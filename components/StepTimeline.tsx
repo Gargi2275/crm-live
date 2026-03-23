@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { motion, useInView } from "framer-motion";
-import { Check } from "lucide-react";
+
 
 interface Step {
   title: string;

@@ -14,7 +14,7 @@ export default function ContactPage() {
         <FadeInUp className="text-center max-w-3xl mx-auto mb-16">
           <h1 className="text-4xl md:text-5xl font-heading font-bold text-navy mb-6">Get in Touch</h1>
           <p className="text-lg text-textMuted font-body">
-            Whether you need a Document Audit, have a question about our services, or need help deciding, we're here for you. We aim to respond within 24 hours.
+            Whether you need a Document Audit, have a question about our services, or need help deciding, we&apos;re here for you. We aim to respond within 24 hours.
           </p>
         </FadeInUp>
 

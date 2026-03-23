@@ -16,7 +16,7 @@ export default function OCIUpdatePage() {
             Mandatory OCI Updates — We Handle the Online Complexity
           </h1>
           <p className="text-lg md:text-xl text-textMuted font-body mb-8">
-            Some OCI updates on the government portal are "gratis" (no government fee), but the process is still technical and time-consuming. We charge a professional service fee to handle everything for you.
+            Some OCI updates on the government portal are &quot;gratis&quot; (no government fee), but the process is still technical and time-consuming. We charge a professional service fee to handle everything for you.
           </p>
         </FadeInUp>
 

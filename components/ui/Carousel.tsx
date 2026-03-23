@@ -50,7 +50,7 @@ export function Carousel({ items }: CarouselProps) {
             className="w-full"
           >
             <blockquote className="text-xl md:text-2xl font-heading text-navy leading-relaxed mb-6">
-              "{items[currentIndex].quote}"
+              &quot;{items[currentIndex].quote}&quot;
             </blockquote>
             <p className="font-body text-textMuted font-medium">
               — {items[currentIndex].author}

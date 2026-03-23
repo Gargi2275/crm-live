@@ -56,7 +56,7 @@ export default function FAQsPage() {
         <FadeInUp className="text-center max-w-3xl mx-auto">
           <h1 className="text-4xl md:text-5xl font-heading font-bold text-navy mb-6">Frequently Asked Questions</h1>
           <p className="text-lg text-textMuted font-body mb-8">
-            Got a question? We're here to answer. If you don't see your question here, feel free to contact us.
+            Got a question? We&apos;re here to answer. If you don&apos;t see your question here, feel free to contact us.
           </p>
         </FadeInUp>
       </section>

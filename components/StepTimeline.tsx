@@ -2,7 +2,10 @@
 
 import { useRef } from "react";
 import { motion, useInView } from "framer-motion";
+<<<<<<< HEAD
 
+=======
+>>>>>>> 4b9863b (fix: resolved build errors and updated project)
 
 interface Step {
   title: string;

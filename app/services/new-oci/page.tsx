@@ -1,8 +1,6 @@
 import { FadeInUp } from "@/components/FadeInUp";
-import { CTABanner } from "@/components/CTABanner";
 import { Button } from "@/components/ui/Button";
 import Link from "next/link";
-import { CheckCircle } from "lucide-react";
 
 export const metadata = {
   title: "New OCI Card Application Service | FlyOCI",
@@ -26,7 +24,7 @@ export default function NewOCIPage() {
             New OCI Card Application
           </h1>
           <p className="text-lg md:text-xl text-textMuted font-body mb-8 max-w-3xl mx-auto">
-            If you're eligible for Overseas Citizen of India (OCI) status and applying for the first time, FlyOCI helps you complete the process with confidence.
+            If you&apos;re eligible for Overseas Citizen of India (OCI) status and applying for the first time, FlyOCI helps you complete the process with confidence.
           </p>
         </FadeInUp>
       </section>
@@ -50,7 +48,7 @@ export default function NewOCIPage() {
               <p className="text-sm text-gray-300 mb-6">Government fees are paid directly as per the latest rules.</p>
               <div className="bg-saffron/20 p-4 rounded-xl border border-saffron/30">
                 <p className="text-sm font-medium text-amber-100">£15 Document Audit Credit</p>
-                <p className="text-xs text-gray-300 mt-1">If you've already done the audit, you pay only £73 at the full application stage.</p>
+                <p className="text-xs text-gray-300 mt-1">If you&apos;ve already done the audit, you pay only £73 at the full application stage.</p>
               </div>
             </div>
           </FadeInUp>

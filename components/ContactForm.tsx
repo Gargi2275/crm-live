@@ -27,7 +27,7 @@ type FormValues = z.infer<typeof formSchema>;
 export function ContactForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [errorFocus, setErrorFocus] = useState<Record<string, boolean>>({});
+  const [] = useState(false);
 
   const {
     register,
@@ -54,9 +54,7 @@ export function ContactForm() {
     }
   };
 
-  const handleFocus = (field: string) => {
-    setErrorFocus(prev => ({ ...prev, [field]: true }));
-  };
+  // Using standard form submission
 
   const Label = ({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) => (
     <label htmlFor={htmlFor} className="block text-sm font-medium text-navy mb-2">
@@ -94,7 +92,7 @@ export function ContactForm() {
           <CheckCircle className="w-16 h-16 text-success mb-6" />
           <h3 className="text-2xl font-heading font-bold text-navy mb-2">Message Sent!</h3>
           <p className="text-textMuted font-body">
-            We've received your inquiry and will get back to you shortly.
+            We&apos;ve received your inquiry and will get back to you shortly.
           </p>
           <button 
             onClick={() => setIsSuccess(false)}

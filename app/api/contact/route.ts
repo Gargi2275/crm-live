@@ -34,10 +34,11 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ success: true, data });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Resend API Error:", err);
+    const error = err as Error;
     return NextResponse.json(
-      { error: err.message || "An error occurred while sending the email." },
+      { error: error.message || "An error occurred while sending the email." },
       { status: 500 }
     );
   }

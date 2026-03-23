@@ -62,7 +62,7 @@ export function HeroSection() {
           variants={itemVariants}
           className="font-body text-lg sm:text-xl text-textMuted max-w-2xl mx-auto mb-10 leading-relaxed"
         >
-          For UK & US residents of Indian origin. We handle the forms, documents and appointments so you don't lose time or miss travel plans.
+          For UK & US residents of Indian origin. We handle the forms, documents and appointments so you don&apos;t lose time or miss travel plans.
         </motion.p>
 
         <motion.div 

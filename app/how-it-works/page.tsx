@@ -2,7 +2,6 @@ import { FadeInUp } from "@/components/FadeInUp";
 import { CTABanner } from "@/components/CTABanner";
 import { Button } from "@/components/ui/Button";
 import Link from "next/link";
-import { ArrowDown } from "lucide-react";
 
 export const metadata = {
   title: "How FlyOCI Works — From Document Check to Final Approval",
@@ -46,7 +45,7 @@ export default function HowItWorksPage() {
         <FadeInUp className="text-center max-w-3xl mx-auto">
           <h1 className="text-4xl md:text-5xl font-heading font-bold text-navy mb-6">How It Works</h1>
           <p className="text-lg text-textMuted font-body mb-8">
-            We designed FlyOCI so that even if you are not comfortable with online forms, you can get your OCI, visa or passport done easily. Here's the step-by-step journey.
+            We designed FlyOCI so that even if you are not comfortable with online forms, you can get your OCI, visa or passport done easily. Here&apos;s the step-by-step journey.
           </p>
         </FadeInUp>
       </section>

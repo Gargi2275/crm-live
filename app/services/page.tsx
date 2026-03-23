@@ -57,7 +57,7 @@ export default function ServicesPage() {
               Our Services
             </h1>
             <p className="text-lg md:text-xl text-textMuted font-body mb-10 max-w-3xl mx-auto leading-relaxed">
-              FlyOCI offers end-to-end support for OCI cards, Indian e-Visas and Indian passport renewals for UK & US residents. Choose the service that fits your situation, or start with a Document Audit if you're unsure.
+              FlyOCI offers end-to-end support for OCI cards, Indian e-Visas and Indian passport renewals for UK & US residents. Choose the service that fits your situation, or start with a Document Audit if you&apos;re unsure.
             </p>
           </FadeInUp>
         </div>

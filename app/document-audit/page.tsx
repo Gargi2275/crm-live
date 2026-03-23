@@ -1,9 +1,8 @@
 import { FadeInUp } from "@/components/FadeInUp";
-import { CTABanner } from "@/components/CTABanner";
 import { Button } from "@/components/ui/Button";
 import { CheckoutButton } from "@/components/CheckoutButton";
 import Link from "next/link";
-import { CheckCircle, AlertTriangle, FileSearch, ArrowRight } from "lucide-react";
+import { CheckCircle, AlertTriangle, FileSearch } from "lucide-react";
 
 export const metadata = {
   title: "Document Audit for OCI, e-Visa & Passport Applications | FlyOCI",

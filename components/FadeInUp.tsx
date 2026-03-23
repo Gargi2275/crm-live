@@ -13,8 +13,8 @@ interface FadeInUpProps {
 export function FadeInUp({ children, delay = 0, className = "", margin = "-80px" }: FadeInUpProps) {
   const ref = useRef(null);
   // Type assertion or casting to generic to satisfy framer-motion useInView options
-  // @ts-ignore
-  const inView = useInView(ref, { once: true, margin: margin as any });
+  // @ts-expect-error framer-motion margin type workaround
+  const inView = useInView(ref, { once: true, margin: margin as unknown as string });
 
   return (
     <motion.div

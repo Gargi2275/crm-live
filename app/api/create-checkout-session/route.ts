@@ -41,11 +41,12 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Stripe Checkout Error:", err);
+    const error = err as { message: string; statusCode?: number };
     return NextResponse.json(
-      { error: err.message || "An error occurred during checkout." },
-      { status: err.statusCode || 500 }
+      { error: error.message || "An error occurred during checkout." },
+      { status: error.statusCode || 500 }
     );
   }
 }

@@ -7,7 +7,7 @@ import { CTABanner } from "@/components/CTABanner";
 import { FadeInUp } from "@/components/FadeInUp";
 import { Button } from "@/components/ui/Button";
 import Link from "next/link";
-import { ArrowRight, CheckCircle, FileX, Globe, Headset, Shield, UserCheck } from "lucide-react";
+import { CheckCircle, FileX, Globe, Shield, UserCheck } from "lucide-react";
 
 export default function Home() {
   const services = [

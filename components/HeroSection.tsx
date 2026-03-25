@@ -144,14 +144,14 @@ export function HeroSection() {
       
       {/* ✅ Softer background (less distracting) */}
       <motion.div
-        animate={{ x: [0, 20, 0], y: [0, -10, 0] }}
+        animate={{ x: [0, 26, 0], y: [0, -14, 0] }}
         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full bg-[radial-gradient(circle,rgba(0,152,119,0.08)_0%,transparent_70%)] blur-2xl z-0"
+        className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.18)_0%,transparent_70%)] blur-3xl z-0"
       />
       <motion.div
-        animate={{ x: [0, -20, 0], y: [0, 15, 0] }}
+        animate={{ x: [0, -26, 0], y: [0, 18, 0] }}
         transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.08)_0%,transparent_70%)] blur-2xl z-0"
+        className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.14)_0%,transparent_70%)] blur-3xl z-0"
       />
 
       <motion.div
@@ -191,13 +191,13 @@ export function HeroSection() {
           className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10"
         >
           <Link href="/document-audit" className="w-full sm:w-auto">
-            <Button className="w-full sm:w-auto px-6 py-3 text-base rounded-full shadow-md hover:shadow-lg transition">
+            <Button className="w-full sm:w-auto px-6 py-3 text-base rounded-full">
               Get Documents Checked
             </Button>
           </Link>
 
           <Link href="/services" className="w-full sm:w-auto">
-            <Button className="w-full sm:w-auto px-6 py-3 text-base rounded-full bg-gray-100 hover:bg-gray-200 transition">
+            <Button variant="outline" className="w-full sm:w-auto px-6 py-3 text-base rounded-full bg-white/75">
               View Services & Pricing
             </Button>
           </Link>
@@ -212,7 +212,7 @@ export function HeroSection() {
             <motion.div
               key={index}
               whileHover={{ y: -2 }}
-              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-gray-100 shadow-sm text-sm text-gray-700"
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/90 border border-primary/15 shadow-[0_8px_18px_rgba(51,161,253,0.12)] text-sm text-[#365067]"
             >
               {badge.icon}
               {badge.text}

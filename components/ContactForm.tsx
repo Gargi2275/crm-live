@@ -79,10 +79,10 @@ export function ContactForm() {
     </AnimatePresence>
   );
 
-  const inputClass = "w-full rounded-xl border-border bg-gray-50/50 px-4 py-3.5 text-dark focus:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20 transition-all outline-none";
+  const inputClass = "w-full rounded-xl border border-primary/15 bg-white px-4 py-3.5 text-dark focus:bg-white focus:border-primary focus:ring-4 focus:ring-primary/15 transition-all outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]";
 
   return (
-    <div className="bg-white rounded-3xl p-6 sm:p-10 shadow-[0_8px_32px_rgba(15,31,61,0.08)] border border-border">
+    <div className="bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] rounded-3xl p-6 sm:p-10 shadow-[0_14px_38px_rgba(51,161,253,0.12)] border border-primary/15">
       {isSuccess ? (
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
@@ -179,7 +179,7 @@ export function ContactForm() {
             whileTap={{ scale: 0.98 }}
             type="submit"
             disabled={isSubmitting}
-            className="w-full bg-primary text-white font-medium py-4 px-6 rounded-xl shadow-[0_8px_24px_rgba(15,31,61,0.2)] hover:bg-opacity-90 transition-all flex justify-center items-center disabled:opacity-70 disabled:pointer-events-none"
+            className="w-full bg-btn-primary text-white font-medium py-4 px-6 rounded-xl shadow-[0_12px_28px_rgba(51,161,253,0.35)] hover:shadow-[0_16px_34px_rgba(51,161,253,0.42)] transition-all flex justify-center items-center disabled:opacity-70 disabled:pointer-events-none"
           >
             {isSubmitting ? (
               <>

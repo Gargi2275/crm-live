@@ -20,12 +20,12 @@ export function Button({
   ...props
 }: ButtonProps) {
   const baseStyles =
-    "inline-flex items-center justify-center font-heading transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-btn disabled:opacity-50 disabled:pointer-events-none";
+    "inline-flex items-center justify-center font-heading font-semibold tracking-[0.01em] transition-all duration-300 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-btn disabled:opacity-50 disabled:pointer-events-none btn-elevate";
 
   const variants = {
-    primary: "bg-btn-primary text-white shadow-btn hover:shadow-btn-hover px-6 py-3",
-    secondary: "bg-white border-2 border-secondary text-secondary rounded-btn px-6 py-3",
-    outline: "border-2 border-primary text-primary hover:bg-bg-blue px-6 py-3 bg-transparent",
+    primary: "bg-btn-primary text-white shadow-btn hover:shadow-btn-hover hover:-translate-y-0.5 px-6 py-3",
+    secondary: "bg-white border border-primary/30 text-primary rounded-btn px-6 py-3 shadow-[0_8px_22px_rgba(51,161,253,0.12)] hover:border-primary hover:bg-bg-blue/70",
+    outline: "border border-primary/35 text-primary hover:bg-bg-blue/80 px-6 py-3 bg-white/70 backdrop-blur-sm",
   };
 
   // const isPrimary = variant === "primary";

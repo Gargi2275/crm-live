@@ -15,11 +15,11 @@ export default function AboutPage() {
 
   return (
     <>
-      <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8 bg-primary text-white relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-1/2 h-full bg-accent/10 rounded-l-full blur-3xl -z-10" />
+      <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8 bg-[linear-gradient(145deg,#ebf5ff_0%,#f8fcff_65%,#ffffff_100%)] text-white relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-1/2 h-full bg-primary/10 rounded-l-full blur-3xl -z-10" />
         <FadeInUp className="text-center max-w-4xl mx-auto">
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-heading font-bold mb-6">About FlyOCI</h1>
-          <p className="text-xl md:text-2xl text-gray-300 font-body mb-8 max-w-3xl mx-auto leading-relaxed">
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-heading font-bold mb-6 text-primary">About FlyOCI</h1>
+          <p className="text-xl md:text-2xl text-textMuted font-body mb-8 max-w-3xl mx-auto leading-relaxed">
             FlyOCI was created to solve a simple problem: Many families of Indian origin living in the UK and US struggle with OCI, e-Visa and Indian passport processes.
           </p>
         </FadeInUp>
@@ -51,7 +51,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="py-24 bg-[#F5F5F0]">
+      <section className="py-24 bg-[#F4F9FF]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <FadeInUp className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary">Our Core Values</h2>

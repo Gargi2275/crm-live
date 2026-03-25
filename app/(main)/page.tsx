@@ -1,7 +1,6 @@
 import { HeroSection } from "@/components/HeroSection";
 import { ServiceCard } from "@/components/ServiceCard";
 import { StepTimeline } from "@/components/StepTimeline";
-import { PricingTable } from "@/components/PricingTable";
 import { Carousel } from "@/components/ui/Carousel";
 import { CTABanner } from "@/components/CTABanner";
 import { FadeInUp } from "@/components/FadeInUp";
@@ -38,12 +37,15 @@ export default function Home() {
   ];
 
   const pricingItems = [
-    { name: "OCI Update (Gratis)", price: "£50", creditApplied: "£35" },
-    { name: "New OCI Application", price: "£88", creditApplied: "£73", popular: true },
-    { name: "OCI Renewal / Transfer", price: "£78", creditApplied: "£63" },
-    { name: "e-Visa — 1 Year", price: "£88", creditApplied: "N/A" },
-    { name: "e-Visa — 5 Year", price: "£150", creditApplied: "N/A" },
+    { name: "OCI Update Gratis", standardFee: "£50", auditFee: "£35 with audit", hasDiscount: true },
+    { name: "New OCI Application", standardFee: "£88", auditFee: "£73 with audit", hasDiscount: true, popular: true },
+    { name: "OCI Renewal Transfer", standardFee: "£78", auditFee: "£63 with audit", hasDiscount: true },
+    { name: "e-Visa 1 Year", standardFee: "£88", auditFee: "No audit discount", hasDiscount: false },
+    { name: "e-Visa 5 Year", standardFee: "£150", auditFee: "No audit discount", hasDiscount: false },
   ];
+
+  const pricingRowOne = pricingItems.slice(0, 3);
+  const pricingRowTwo = pricingItems.slice(3, 5);
 
   return (
     <>
@@ -76,7 +78,7 @@ export default function Home() {
       </section>
 
       {/* SECTION 2: Why Document Audit First? */}
-      <section className="py-24 bg-[#F5F5F0]">
+      <section className="py-24 bg-[#F4F9FF]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-16 items-center">
             <FadeInUp>
@@ -155,7 +157,7 @@ export default function Home() {
       </section>
 
       {/* SECTION 4: Pricing */}
-      <section className="py-24 bg-[#FAFaF7] border-y border-border">
+      <section className="py-24 bg-[#F7FBFF] border-y border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <FadeInUp className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary mb-4">
@@ -166,7 +168,95 @@ export default function Home() {
             </p>
           </FadeInUp>
 
-          <PricingTable items={pricingItems} />
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-3 gap-6">
+              {pricingRowOne.map((item, index) => (
+                <FadeInUp key={item.name} delay={index * 0.07}>
+                  <div
+                    className={`h-full rounded-2xl p-6 bg-white shadow-[0_12px_30px_rgba(51,161,253,0.10)] border transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_16px_36px_rgba(51,161,253,0.16)] ${
+                      item.popular ? "border-primary ring-2 ring-primary/20" : "border-primary/15"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-6">
+                      <h3 className="text-xl font-heading font-bold text-primary leading-snug">{item.name}</h3>
+                      {item.popular ? (
+                        <span className="shrink-0 rounded-full bg-primary text-white text-[11px] px-3 py-1 font-semibold tracking-wide">
+                          Most Popular
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2 mb-8">
+                      <p className="text-sm text-textMuted uppercase tracking-wide font-semibold">Standard Fee</p>
+                      <p className={`font-mono text-xl ${item.hasDiscount ? "text-textMuted line-through decoration-primary/60" : "text-primary font-semibold"}`}>
+                        {item.standardFee}
+                      </p>
+
+                      <p className="text-sm text-textMuted uppercase tracking-wide font-semibold pt-2">Audit Credit Price</p>
+                      <p className={`font-mono text-2xl font-semibold ${item.hasDiscount ? "text-primary" : "text-textMuted"}`}>
+                        {item.auditFee}
+                      </p>
+                    </div>
+
+                    <Link href="/contact" className="block">
+                      <Button
+                        variant={item.popular ? "primary" : "outline"}
+                        className="w-full justify-center"
+                      >
+                        Select
+                      </Button>
+                    </Link>
+                  </div>
+                </FadeInUp>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-[780px] mx-auto">
+              {pricingRowTwo.map((item, index) => (
+                <FadeInUp key={item.name} delay={(index + 3) * 0.07}>
+                  <div
+                    className={`h-full rounded-2xl p-6 bg-white shadow-[0_12px_30px_rgba(51,161,253,0.10)] border transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_16px_36px_rgba(51,161,253,0.16)] ${
+                      item.popular ? "border-primary ring-2 ring-primary/20" : "border-primary/15"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-6">
+                      <h3 className="text-xl font-heading font-bold text-primary leading-snug">{item.name}</h3>
+                      {item.popular ? (
+                        <span className="shrink-0 rounded-full bg-primary text-white text-[11px] px-3 py-1 font-semibold tracking-wide">
+                          Most Popular
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2 mb-8">
+                      <p className="text-sm text-textMuted uppercase tracking-wide font-semibold">Standard Fee</p>
+                      <p className={`font-mono text-xl ${item.hasDiscount ? "text-textMuted line-through decoration-primary/60" : "text-primary font-semibold"}`}>
+                        {item.standardFee}
+                      </p>
+
+                      <p className="text-sm text-textMuted uppercase tracking-wide font-semibold pt-2">Audit Credit Price</p>
+                      <p className={`font-mono text-2xl font-semibold ${item.hasDiscount ? "text-primary" : "text-textMuted"}`}>
+                        {item.auditFee}
+                      </p>
+                    </div>
+
+                    <Link href="/contact" className="block">
+                      <Button
+                        variant={item.popular ? "primary" : "outline"}
+                        className="w-full justify-center"
+                      >
+                        Select
+                      </Button>
+                    </Link>
+                  </div>
+                </FadeInUp>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-xs text-textMuted mt-6 text-center">
+            * Prices are per applicant and may exclude applicable government or courier charges where relevant.
+          </p>
 
           <FadeInUp delay={0.4} className="text-center mt-12">
             <Link href="/pricing">
@@ -204,7 +294,7 @@ export default function Home() {
       </section>
 
       {/* SECTION 6: Testimonials */}
-      <section className="py-24 bg-[#F5F5F0]">
+      <section className="py-24 bg-[#F4F9FF]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <FadeInUp className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary mb-4">

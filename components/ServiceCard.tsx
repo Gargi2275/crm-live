@@ -15,11 +15,11 @@ interface ServiceCardProps {
 export function ServiceCard({ icon, title, description, href, price }: ServiceCardProps) {
   const content = (
     <motion.div
-      whileHover={{ y: -4, boxShadow: "var(--shadow-md)" }}
+      whileHover={{ y: -6, boxShadow: "0 18px 40px rgba(51,161,253,0.18)" }}
       transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      className="bg-gradient-card rounded-[var(--radius-card,20px)] p-6 sm:p-8 h-full flex flex-col border border-[rgba(0,152,119,0.1)] shadow-card transition-all duration-300 cursor-pointer group"
+      className="bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] rounded-[var(--radius-card,20px)] p-6 sm:p-8 h-full flex flex-col border border-primary/15 shadow-card transition-all duration-300 cursor-pointer group"
     >
-      <div className="w-12 h-12 bg-primary/5 rounded-xl flex items-center justify-center text-primary mb-6 group-hover:scale-110 group-hover:bg-accent/10 group-hover:text-accent transition-all duration-300">
+      <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center text-primary mb-6 group-hover:scale-110 group-hover:bg-primary/15 group-hover:text-accent transition-all duration-300">
         {icon}
       </div>
       <h3 className="text-xl font-heading font-bold text-primary mb-3">{title}</h3>
@@ -32,7 +32,7 @@ export function ServiceCard({ icon, title, description, href, price }: ServiceCa
           <span className="font-mono text-primary font-semibold">{price}</span>
         )}
         {href && (
-          <div className="text-accent font-medium flex items-center text-sm group-hover:underline ml-auto">
+          <div className="text-primary font-medium flex items-center text-sm group-hover:underline ml-auto">
             Learn More <ArrowRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
           </div>
         )}

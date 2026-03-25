@@ -50,7 +50,7 @@ export default function ServicesPage() {
   return (
     <>
       <section className="pt-32 pb-16 px-4 sm:px-6 lg:px-8 bg-bg-page relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-1/2 h-full bg-accent/5 rounded-l-full blur-3xl -z-10" />
+        <div className="absolute top-0 right-0 w-1/2 h-full bg-primary/8 rounded-l-full blur-3xl -z-10" />
         <div className="max-w-4xl mx-auto text-center">
           <FadeInUp>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-heading font-bold text-primary mb-6">

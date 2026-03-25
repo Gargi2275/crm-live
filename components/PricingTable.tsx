@@ -53,7 +53,7 @@ export function PricingTable({ items }: PricingTableProps) {
               <motion.tr
                 key={index}
                 variants={rowVariants}
-                className="border-b border-border hover:bg-gray-50 transition-colors group"
+                className="border-b border-border hover:bg-bg-blue/45 transition-colors group"
               >
                 <td className="py-5 px-6 font-body font-medium text-primary flex items-center">
                   {item.name}
@@ -71,7 +71,7 @@ export function PricingTable({ items }: PricingTableProps) {
                     <motion.div
                       animate={{ scale: [1, 1.05, 1] }}
                       transition={{ repeat: Infinity, duration: 2 }}
-                      className="inline-block bg-accent/10 text-amber-700 text-sm px-3 py-1 rounded-full font-medium border border-accent/20"
+                      className="inline-block bg-primary/10 text-primary text-sm px-3 py-1 rounded-full font-medium border border-primary/25"
                     >
                       {item.creditApplied}
                     </motion.div>

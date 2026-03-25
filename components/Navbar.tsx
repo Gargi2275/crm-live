@@ -53,13 +53,13 @@ export function Navbar() {
   return (
     <>
       <motion.nav
-        initial={{ backgroundColor: "rgba(255, 255, 255, 1)", borderBottomColor: "rgba(226, 232, 240, 0)" }}
+        initial={{ backgroundColor: "rgba(255, 255, 255, 0.9)", borderBottomColor: "rgba(51, 161, 253, 0.08)" }}
         animate={{
-          backgroundColor: isScrolled ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 1)",
-          borderBottomColor: isScrolled ? "rgba(226, 232, 240, 1)" : "rgba(226, 232, 240, 0)",
+          backgroundColor: isScrolled ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.95)",
+          borderBottomColor: isScrolled ? "rgba(51, 161, 253, 0.2)" : "rgba(51, 161, 253, 0.08)",
         }}
         transition={{ duration: 0.3 }}
-        className={`fixed top-0 w-full z-50 border-b transition-shadow ${isScrolled ? "shadow-navbar backdrop-blur-md" : ""}`}
+        className={`fixed top-0 w-full z-50 border-b transition-shadow backdrop-blur-xl ${isScrolled ? "shadow-navbar" : ""}`}
       >
         <div className="max-w-7xl mx-auto px-2">
           <div className="flex justify-between items-center h-20">
@@ -87,7 +87,7 @@ export function Navbar() {
                 >
                   <Link
                     href={link.href}
-                    className="px-3 py-2 rounded-md text-sm font-medium transition-all duration-250 ease-out flex items-center relative group text-dark hover:text-primary"
+                    className="px-3 py-2 rounded-md text-sm font-medium transition-all duration-250 ease-out flex items-center relative group text-dark/90 hover:text-primary"
                   >
                     {link.name}
                     {link.dropdown && <ChevronDown className="ml-1 w-4 h-4" />}
@@ -109,14 +109,14 @@ export function Navbar() {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: 10 }}
                           transition={{ duration: 0.2 }}
-                          className="absolute left-0 mt-2 w-56 rounded-xl bg-white shadow-[0_8px_32px_rgba(15,31,61,0.12)] ring-1 ring-black ring-opacity-5 overflow-hidden focus:outline-none"
+                          className="absolute left-0 mt-2 w-56 rounded-2xl bg-white/95 backdrop-blur-md shadow-[0_14px_36px_rgba(51,161,253,0.16)] ring-1 ring-primary/10 overflow-hidden focus:outline-none"
                         >
                           <div className="py-2">
                             {link.dropdown.map((sublink) => (
                               <Link
                                 key={sublink.name}
                                 href={sublink.href}
-                                className="block px-4 py-3 text-sm text-dark hover:bg-bg-page hover:text-primary transition-colors"
+                                className="block px-4 py-3 text-sm text-dark hover:bg-bg-blue/70 hover:text-primary transition-colors"
                               >
                                 {sublink.name}
                               </Link>
@@ -160,7 +160,7 @@ export function Navbar() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-dark z-40 lg:hidden"
+            className="fixed inset-0 bg-[#0d1f2d]/35 backdrop-blur-sm z-40 lg:hidden"
             onClick={() => setMenuOpen(false)}
           />
         )}
@@ -174,20 +174,20 @@ export function Navbar() {
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 right-0 max-w-sm w-full bg-white z-40 shadow-2xl overflow-y-auto lg:hidden pt-24 pb-8 px-6"
+            className="fixed inset-y-0 right-0 max-w-sm w-full bg-white/95 backdrop-blur-xl z-40 shadow-[0_18px_48px_rgba(51,161,253,0.2)] overflow-y-auto lg:hidden pt-24 pb-8 px-6"
           >
             <div className="flex flex-col space-y-6">
               {navLinks.map((link) => (
                 <div key={link.name}>
                   <Link
                     href={link.href}
-                    className={`block text-lg font-medium ${pathname === link.href ? "text-primary" : "text-dark"
+                    className={`block text-lg font-medium ${pathname === link.href ? "text-primary" : "text-dark/90"
                       }`}
                   >
                     {link.name}
                   </Link>
                   {link.dropdown && (
-                    <div className="mt-3 ml-4 pl-4 border-l-2 border-border space-y-3">
+                    <div className="mt-3 ml-4 pl-4 border-l-2 border-primary/20 space-y-3">
                       {link.dropdown.map((sublink) => (
                         <Link
                           key={sublink.name}

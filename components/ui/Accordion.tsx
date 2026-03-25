@@ -28,18 +28,18 @@ export function Accordion({ items }: AccordionProps) {
           <div
             key={index}
             className={`bg-white rounded-2xl shadow-[0_2px_16px_rgba(15,31,61,0.08)] overflow-hidden border-l-4 transition-colors duration-300 ${
-              isOpen ? "border-saffron" : "border-transparent"
+              isOpen ? "border-accent" : "border-transparent"
             }`}
           >
             <button
               onClick={() => toggleOpen(index)}
               className="w-full px-6 py-5 flex justify-between items-center text-left focus:outline-none"
             >
-              <span className="font-heading text-lg text-navy font-semibold">{item.question}</span>
+              <span className="font-heading text-lg text-primary font-semibold">{item.question}</span>
               <motion.div
                 animate={{ rotate: isOpen ? 180 : 0 }}
                 transition={{ duration: 0.3 }}
-                className="text-saffron flex-shrink-0 ml-4"
+                className="text-accent flex-shrink-0 ml-4"
               >
                 <ChevronDown className="w-6 h-6" />
               </motion.div>

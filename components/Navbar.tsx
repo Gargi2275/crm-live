@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X, ChevronDown } from "lucide-react";
 import { Button } from "./ui/Button";
+import Image from "next/image";
 
 const navLinks = [
   { name: "Home", href: "/" },
@@ -52,25 +53,31 @@ export function Navbar() {
   return (
     <>
       <motion.nav
-        initial={{ backgroundColor: "rgba(250, 250, 247, 1)", borderBottomColor: "rgba(229, 231, 235, 0)" }}
+        initial={{ backgroundColor: "rgba(255, 255, 255, 1)", borderBottomColor: "rgba(226, 232, 240, 0)" }}
         animate={{
-          backgroundColor: isScrolled ? "rgba(15, 31, 61, 0.97)" : "rgba(250, 250, 247, 1)",
-          borderBottomColor: isScrolled ? "rgba(15, 31, 61, 0)" : "rgba(229, 231, 235, 1)",
+          backgroundColor: isScrolled ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 1)",
+          borderBottomColor: isScrolled ? "rgba(226, 232, 240, 1)" : "rgba(226, 232, 240, 0)",
         }}
         transition={{ duration: 0.3 }}
-        className={`fixed top-0 w-full z-50 border-b ${isScrolled ? "backdrop-blur-md" : ""}`}
+        className={`fixed top-0 w-full z-50 border-b transition-shadow ${isScrolled ? "shadow-navbar backdrop-blur-md" : ""}`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-2">
           <div className="flex justify-between items-center h-20">
             {/* Logo */}
-            <Link href="/" className="flex-shrink-0 flex items-center gap-2 relative z-50">
-              <span className={`font-heading text-2xl font-bold transition-colors duration-300 ${isScrolled ? "text-white" : "text-navy"}`}>
-                FlyOCI
-              </span>
+            <Link href="/" className="flex-shrink-0 flex items-center relative z-50 ">
+
+              <Image
+                src="/logo.png"
+                alt="FlyOCI Logo"
+                width={120}
+                height={40}
+                className="h-10 w-auto"
+                priority
+              />
             </Link>
 
             {/* Desktop Navigation */}
-            <div className="hidden lg:flex items-center space-x-1 lg:space-x-4">
+            <div className="hidden lg:flex items-center space-x-2 lg:space-x-1">
               {navLinks.map((link) => (
                 <div
                   key={link.name}
@@ -80,17 +87,16 @@ export function Navbar() {
                 >
                   <Link
                     href={link.href}
-                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center ${
-                      isScrolled ? "text-gray-200 hover:text-white" : "text-textMuted hover:text-navy"
-                    }`}
+                    className="px-3 py-2 rounded-md text-sm font-medium transition-all duration-250 ease-out flex items-center relative group text-dark hover:text-primary"
                   >
                     {link.name}
                     {link.dropdown && <ChevronDown className="ml-1 w-4 h-4" />}
+                    <span className="absolute bottom-1 left-3 right-3 h-[2px] bg-primary origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-250 ease-out" />
                   </Link>
                   {pathname === link.href && (
                     <motion.div
                       layoutId="activeNav"
-                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-saffron rounded-full"
+                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full"
                     />
                   )}
 
@@ -110,7 +116,7 @@ export function Navbar() {
                               <Link
                                 key={sublink.name}
                                 href={sublink.href}
-                                className="block px-4 py-3 text-sm text-navy hover:bg-gray-50 hover:text-saffron transition-colors"
+                                className="block px-4 py-3 text-sm text-dark hover:bg-bg-page hover:text-primary transition-colors"
                               >
                                 {sublink.name}
                               </Link>
@@ -127,17 +133,18 @@ export function Navbar() {
             {/* CTA Button */}
             <div className="hidden lg:flex items-center">
               <Link href="/document-audit">
-                <Button>Get My Documents Checked</Button>
+                <Button variant="primary" className="text-sm">
+                  Get My Documents Checked
+                </Button>
               </Link>
             </div>
+
 
             {/* Mobile menu button */}
             <div className="flex lg:hidden items-center z-50">
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
-                className={`p-2 rounded-md focus:outline-none ${
-                  isScrolled && !menuOpen ? "text-white" : "text-navy"
-                }`}
+                className="p-2 rounded-md focus:outline-none text-dark hover:text-primary"
               >
                 {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
               </button>
@@ -153,7 +160,7 @@ export function Navbar() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-navy z-40 lg:hidden"
+            className="fixed inset-0 bg-dark z-40 lg:hidden"
             onClick={() => setMenuOpen(false)}
           />
         )}
@@ -167,16 +174,15 @@ export function Navbar() {
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 right-0 max-w-sm w-full bg-background z-40 shadow-2xl overflow-y-auto lg:hidden pt-24 pb-8 px-6"
+            className="fixed inset-y-0 right-0 max-w-sm w-full bg-white z-40 shadow-2xl overflow-y-auto lg:hidden pt-24 pb-8 px-6"
           >
             <div className="flex flex-col space-y-6">
               {navLinks.map((link) => (
                 <div key={link.name}>
                   <Link
                     href={link.href}
-                    className={`block text-lg font-medium ${
-                      pathname === link.href ? "text-saffron" : "text-navy"
-                    }`}
+                    className={`block text-lg font-medium ${pathname === link.href ? "text-primary" : "text-dark"
+                      }`}
                   >
                     {link.name}
                   </Link>
@@ -186,7 +192,7 @@ export function Navbar() {
                         <Link
                           key={sublink.name}
                           href={sublink.href}
-                          className="block text-base text-textMuted hover:text-navy"
+                          className="block text-base text-textMuted hover:text-primary"
                         >
                           {sublink.name}
                         </Link>

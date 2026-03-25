@@ -42,9 +42,9 @@ export function PricingTable({ items }: PricingTableProps) {
         >
           <thead>
             <tr className="border-b-2 border-border">
-              <th className="py-4 px-6 text-navy font-heading font-bold text-lg">Service</th>
-              <th className="py-4 px-6 text-navy font-heading font-bold text-lg">Our Fee</th>
-              <th className="py-4 px-6 text-navy font-heading font-bold text-lg hidden sm:table-cell">With Audit Credit</th>
+              <th className="py-4 px-6 text-primary font-heading font-bold text-lg">Service</th>
+              <th className="py-4 px-6 text-primary font-heading font-bold text-lg">Our Fee</th>
+              <th className="py-4 px-6 text-primary font-heading font-bold text-lg hidden sm:table-cell">With Audit Credit</th>
               <th className="py-4 px-6"></th>
             </tr>
           </thead>
@@ -55,15 +55,15 @@ export function PricingTable({ items }: PricingTableProps) {
                 variants={rowVariants}
                 className="border-b border-border hover:bg-gray-50 transition-colors group"
               >
-                <td className="py-5 px-6 font-body font-medium text-navy flex items-center">
+                <td className="py-5 px-6 font-body font-medium text-primary flex items-center">
                   {item.name}
                   {item.popular && (
-                    <span className="ml-3 bg-teal/10 text-teal text-xs px-2 py-1 rounded-full font-bold uppercase tracking-wider">
+                    <span className="ml-3 bg-primary/10 text-primary text-xs px-2 py-1 rounded-full font-bold uppercase tracking-wider">
                       Popular
                     </span>
                   )}
                 </td>
-                <td className="py-5 px-6 font-mono font-semibold text-lg text-navy">
+                <td className="py-5 px-6 font-mono font-semibold text-lg text-primary">
                   {item.price}
                 </td>
                 <td className="py-5 px-6 hidden sm:table-cell">
@@ -71,7 +71,7 @@ export function PricingTable({ items }: PricingTableProps) {
                     <motion.div
                       animate={{ scale: [1, 1.05, 1] }}
                       transition={{ repeat: Infinity, duration: 2 }}
-                      className="inline-block bg-saffron/10 text-amber-700 text-sm px-3 py-1 rounded-full font-medium border border-saffron/20"
+                      className="inline-block bg-accent/10 text-amber-700 text-sm px-3 py-1 rounded-full font-medium border border-accent/20"
                     >
                       {item.creditApplied}
                     </motion.div>
@@ -81,7 +81,7 @@ export function PricingTable({ items }: PricingTableProps) {
                 </td>
                 <td className="py-5 px-6 text-right">
                   <Link href="/contact">
-                    <Button variant="outline" className="py-2 px-4 text-sm group-hover:bg-navy group-hover:text-white group-hover:border-navy transition-all">
+                    <Button variant="outline" className="py-2 px-4 text-sm group-hover:bg-primary group-hover:text-white group-hover:border-primary transition-all">
                       Select
                     </Button>
                   </Link>

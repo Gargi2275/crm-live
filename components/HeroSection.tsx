@@ -1,3 +1,111 @@
+// "use client";
+
+// import { motion } from "framer-motion";
+// import { CheckCircle, ShieldCheck, Clock, MessageCircle } from "lucide-react";
+// import Link from "next/link";
+// import { Button } from "./ui/Button";
+
+// const containerVariants = {
+//   hidden: {},
+//   visible: {
+//     transition: {
+//       staggerChildren: 0.15,
+//     },
+//   },
+// };
+
+// const itemVariants = {
+//   hidden: { opacity: 0, y: 20 },
+//   visible: {
+//     opacity: 1,
+//     y: 0,
+//     transition: { duration: 0.6, ease: "easeOut" as const },
+//   },
+// };
+
+// const badges = [
+//   { text: "UK-based support", icon: <CheckCircle className="w-4 h-4 text-secondary" /> },
+//   { text: "Transparent fixed fees", icon: <ShieldCheck className="w-4 h-4 text-accent" /> },
+//   { text: "Secure document uploads", icon: <Clock className="w-4 h-4 text-primary" /> },
+//   { text: "WhatsApp & email updates", icon: <MessageCircle className="w-4 h-4 text-primary" /> },
+// ];
+
+// export function HeroSection() {
+//   return (
+//     <section className="relative min-h-[90vh] flex flex-col justify-center items-center overflow-hidden pt-28 pb-16 px-4 sm:px-6 lg:px-8 bg-hero">
+//       {/* Animated Background Mesh and SVG Shapes */}
+//       <motion.div
+//         animate={{ x: [0, 30, 0], y: [0, -20, 0] }}
+//         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+//         className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(0,152,119,0.15)_0%,transparent_70%)] pointer-events-none blur-3xl z-0"
+//       />
+//       <motion.div
+//         animate={{ x: [0, -40, 0], y: [0, 30, 0] }}
+//         transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
+//         className="absolute bottom-[-10%] right-[-10%] w-[60vw] h-[60vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.15)_0%,transparent_70%)] pointer-events-none blur-3xl z-0"
+//       />
+
+    
+
+//       <motion.div
+//         variants={containerVariants}
+//         initial="hidden"
+//         animate="visible"
+//         className="relative z-10 w-full max-w-4xl mx-auto text-center"
+//       >
+//         <motion.h1
+//           variants={itemVariants}
+//           className="font-heading text-dark font-extrabold tracking-tight mb-6 leading-[1.1]"
+//           style={{ fontSize: "clamp(40px, 5vw, 72px)" }}
+//         >
+//           <span className="text-primary font-bold">Hassle-Free</span> OCI, Indian e-Visa & Passport Services <span className="text-accent italic">— Done For You</span>
+//         </motion.h1>
+
+//         <motion.p
+//           variants={itemVariants}
+//           className="font-body text-lg sm:text-xl text-muted max-w-2xl mx-auto mb-10 leading-relaxed"
+//         >
+//           For UK & US residents of Indian origin. We handle the forms, documents and appointments so you don&apos;t lose time or miss travel plans.
+//         </motion.p>
+
+//         <motion.div
+//           variants={itemVariants}
+//           className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14"
+//         >
+//           <Link href="/document-audit" className="w-full sm:w-auto">
+//             <Button variant="primary" className="w-full sm:w-auto text-lg py-4">
+//               Get My Documents Checked
+//             </Button>
+//           </Link>
+//           <Link href="/services" className="w-full sm:w-auto">
+//             <Button variant="outline" className="w-full sm:w-auto text-lg py-4 bg-white/50 backdrop-blur-sm">
+//               View Services & Pricing
+//             </Button>
+//           </Link>
+//         </motion.div>
+
+//         <motion.div
+//           variants={itemVariants}
+//           className="flex flex-wrap justify-center items-center gap-3 sm:gap-6"
+//         >
+//           {badges.map((badge, index) => (
+//             <motion.div
+//               key={index}
+//               whileHover={{ y: -3, boxShadow: "0 4px 12px rgba(51,161,253,0.15)" }}
+//               className="flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-badge px-3 py-1 text-sm font-medium text-primary transition-all"
+//             >
+//               {badge.icon}
+//               {badge.text}
+//             </motion.div>
+//           ))}
+//         </motion.div>
+//       </motion.div>
+//     </section>
+//   );
+// }
+
+
+
 "use client";
 
 import { motion } from "framer-motion";
@@ -9,7 +117,7 @@ const containerVariants = {
   hidden: {},
   visible: {
     transition: {
-      staggerChildren: 0.15,
+      staggerChildren: 0.12,
     },
   },
 };
@@ -19,77 +127,92 @@ const itemVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.6, ease: "easeOut" as const },
+    transition: { duration: 0.5, ease: "easeOut" as const },
   },
 };
 
 const badges = [
-  { text: "UK-based support", icon: <CheckCircle className="w-4 h-4 text-success" /> },
-  { text: "Transparent fixed fees", icon: <ShieldCheck className="w-4 h-4 text-saffron" /> },
-  { text: "Secure document uploads", icon: <Clock className="w-4 h-4 text-teal" /> },
-  { text: "WhatsApp & email updates", icon: <MessageCircle className="w-4 h-4 text-navy" /> },
+  { text: "UK-based support", icon: <CheckCircle className="w-4 h-4 text-secondary" /> },
+  { text: "Transparent fixed fees", icon: <ShieldCheck className="w-4 h-4 text-accent" /> },
+  { text: "Secure document uploads", icon: <Clock className="w-4 h-4 text-primary" /> },
+  { text: "WhatsApp & email updates", icon: <MessageCircle className="w-4 h-4 text-primary" /> },
 ];
 
 export function HeroSection() {
   return (
-    <section className="relative min-h-[90vh] flex flex-col justify-center items-center overflow-hidden pt-28 pb-16 px-4 sm:px-6 lg:px-8">
-      {/* Animated Background Mesh */}
+    <section className="relative min-h-[85vh] flex items-center justify-center px-4 sm:px-6 lg:px-8 pt-32 pb-16 bg-hero overflow-hidden">
+      
+      {/* ✅ Softer background (less distracting) */}
       <motion.div
-        animate={{ x: [0, 30, 0], y: [0, -20, 0] }}
+        animate={{ x: [0, 20, 0], y: [0, -10, 0] }}
         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-saffron opacity-10 filter blur-[100px] pointer-events-none"
+        className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full bg-[radial-gradient(circle,rgba(0,152,119,0.08)_0%,transparent_70%)] blur-2xl z-0"
       />
       <motion.div
-        animate={{ x: [0, -40, 0], y: [0, 30, 0] }}
+        animate={{ x: [0, -20, 0], y: [0, 15, 0] }}
         transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute bottom-[-10%] right-[-10%] w-[60vw] h-[60vw] rounded-full bg-teal opacity-10 filter blur-[100px] pointer-events-none"
+        className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.08)_0%,transparent_70%)] blur-2xl z-0"
       />
 
       <motion.div
         variants={containerVariants}
         initial="hidden"
         animate="visible"
-        className="relative z-10 w-full max-w-4xl mx-auto text-center"
+        className="relative z-10 w-full max-w-3xl mx-auto text-center"
       >
-        <motion.h1 
-          variants={itemVariants}
-          className="font-heading text-4xl sm:text-5xl lg:text-7xl text-navy font-bold tracking-tight mb-6 leading-[1.1]"
-        >
-          Hassle-Free OCI, Indian e-Visa & Passport Services <span className="text-saffron">— Done For You</span>
-        </motion.h1>
+        {/* ✅ Fixed heading (balanced + gradient only on key text) */}
+<motion.h1
+  className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight leading-tight"
+>
+  <span className="text-[#0B1F3A]">
+    Hassle-Free
+  </span>{" "}
+  
+  <span className="bg-gradient-to-r from-[#33A1FD] to-[#1E7ED8] bg-clip-text text-transparent">
+    OCI, e-Visa & Passport
+  </span>{" "}
+  
+  <span className="text-[#0B1F3A]">
+    Services
+  </span>
+</motion.h1>
 
-        <motion.p 
+        {/* ✅ Supporting text */}
+        <motion.p
           variants={itemVariants}
-          className="font-body text-lg sm:text-xl text-textMuted max-w-2xl mx-auto mb-10 leading-relaxed"
+          className="text-base sm:text-lg text-muted max-w-xl mx-auto mb-8 leading-relaxed"
         >
           For UK & US residents of Indian origin. We handle the forms, documents and appointments so you don&apos;t lose time or miss travel plans.
         </motion.p>
 
-        <motion.div 
+        {/* ✅ Buttons */}
+        <motion.div
           variants={itemVariants}
-          className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14"
+          className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10"
         >
           <Link href="/document-audit" className="w-full sm:w-auto">
-            <Button variant="primary" className="w-full sm:w-auto text-lg py-4">
-              Get My Documents Checked
+            <Button className="w-full sm:w-auto px-6 py-3 text-base rounded-full shadow-md hover:shadow-lg transition">
+              Get Documents Checked
             </Button>
           </Link>
+
           <Link href="/services" className="w-full sm:w-auto">
-            <Button variant="outline" className="w-full sm:w-auto text-lg py-4 bg-white/50 backdrop-blur-sm">
+            <Button className="w-full sm:w-auto px-6 py-3 text-base rounded-full bg-gray-100 hover:bg-gray-200 transition">
               View Services & Pricing
             </Button>
           </Link>
         </motion.div>
 
-        <motion.div 
+        {/* ✅ Badges */}
+        <motion.div
           variants={itemVariants}
-          className="flex flex-wrap justify-center items-center gap-3 sm:gap-6"
+          className="flex flex-wrap justify-center gap-3"
         >
           {badges.map((badge, index) => (
             <motion.div
               key={index}
-              whileHover={{ y: -3, boxShadow: "0 4px 12px rgba(15,31,61,0.08)" }}
-              className="flex items-center gap-2 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-border shadow-sm text-sm font-medium text-navy transition-all"
+              whileHover={{ y: -2 }}
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-gray-100 shadow-sm text-sm text-gray-700"
             >
               {badge.icon}
               {badge.text}

@@ -57,7 +57,7 @@ export function ContactForm() {
   // Using standard form submission
 
   const Label = ({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) => (
-    <label htmlFor={htmlFor} className="block text-sm font-medium text-navy mb-2">
+    <label htmlFor={htmlFor} className="block text-sm font-medium text-primary mb-2">
       {children}
     </label>
   );
@@ -79,7 +79,7 @@ export function ContactForm() {
     </AnimatePresence>
   );
 
-  const inputClass = "w-full rounded-xl border-border bg-gray-50/50 px-4 py-3.5 text-textPrimary focus:bg-white focus:border-saffron focus:ring-2 focus:ring-saffron/20 transition-all outline-none";
+  const inputClass = "w-full rounded-xl border-border bg-gray-50/50 px-4 py-3.5 text-dark focus:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20 transition-all outline-none";
 
   return (
     <div className="bg-white rounded-3xl p-6 sm:p-10 shadow-[0_8px_32px_rgba(15,31,61,0.08)] border border-border">
@@ -90,13 +90,13 @@ export function ContactForm() {
           className="flex flex-col items-center justify-center py-12 text-center"
         >
           <CheckCircle className="w-16 h-16 text-success mb-6" />
-          <h3 className="text-2xl font-heading font-bold text-navy mb-2">Message Sent!</h3>
+          <h3 className="text-2xl font-heading font-bold text-primary mb-2">Message Sent!</h3>
           <p className="text-textMuted font-body">
             We&apos;ve received your inquiry and will get back to you shortly.
           </p>
           <button 
             onClick={() => setIsSuccess(false)}
-            className="mt-8 text-saffron font-medium hover:underline"
+            className="mt-8 text-accent font-medium hover:underline"
           >
             Send another message
           </button>
@@ -179,7 +179,7 @@ export function ContactForm() {
             whileTap={{ scale: 0.98 }}
             type="submit"
             disabled={isSubmitting}
-            className="w-full bg-navy text-white font-medium py-4 px-6 rounded-xl shadow-[0_8px_24px_rgba(15,31,61,0.2)] hover:bg-opacity-90 transition-all flex justify-center items-center disabled:opacity-70 disabled:pointer-events-none"
+            className="w-full bg-primary text-white font-medium py-4 px-6 rounded-xl shadow-[0_8px_24px_rgba(15,31,61,0.2)] hover:bg-opacity-90 transition-all flex justify-center items-center disabled:opacity-70 disabled:pointer-events-none"
           >
             {isSubmitting ? (
               <>

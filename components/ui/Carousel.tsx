@@ -35,7 +35,7 @@ export function Carousel({ items }: CarouselProps) {
     >
       <div className="flex justify-center mb-6 space-x-1">
         {[...Array(5)].map((_, i) => (
-          <Star key={i} className="w-6 h-6 fill-saffron text-saffron" />
+          <Star key={i} className="w-6 h-6 fill-saffron text-accent" />
         ))}
       </div>
       
@@ -49,7 +49,7 @@ export function Carousel({ items }: CarouselProps) {
             transition={{ duration: 0.5, ease: "easeInOut" }}
             className="w-full"
           >
-            <blockquote className="text-xl md:text-2xl font-heading text-navy leading-relaxed mb-6">
+            <blockquote className="text-xl md:text-2xl font-heading text-primary leading-relaxed mb-6">
               &quot;{items[currentIndex].quote}&quot;
             </blockquote>
             <p className="font-body text-textMuted font-medium">

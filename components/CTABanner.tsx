@@ -6,10 +6,10 @@ import { Button } from "./ui/Button";
 
 export function CTABanner() {
   return (
-    <section className="bg-navy py-20 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+    <section className="bg-primary py-20 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
       {/* Background decoration */}
-      <div className="absolute top-0 right-0 -mt-20 -mr-20 w-80 h-80 bg-saffron opacity-10 rounded-full blur-[80px] pointer-events-none" />
-      <div className="absolute bottom-0 left-0 -mb-20 -ml-20 w-80 h-80 bg-teal opacity-10 rounded-full blur-[80px] pointer-events-none" />
+      <div className="absolute top-0 right-0 -mt-20 -mr-20 w-80 h-80 bg-accent opacity-10 rounded-full blur-[80px] pointer-events-none" />
+      <div className="absolute bottom-0 left-0 -mb-20 -ml-20 w-80 h-80 bg-primary opacity-10 rounded-full blur-[80px] pointer-events-none" />
       
       <div className="max-w-4xl mx-auto text-center relative z-10">
         <motion.h2 

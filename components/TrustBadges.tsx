@@ -24,9 +24,9 @@ const badgeVariants = {
 export function TrustBadges() {
   const badges = [
     { text: "UK-based support", icon: <CheckCircle className="w-5 h-5 text-success" /> },
-    { text: "Transparent fixed fees", icon: <ShieldCheck className="w-5 h-5 text-saffron" /> },
-    { text: "Secure document uploads", icon: <Clock className="w-5 h-5 text-teal" /> },
-    { text: "WhatsApp & email updates", icon: <MessageCircle className="w-5 h-5 text-navy" /> },
+    { text: "Transparent fixed fees", icon: <ShieldCheck className="w-5 h-5 text-accent" /> },
+    { text: "Secure document uploads", icon: <Clock className="w-5 h-5 text-primary" /> },
+    { text: "WhatsApp & email updates", icon: <MessageCircle className="w-5 h-5 text-primary" /> },
   ];
 
   return (
@@ -45,7 +45,7 @@ export function TrustBadges() {
           className="flex items-center gap-3 bg-white px-5 py-3 rounded-xl border border-border shadow-[0_2px_8px_rgba(15,31,61,0.04)]"
         >
           {badge.icon}
-          <span className="font-body text-sm font-semibold text-navy">{badge.text}</span>
+          <span className="font-body text-sm font-semibold text-primary">{badge.text}</span>
         </motion.div>
       ))}
     </motion.div>

@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Mail, MessageCircle } from "lucide-react";
+import { FlyOCILogo } from "./FlyOCILogo";
 
 const links = {
   services: [
     { name: "New OCI Card", href: "/services/new-oci" },
     { name: "OCI Renewal", href: "/services/oci-renewal" },
     { name: "OCI Update", href: "/services/oci-update" },
-    { name: "Indian e-Visa", href: "/services/indian-evisa" },
+    { name: "Indian e-Visa", href: "/indian-e-visa" },
     { name: "Passport Renewal", href: "/services/passport-renewal" },
   ],
   company: [
@@ -29,10 +30,10 @@ const links = {
 
 const FooterLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
   <li>
-    <Link href={href} className="text-gray-300 hover:text-amber-400 transition-colors relative group block py-1">
+    <Link href={href} className="text-gray-400 hover:text-gray-300 transition-colors relative group block py-1">
       {children}
       <motion.span
-        className="absolute bottom-0 left-0 w-full h-0.5 bg-amber-400 origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300 ease-out"
+        className="absolute bottom-0 left-0 w-full h-0.5 bg-gray-300 origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300 ease-out"
       />
     </Link>
   </li>
@@ -40,13 +41,13 @@ const FooterLink = ({ href, children }: { href: string; children: React.ReactNod
 
 export function Footer() {
   return (
-    <footer className="bg-navy pt-20 pb-10 border-t border-navy">
+    <footer className="bg-dark pt-20 pb-10 border-t-4 border-t-primary">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 mb-16">
           {/* Brand Col */}
           <div className="space-y-6">
             <Link href="/" className="inline-block">
-              <span className="font-heading text-3xl font-bold text-white">FlyOCI</span>
+              <FlyOCILogo className="text-3xl" textClassName="!text-white" />
             </Link>
             <p className="text-gray-400 leading-relaxed font-body text-sm">
               Helping UK and US residents of Indian origin with OCI cards, Indian e-Visas, and passport renewals. Expert document audit and end-to-end support.

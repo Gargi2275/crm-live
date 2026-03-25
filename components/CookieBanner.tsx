@@ -39,7 +39,7 @@ export function CookieBanner() {
           className="fixed bottom-0 left-0 right-0 z-50 p-4 sm:p-6 pb-6 sm:pb-8 pointer-events-none"
         >
           <div className="max-w-7xl mx-auto">
-            <div className="bg-navy rounded-2xl p-6 shadow-2xl border border-gray-800 flex flex-col lg:flex-row items-center justify-between gap-6 pointer-events-auto">
+            <div className="bg-primary rounded-2xl p-6 shadow-2xl border border-gray-800 flex flex-col lg:flex-row items-center justify-between gap-6 pointer-events-auto">
               <p className="text-gray-300 font-body text-sm leading-relaxed max-w-4xl">
                 This website uses cookies to improve your experience and to help us understand how our services are used. By continuing to use this site, you agree to our use of cookies. You can manage preferences in your browser settings.
               </p>

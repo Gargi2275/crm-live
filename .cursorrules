@@ -1,0 +1,138 @@
+# .cursorrules — Color Theme System
+# Stack: Next.js + Tailwind CSS + TypeScript
+
+## Rules
+1. ALWAYS use Tailwind utility classes from the custom token list below — never raw hex values in className.
+2. Never introduce a color not in this token system.
+3. For values Tailwind can't express (gradients, complex shadows), use inline style or a cn() utility with CSS variables.
+4. All components must be TypeScript (.tsx). No `any` types.
+5. Use CSS variables (var(--...)) in tailwind.config.ts so tokens stay in sync.
+
+---
+
+## tailwind.config.ts
+
+import type { Config } from 'tailwindcss'
+
+const config: Config = {
+  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        primary:    '#33A1FD',
+        secondary:  '#009877',
+        accent:     '#B87333',
+        dark:       '#0D1F2D',
+        muted:      '#64748B',
+        'bg-blue':   '#EBF6FF',
+        'bg-green':  '#F0FBF7',
+        'bg-copper': '#FDF6EE',
+        'bg-page':   '#F8FEFF',
+      },
+      fontFamily: {
+        heading: ['Poppins', 'sans-serif'],
+        body:    ['Raleway', 'sans-serif'],
+      },
+      borderRadius: {
+        btn:   '50px',
+        card:  '16px',
+        badge: '50px',
+      },
+      boxShadow: {
+        navbar:      '0 2px 20px rgba(51,161,253,0.08)',
+        card:        '0 4px 24px rgba(51,161,253,0.08)',
+        'btn':       '0 6px 20px rgba(51,161,253,0.30)',
+        'btn-hover': '0 8px 28px rgba(51,161,253,0.40)',
+      },
+      backgroundImage: {
+        'hero':    'linear-gradient(150deg, #EBF6FF 0%, #F5FBFF 50%, #FFFFFF 100%)',
+        'btn-primary': 'linear-gradient(135deg, #33A1FD, #0F7EE8)',
+        'stats-row':   'linear-gradient(90deg, #EBF6FF, #F0FBF7, #FDF6EE, #EBF6FF)',
+      },
+      borderColor: {
+        'blue-tint':   'rgba(51, 161, 253, 0.15)',
+        'green-tint':  'rgba(0, 152, 119, 0.15)',
+        'copper-tint': 'rgba(184, 115, 51, 0.15)',
+      },
+    },
+  },
+  plugins: [],
+}
+export default config
+
+---
+
+## app/globals.css
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Raleway:wght@400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+---
+
+## Color Role Map — use these Tailwind classes
+
+### Navbar
+- bg-white shadow-navbar
+- Links: text-dark hover:text-primary
+- CTA button: bg-btn-primary text-white shadow-btn hover:shadow-btn-hover rounded-btn
+
+### Hero
+- bg-hero (gradient)
+- Heading: text-dark font-heading
+- Highlight word: text-primary font-bold
+- Italic phrase "Done For You": text-accent italic
+- Subtext: text-muted font-body
+
+### Buttons
+- Primary: bg-btn-primary text-white shadow-btn hover:shadow-btn-hover rounded-btn px-6 py-3
+- Secondary: bg-white border-2 border-secondary text-secondary rounded-btn px-6 py-3
+
+### Badge / Pill
+- bg-primary/10 border border-primary/20 text-primary rounded-badge px-3 py-1 text-sm
+
+### Stats Row
+- Applications: bg-bg-blue  — number: text-primary
+- Success Rate: bg-bg-green — number: text-secondary
+- Turnaround:   bg-bg-copper — number: text-accent
+- Rating:       bg-bg-blue  — number: text-primary
+
+### Cards
+- OCI:       bg-bg-green  border border-green-tint  rounded-card shadow-card  title: text-secondary
+- e-Visa:    bg-bg-blue   border border-blue-tint   rounded-card shadow-card  title: text-primary
+- Doc Audit: bg-bg-copper border border-copper-tint rounded-card shadow-card  title: text-accent
+- Body text on all cards: text-muted
+
+### Sections
+- Odd sections:  bg-white
+- Even sections: bg-bg-page
+
+### Footer
+- bg-dark border-t-[3px] border-primary
+- Logo "Fly": text-secondary | Logo "OCI": text-primary
+- Links: text-white/55 hover:text-white
+- Badge: bg-secondary/15 text-secondary rounded-badge px-3 py-1
+
+---
+
+## Component Pattern (TypeScript example)
+
+// components/PrimaryButton.tsx
+interface PrimaryButtonProps {
+  label: string
+  onClick?: () => void
+}
+
+export default function PrimaryButton({ label, onClick }: PrimaryButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className="bg-btn-primary text-white font-heading font-semibold
+                 rounded-btn px-6 py-3 shadow-btn
+                 hover:shadow-btn-hover transition-shadow duration-200"
+    >
+      {label}
+    </button>
+  )
+}

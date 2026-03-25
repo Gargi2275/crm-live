@@ -2,11 +2,6 @@
 
 import { useRef } from "react";
 import { motion, useInView } from "framer-motion";
-<<<<<<< HEAD
-
-=======
->>>>>>> 4b9863b (fix: resolved build errors and updated project)
-
 interface Step {
   title: string;
   description: string;
@@ -26,7 +21,7 @@ export function StepTimeline({ steps }: StepTimelineProps) {
       {/* Desktop Horizontal Line */}
       <div className="hidden md:block absolute top-12 left-0 w-full h-1 bg-gray-200 rounded-full" />
       <motion.div
-        className="hidden md:block absolute top-12 left-0 h-1 bg-saffron rounded-full origin-left"
+        className="hidden md:block absolute top-12 left-0 h-1 bg-accent rounded-full origin-left"
         initial={{ scaleX: 0 }}
         animate={inView ? { scaleX: 1 } : { scaleX: 0 }}
         transition={{ duration: 1.5, ease: "easeInOut" }}
@@ -36,7 +31,7 @@ export function StepTimeline({ steps }: StepTimelineProps) {
         {/* Mobile Vertical Line */}
         <div className="md:hidden absolute top-0 left-[23px] w-1 h-full bg-gray-200 rounded-full" />
         <motion.div
-          className="md:hidden absolute top-0 left-[23px] w-1 bg-saffron rounded-full origin-top"
+          className="md:hidden absolute top-0 left-[23px] w-1 bg-accent rounded-full origin-top"
           initial={{ scaleY: 0 }}
           animate={inView ? { scaleY: 1 } : { scaleY: 0 }}
           transition={{ duration: 1.5, ease: "easeInOut" }}
@@ -49,18 +44,18 @@ export function StepTimeline({ steps }: StepTimelineProps) {
               initial={{ scale: 0 }}
               animate={inView ? { scale: 1 } : { scale: 0 }}
               transition={{ type: "spring", stiffness: 300, damping: 20, delay: index * 0.4 }}
-              className="w-12 h-12 rounded-full bg-saffron text-navy flex items-center justify-center font-bold text-lg shadow-[0_4px_16px_rgba(245,166,35,0.4)] flex-shrink-0 z-10"
+              className="w-12 h-12 rounded-full bg-accent text-primary flex items-center justify-center font-bold text-lg shadow-[0_4px_16px_rgba(245,166,35,0.4)] flex-shrink-0 z-10"
             >
               {step.icon || (index + 1)}
             </motion.div>
-            
+
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={inView ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
               transition={{ duration: 0.5, delay: index * 0.4 + 0.2 }}
               className="ml-6 md:ml-0 md:mt-8 md:text-center"
             >
-              <h3 className="text-xl font-heading font-bold text-navy mb-3">{step.title}</h3>
+              <h3 className="text-xl font-heading font-bold text-primary mb-3">{step.title}</h3>
               <p className="text-textMuted font-body leading-relaxed text-sm">
                 {step.description}
               </p>

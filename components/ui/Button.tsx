@@ -28,7 +28,7 @@ export function Button({
     outline: "border border-primary/35 text-primary hover:bg-bg-blue/80 px-6 py-3 bg-white/70 backdrop-blur-sm",
   };
 
-  // const isPrimary = variant === "primary";
+  
 
   return (
     <motion.button

@@ -1,22 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2,Check } from "lucide-react";
 
 import { useEVisa } from "@/context/EVisaContext";
 import { Reveal } from "@/components/Reveal";
 import { ProgressStepper } from "@/components/ProgressStepper";
 import { FileDropZone } from "@/components/FileDropZone";
 import { AnimatedCheckmark } from "@/components/AnimatedCheckmark";
+import { eVisaApi } from "@/lib/api-client";
 
 export default function UploadPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data, updateData } = useEVisa();
+  const caseNumber = searchParams.get("case") || data.fileNumber || "";
 
   const [passportRef, setPassportRef] = useState<File | null>(null);
   const [photoRef, setPhotoRef] = useState<File | null>(null);
+  const [supportingFiles, setSupportingFiles] = useState<File[]>([]);
+  const [applicantEmail, setApplicantEmail] = useState(data.email || "");
   
   const [arrivalDate, setArrivalDate] = useState("");
   const [portOfEntry, setPortOfEntry] = useState("");
@@ -27,39 +32,55 @@ export default function UploadPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
-  // Derive file number from context or use demo mock
-  const fileNumber = data.fileNumber || "FO-EV-2025-000000";
+  const fileNumber = caseNumber || "FO-EV-...";
 
   // Validate Required Fields
-  const isFormValid = passportRef && photoRef && arrivalDate && portOfEntry && addressInIndia;
+  const isFormValid = passportRef && photoRef && arrivalDate && portOfEntry && addressInIndia && applicantEmail && caseNumber;
 
-  useEffect(() => {
-    if (isUploading) {
-      const interval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            setTimeout(() => {
-              setIsUploading(false);
-              setIsSuccess(true);
-              updateData({ hasUploaded: true });
-            }, 600);
-            return 100;
-          }
-          const bump = prev > 80 ? Math.random() * 5 : Math.random() * 15;
-          return Math.min(prev + bump, 100);
-        });
-      }, 200);
-      return () => clearInterval(interval);
-    }
-  }, [isUploading, updateData]);
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isFormValid) return;
+
+    setUploadError("");
     setIsUploading(true);
-    setUploadProgress(0);
+    setUploadProgress(15);
+
+    try {
+      const formData = new FormData();
+      formData.append("case_number", caseNumber);
+      formData.append("email", applicantEmail.toLowerCase());
+      formData.append("passport_bio_page", passportRef as File);
+      formData.append("applicant_photograph", photoRef as File);
+      formData.append("intended_arrival_date", arrivalDate);
+      formData.append("port_of_entry", portOfEntry);
+      formData.append("address_in_india", addressInIndia);
+      formData.append("emergency_contact", emergencyContact);
+
+      supportingFiles.forEach((file) => formData.append("supporting_documents", file));
+
+      setUploadProgress(55);
+      await eVisaApi.uploadDocuments(formData);
+      setUploadProgress(100);
+      setIsSuccess(true);
+      updateData({
+        hasUploaded: true,
+        fileNumber: caseNumber,
+        email: applicantEmail,
+        travelDetails: {
+          arrivalDate,
+          portOfEntry,
+          addressInIndia,
+          emergencyContact,
+          additionalNotes: notes,
+        },
+      });
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   if (isSuccess) {
@@ -96,7 +117,7 @@ export default function UploadPage() {
                 onClick={() => router.push("/track")}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="w-full bg-accent text-primary font-bold text-[16px] px-7 py-[16px] rounded-btn shadow-btn-hover"
+                className="w-full bg-accent text-white font-bold text-[16px] px-7 py-[16px] rounded-btn shadow-btn-hover"
               >
                 Track Application
               </motion.button>
@@ -207,6 +228,16 @@ export default function UploadPage() {
                <div className="p-6 sm:p-8 space-y-5">
                  <div className="grid sm:grid-cols-2 gap-5">
                    <div>
+                     <label className="block font-body font-bold text-primary text-sm mb-2">Email Used for Registration *</label>
+                     <input
+                       type="email"
+                       required
+                       value={applicantEmail}
+                       onChange={(e) => setApplicantEmail(e.target.value)}
+                       className={inputClasses}
+                     />
+                   </div>
+                   <div>
                      <label className="block font-body font-bold text-primary text-sm mb-2">Intended Arrival Date *</label>
                      <input
                        type="date"
@@ -261,6 +292,7 @@ export default function UploadPage() {
                <input 
                   type="file" 
                   multiple 
+                onChange={(e) => setSupportingFiles(Array.from(e.target.files || []))}
                   className="block w-full font-body text-sm text-muted
                   file:mr-4 file:py-2 file:px-4
                   file:rounded-btn file:border-0
@@ -286,12 +318,16 @@ export default function UploadPage() {
               whileTap={isFormValid && !isUploading ? { scale: 0.98 } : {}}
               className={`w-full font-bold text-[16px] px-7 py-[18px] rounded-btn shadow-[0_4px_16px_rgba(245,166,35,0.28)] flex justify-center items-center transition-all duration-300 mt-8 ${
                 isFormValid && !isUploading 
-                  ? "bg-accent text-primary shadow-btn hover:shadow-btn-hover" 
-                  : "bg-slate-300 text-slate-500 shadow-none cursor-not-allowed transform-none"
+                  ? "bg-accent text-white shadow-btn hover:shadow-btn-hover" 
+                  : "bg-slate-300 text-white-500 shadow-none cursor-not-allowed transform-none"
               }`}
             >
               Submit Documents
             </motion.button>
+
+            {uploadError && (
+              <p className="text-center text-sm text-red-600 font-semibold">{uploadError}</p>
+            )}
           </form>
         </Reveal>
       </div>
@@ -311,7 +347,9 @@ export default function UploadPage() {
               className="max-w-[360px] w-full text-center"
             >
               <div className="w-20 h-20 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-6 relative">
-                <span className="text-4xl translate-x-1">🚀</span>
+                <span className="text-4xl translate-x-1">
+  <Check className="w-8 h-8 text-green-500" strokeWidth={3} />
+</span>
               </div>
               
               <h3 className="font-heading font-extrabold text-primary text-2xl mb-2">Uploading Files</h3>

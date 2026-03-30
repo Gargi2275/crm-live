@@ -21,8 +21,9 @@ const config: Config = {
         'bg-page': '#F6FBFF',
       },
       fontFamily: {
-        heading: ['Poppins', 'sans-serif'],
-        body: ['Raleway', 'sans-serif'],
+        heading: ['var(--font-heading)', 'sans-serif'],
+        body: ['var(--font-body)', 'sans-serif'],
+        mono: ['var(--font-body)', 'sans-serif'],
       },
       borderRadius: {
         btn: '50px',

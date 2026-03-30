@@ -1,4 +1,9 @@
-export type ConsoleRole = "Admin / CEO" | "Operations Manager" | "Staff / Case Worker";
+export type ConsoleRole =
+  | "Admin / CEO"
+  | "Operations Manager"
+  | "Audit Officer"
+  | "Staff / Case Worker"
+  | "Viewer";
 export type ServiceType = "OCI" | "Passport Renewal" | "E-Visa";
 export type PaymentStatus = "Paid" | "Pending" | "Prepaid";
 export type StaffLoadStatus = "Available" | "Busy" | "Overloaded";
@@ -46,7 +51,13 @@ export interface PipelineCase {
   slaBreached: boolean;
 }
 
-export const FLYOCI_ROLES: ConsoleRole[] = ["Admin / CEO", "Operations Manager", "Staff / Case Worker"];
+export const FLYOCI_ROLES: ConsoleRole[] = [
+  "Admin / CEO",
+  "Operations Manager",
+  "Audit Officer",
+  "Staff / Case Worker",
+  "Viewer",
+];
 
 export const KANBAN_COLUMNS: { id: KanbanStage; title: string; color: string }[] = [
   { id: "NEW_LEAD", title: "NEW LEAD", color: "bg-sky-100 text-sky-700 border-sky-200" },

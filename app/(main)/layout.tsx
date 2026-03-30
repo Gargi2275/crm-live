@@ -9,11 +9,11 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <div className="min-h-[100svh] flex flex-col">
       <Navbar />
       <PageTransition>{children}</PageTransition>
       <Footer />
       <CookieBanner />
-    </>
+    </div>
   );
 }

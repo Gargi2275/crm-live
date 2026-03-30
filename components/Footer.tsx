@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
 import { Mail, MessageCircle } from "lucide-react";
-import { FlyOCILogo } from "./FlyOCILogo";
+import Image from "next/image";
 
 const links = {
   services: [
@@ -30,24 +29,29 @@ const links = {
 
 const FooterLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
   <li>
-    <Link href={href} className="text-[#5f7388] hover:text-primary transition-colors relative group block py-1">
+    <Link href={href} className="text-[#5f7388] hover:text-primary transition-colors relative group block py-1 overflow-hidden">
       {children}
-      <motion.span
-        className="absolute bottom-0 left-0 w-full h-0.5 bg-primary/70 origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300 ease-out"
-      />
+      <span className="absolute bottom-0 left-0 w-full h-0.5 bg-primary/70 origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300 ease-out" />
     </Link>
   </li>
 );
 
-export function Footer() {
+export function Footer({ compact = false }: { compact?: boolean }) {
   return (
-    <footer className="bg-[linear-gradient(180deg,#f7fbff_0%,#ffffff_100%)] pt-20 pb-10 border-t border-t-primary/20">
+    <footer className={`bg-[linear-gradient(180deg,#f7fbff_0%,#ffffff_100%)] border-t border-t-primary/20 ${compact ? "pt-10 pb-8" : "pt-20 pb-10"}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 mb-16">
+        <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 ${compact ? "gap-8 mb-10" : "gap-12 mb-16"}`}>
           {/* Brand Col */}
           <div className="space-y-6">
             <Link href="/" className="inline-block">
-              <FlyOCILogo className="text-3xl" />
+              <Image
+                              src="/logo.png"
+                              alt="FlyOCI Logo"
+                              width={120}
+                              height={40}
+                              className="h-10 w-auto"
+                              priority
+                            />
             </Link>
             <p className="text-[#5f7388] leading-relaxed font-body text-sm">
               Helping UK and US residents of Indian origin with OCI cards, Indian e-Visas, and passport renewals. Expert document audit and end-to-end support.
@@ -100,8 +104,8 @@ export function Footer() {
         </div>
 
         {/* Disclaimer Line */}
-        <div className="border-t border-primary/15 pt-8 mt-8">
-          <div className="p-4 rounded-xl bg-bg-blue/55 mb-6 border border-primary/20 shadow-[0_8px_22px_rgba(51,161,253,0.12)]">
+        <div className={`border-t border-primary/15 ${compact ? "pt-5 mt-5" : "pt-8 mt-8"}`}>
+          <div className={`p-4 rounded-xl bg-bg-blue/55 border border-primary/20 shadow-[0_8px_22px_rgba(51,161,253,0.12)] ${compact ? "mb-4" : "mb-6"}`}>
             <p className="text-[#60788f] text-xs text-center leading-relaxed">
               <strong>Disclaimer:</strong> FlyOCI is an independent private service. We are not affiliated with any government, consulate or embassy. We charge a fee for our professional form-filling, document audit, and full application management services. Government fees are paid directly to the respective authorities.
             </p>

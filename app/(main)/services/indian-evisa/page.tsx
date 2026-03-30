@@ -26,8 +26,9 @@ export default function IndianEVisaPage() {
             <p className="text-4xl font-mono font-bold text-amber-400 mb-2">£88</p>
             <p className="text-sm font-body text-gray-300">Total (includes approx. £32 govt fee)</p>
           </div>
-          <div className="bg-primary p-8 rounded-2xl shadow-sm border border-primary text-white text-center relative overflow-hidden">
-            <div className="absolute top-4 right-[-30px] bg-accent text-primary text-xs font-bold px-10 py-1 rotate-[45deg] z-10">POPULAR</div>
+          <div className="bg-primary p-8 rounded-2xl shadow-sm border border-primary text-white text-center relative overflow-hidden"><div className="absolute top-4 right-0 translate-x-1/4 -translate-y-1/2 rotate-45 bg-accent text-white text-[10px] font-semibold px-8 py-1 z-10">
+  POPULAR
+</div>
             <h3 className="text-xl font-heading font-bold mb-4">Indian e-Visa — 5 Year</h3>
             <p className="text-4xl font-mono font-bold text-amber-400 mb-2">£150</p>
             <p className="text-sm font-body text-gray-300">Total (includes approx. £70 govt fee)</p>

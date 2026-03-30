@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
@@ -9,14 +9,18 @@ import { useEVisa } from "@/context/EVisaContext";
 import { Reveal } from "@/components/Reveal";
 import { OTPInput } from "@/components/OTPInput";
 import { ProgressStepper } from "@/components/ProgressStepper";
+import { eVisaApi } from "@/lib/api-client";
 
 export default function ConfirmEmailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data, updateData } = useEVisa();
+  const caseNumber = searchParams.get("case") || data.fileNumber || "";
   
   const [otpStatus, setOtpStatus] = useState<"idle" | "success" | "error">("idle");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [statusMessage, setStatusMessage] = useState<string>("");
 
   // Mask email: r*****@gmail.com
   const maskEmail = (email: string) => {
@@ -41,12 +45,24 @@ export default function ConfirmEmailPage() {
     }
   }, [countdown]);
 
-const handleOTPComplete = (code: string) => {
-  if (code === "123456") {
-    setOtpStatus("success");
-    updateData({ isEmailConfirmed: true });
-  } else {
+const handleOTPComplete = async (code: string) => {
+  if (!caseNumber) {
     setOtpStatus("error");
+    setStatusMessage("Case number missing. Please register again.");
+    return;
+  }
+
+  setIsSubmitting(true);
+  setStatusMessage("");
+  try {
+    await eVisaApi.confirmEmail(caseNumber, code);
+    setOtpStatus("success");
+    updateData({ isEmailConfirmed: true, fileNumber: caseNumber });
+  } catch (error) {
+    setOtpStatus("error");
+    setStatusMessage(error instanceof Error ? error.message : "OTP verification failed");
+  } finally {
+    setIsSubmitting(false);
   }
 };
 
@@ -57,13 +73,26 @@ const handleContinue = () => {
   setIsSubmitting(true);
 
   setTimeout(() => {
-    router.replace("/indian-e-visa/payment");
+    router.replace(`/indian-e-visa/payment?case=${encodeURIComponent(caseNumber)}`);
   }, 800);
 };
-  const handleResend = () => {
-    if (countdown === 0) {
-      setCountdown(45);
+  const handleResend = async () => {
+    if (countdown !== 0 || !caseNumber) return;
+
+    setStatusMessage("");
+    try {
+      const response = await eVisaApi.resendEmail(caseNumber);
+      const nextAt = response.data.next_resend_available_at;
+      if (nextAt) {
+        const remaining = Math.max(0, Math.ceil((new Date(nextAt).getTime() - Date.now()) / 1000));
+        setCountdown(remaining);
+      } else {
+        setCountdown(180);
+      }
       setOtpStatus("idle");
+      setStatusMessage("OTP resent successfully.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to resend OTP");
     }
   };
 
@@ -95,7 +124,7 @@ const handleContinue = () => {
                   {maskEmail(data.email)}
                 </div>
                 <div className="bg-primary text-white text-[11px] font-mono font-bold px-3 py-1 rounded-badge">
-                  {data.fileNumber || "FO-EV-..."}
+                  {caseNumber || "FO-EV-..."}
                 </div>
               </div>
             </div>
@@ -128,7 +157,7 @@ const handleContinue = () => {
                 <AnimatePresence mode="wait">
                   {otpStatus === "error" && (
                     <motion.p key="error" initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="text-red text-sm font-bold flex items-center gap-1.5">
-                      <span className="text-lg leading-none">✗</span> Incorrect code. Please try again.
+                      <span className="text-lg leading-none">✗</span> {statusMessage || "Incorrect code. Please try again."}
                     </motion.p>
                   )}
                   {otpStatus === "success" && (
@@ -138,11 +167,15 @@ const handleContinue = () => {
                   )}
                   {otpStatus === "idle" && (
                     <motion.p key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-muted font-mono text-[11px]">
-                      Tip: Use 123456 for this demo
+                      Enter the OTP received in your email
                     </motion.p>
                   )}
                 </AnimatePresence>
               </div>
+
+              {statusMessage && otpStatus !== "error" && (
+                <p className="text-center text-xs text-muted mt-2">{statusMessage}</p>
+              )}
             </div>
 
             <motion.button

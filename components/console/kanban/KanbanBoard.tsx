@@ -61,7 +61,7 @@ export function KanbanBoard() {
         caseData={selectedCase} 
       />
 
-      <div className="flex gap-3 mb-4 overflow-x-auto pb-1">
+      <div className="flex flex-wrap gap-3 mb-4">
         {[
           ["Service Type", ["All", "OCI", "Passport Renewal", "E-Visa"], serviceFilter, setServiceFilter],
           ["Country", ["All", "India", "USA", "UK", "Canada"], countryFilter, setCountryFilter],
@@ -72,7 +72,7 @@ export function KanbanBoard() {
             key={label as string}
             value={value as string}
             onChange={(e) => (setter as (value: string) => void)(e.target.value)}
-            className="bg-white border border-blue-200 text-sm rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#33A1FD]/40"
+            className="bg-white border-[0.5px] border-[#D9E1EA] text-sm rounded-[10px] px-3 py-2 text-[#102A43] focus:outline-none focus:ring-2 focus:ring-[#009877]/25 focus:border-[#009877] min-w-[150px]"
             aria-label={label as string}
           >
             {(options as string[]).map((option) => (
@@ -90,7 +90,7 @@ export function KanbanBoard() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 h-[calc(100vh-180px)] overflow-x-auto pb-4 custom-scrollbar">
+        <div className="flex gap-4 h-[560px] max-h-[64vh] min-h-[420px] overflow-x-auto pb-2 custom-scrollbar">
           {KANBAN_COLUMNS.map((column) => {
             const columnCases = filteredCases.filter((c) => c.stage === column.id);
             return (
@@ -114,7 +114,7 @@ export function KanbanBoard() {
           {activeId && cases.find((c) => c.id === activeId) ? (() => {
             const activeCase = cases.find((c) => c.id === activeId)!;
             return (
-              <div className="opacity-90 shadow-2xl scale-105 border-2 border-blue-500 rotate-3 z-50 rounded-lg">
+              <div className="opacity-90 shadow-2xl scale-105 border-2 border-[#009877] rotate-2 z-50 rounded-[12px]">
                 <KanbanCard 
                   {...activeCase}
                   onClick={() => {}}

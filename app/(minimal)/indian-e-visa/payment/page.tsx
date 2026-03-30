@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
@@ -9,6 +9,7 @@ import { useEVisa } from "@/context/EVisaContext";
 import { Reveal } from "@/components/Reveal";
 import { ProgressStepper } from "@/components/ProgressStepper";
 import { AnimatedCheckmark } from "@/components/AnimatedCheckmark";
+import { eVisaApi } from "@/lib/api-client";
 
 const framerConfetti = Array.from({ length: 50 }).map((_, i) => ({
   id: i,
@@ -21,26 +22,47 @@ const framerConfetti = Array.from({ length: 50 }).map((_, i) => ({
 
 export default function PaymentPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data, updateData } = useEVisa();
+  const caseNumber = searchParams.get("case") || data.fileNumber || "";
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [uploadUrl, setUploadUrl] = useState("");
 
   const price = data.visaDuration === "5-Year" ? 150 : 88;
-  const fileNumber = data.fileNumber || "FO-EV-2025-000000";
+  const fileNumber = caseNumber || "FO-EV-...";
 
-  const handlePayment = () => {
+  const handlePayment = async () => {
+    if (!caseNumber) {
+      setErrorMessage("Case number missing. Please start registration again.");
+      return;
+    }
+
+    setErrorMessage("");
     setIsProcessing(true);
-    // Simulate payment processing
-    setTimeout(() => {
-      setIsProcessing(false);
+
+    try {
+      const paymentReference = `LOCAL-${Date.now()}`;
+      const response = await eVisaApi.paymentConfirm(caseNumber, paymentReference);
+      setUploadUrl(response.data.upload_url);
+      updateData({ hasPaid: true, fileNumber: caseNumber });
       setIsSuccess(true);
-      updateData({ hasPaid: true });
-    }, 2000);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Payment confirmation failed");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleContinue = () => {
-    router.push("/indian-e-visa/upload");
+    if (uploadUrl && uploadUrl.includes("?case=")) {
+      const caseParam = uploadUrl.split("?case=")[1] || caseNumber;
+      router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseParam)}`);
+      return;
+    }
+    router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}`);
   };
 
   if (isSuccess) {
@@ -69,7 +91,7 @@ export default function PaymentPage() {
                 <AnimatedCheckmark size={80} color="#16A34A" />
               </div>
               
-              <h2 className="font-heading font-extrabold text-accent text-2xl sm:text-3xl mb-2">Payment Confirmed! 🎉</h2>
+              <h2 className="font-heading font-extrabold text-accent text-2xl sm:text-3xl mb-2">Payment Confirmed!</h2>
               <div className="mt-3 mb-4 inline-flex bg-bg border border-border rounded-badge px-4 py-1.5 font-mono font-bold text-primary text-[13px]">
                 {fileNumber}
               </div>
@@ -98,7 +120,7 @@ export default function PaymentPage() {
                 onClick={handleContinue}
                 whileHover={{ scale: 1.02, y: -2 }}
                 whileTap={{ scale: 0.98 }}
-                className="w-full bg-accent text-primary font-bold text-[16px] px-7 py-[15px] rounded-btn shadow-[0_4px_16px_rgba(245,166,35,0.28)] hover:shadow-btn-hover flex justify-center items-center gap-2 transition-all"
+                className="w-full bg-accent text-white font-bold text-[16px] px-7 py-[15px] rounded-btn shadow-[0_4px_16px_rgba(245,166,35,0.28)] hover:shadow-btn-hover flex justify-center items-center gap-2 transition-all"
               >
                 Upload Documents →
               </motion.button>
@@ -147,18 +169,18 @@ export default function PaymentPage() {
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8 items-start">
             
             {/* Left — Service Summary Card */}
-            <div className="bg-card rounded-card shadow-card border border-border overflow-hidden">
+            <div className="bg-white rounded-card shadow-[0_18px_45px_rgba(20,76,160,0.10)] border border-[#d8e7f8] overflow-hidden">
               <div className="p-6 sm:p-8">
-                <span className="inline-block px-3 py-1 bg-primary/5 text-primary text-[11px] font-bold uppercase tracking-wider rounded-md mb-4">
+                <span className="inline-block px-3 py-1 bg-[#eaf4ff] text-[#1f4f8f] text-[11px] font-bold uppercase tracking-wider rounded-md mb-4">
                   Service Summary
                 </span>
-                <h3 className="font-body font-bold text-primary text-xl sm:text-2xl mb-6">Indian e-Visa Assistance Fee</h3>
+                <h3 className="font-body font-bold text-[#0f1f3d] text-xl sm:text-2xl mb-6">Indian e-Visa Assistance Fee</h3>
                 
                 <div className="flex flex-wrap gap-3 mb-8">
-                  <div className="bg-accent/10 border border-accent/20 font-body font-bold text-primary text-sm px-3 py-1.5 rounded-badge flex items-center gap-2">
+                  <div className="bg-[#fff5dd] border border-[#f4d89a] font-body font-bold text-[#3b2a08] text-sm px-3 py-1.5 rounded-badge flex items-center gap-2">
                     <span>✈️</span> {data.visaDuration || "1-Year"} e-Visa
                   </div>
-                  <div className="bg-greenL border border-green/20 font-mono font-bold text-green-800 text-sm px-3 py-1.5 rounded-badge flex items-center gap-2">
+                  <div className="bg-[#e9f9f0] border border-[#bfe9cf] font-mono font-bold text-[#196c43] text-sm px-3 py-1.5 rounded-badge flex items-center gap-2">
                     <span>📋</span> {fileNumber}
                   </div>
                 </div>
@@ -171,43 +193,43 @@ export default function PaymentPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                         </svg>
                       </div>
-                      <p className="font-body text-primary">{feature}</p>
+                      <p className="font-body text-[#23395d]">{feature}</p>
                     </motion.div>
                   ))}
                 </div>
 
-                <div className="bg-[#FFFBF0] border border-accent/30 rounded-lg p-4 mb-8 text-primary font-body text-sm font-medium">
+                <div className="bg-[#fff8e8] border border-[#f4d89a] rounded-lg p-4 mb-8 text-[#3b2a08] font-body text-sm font-medium">
                   Final approval is subject to the issuing authorities.
                 </div>
 
                 <div className="w-full h-px bg-border mb-6" />
 
                 <div className="space-y-3 font-body">
-                  <div className="flex justify-between items-center text-muted">
+                  <div className="flex justify-between items-center text-[#5f7391]">
                     <span>Service Fee:</span>
-                    <span className="font-mono text-accent font-bold text-lg">£{price}.00</span>
+                    <span className="font-mono text-[#cb7f00] font-bold text-lg">£{price}.00</span>
                   </div>
-                  <div className="flex justify-between items-center text-muted">
+                  <div className="flex justify-between items-center text-[#5f7391]">
                     <span>Taxes:</span>
-                    <span className="font-mono text-accent font-bold text-lg">£0.00</span>
+                    <span className="font-mono text-[#cb7f00] font-bold text-lg">£0.00</span>
                   </div>
                   <div className="flex justify-between items-center mt-4">
-                    <span className="font-bold text-primary text-lg">Total payable:</span>
-                    <span className="font-mono text-primary font-bold text-xl">£{price}.00</span>
+                    <span className="font-bold text-[#0f1f3d] text-lg">Total payable:</span>
+                    <span className="font-mono text-[#0f1f3d] font-bold text-xl">£{price}.00</span>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Right — Sticky Pricing Card */}
-            <div className="sticky top-24 bg-primary rounded-card shadow-card p-7 text-white">
-              <div className="font-mono text-white/60 text-xs font-bold tracking-widest mb-2">TOTAL PAYABLE</div>
-              <div className="font-mono text-accent text-[52px] leading-tight font-bold mb-4">£{price}</div>
-              <p className="font-body text-white/65 text-sm mb-6 leading-relaxed">
+            <div className="sticky top-24 bg-[#f3f9ff] border border-[#d8e7f8] rounded-card shadow-[0_18px_45px_rgba(20,76,160,0.10)] p-7 text-[#0f1f3d]">
+              <div className="font-mono text-[#5f7391] text-xs font-bold tracking-widest mb-2">TOTAL PAYABLE</div>
+              <div className="font-mono text-[#cb7f00] text-[52px] leading-tight font-bold mb-4">£{price}</div>
+              <p className="font-body text-[#3f587a] text-sm mb-6 leading-relaxed">
                 Complete payment to proceed to the secure document upload section.
               </p>
 
-              <label className="flex items-start gap-3 bg-white text-primary rounded-xl p-4 cursor-pointer mb-6 transition-transform hover:scale-[1.02] active:scale-[0.98]">
+              <label className="flex items-start gap-3 bg-white text-[#1f3658] border border-[#d8e7f8] rounded-xl p-4 cursor-pointer mb-6 transition-transform hover:scale-[1.02] active:scale-[0.98]">
                 <input
                   type="checkbox"
                   checked={acknowledged}
@@ -227,8 +249,8 @@ export default function PaymentPage() {
                 whileTap={acknowledged && !isProcessing ? { scale: 0.98 } : {}}
                 className={`w-full font-bold text-[16px] px-7 py-[16px] rounded-btn flex justify-center items-center transition-all duration-300 ${
                   acknowledged && !isProcessing 
-                    ? "bg-accent text-primary shadow-btn hover:shadow-btn-hover cursor-pointer" 
-                    : "bg-white/10 text-white/40 cursor-not-allowed"
+                    ? "bg-[#1a56db] text-white shadow-[0_10px_24px_rgba(26,86,219,0.35)] hover:shadow-[0_14px_30px_rgba(26,86,219,0.42)] cursor-pointer" 
+                    : "bg-[#dfe9f6] text-[#7f94b1] cursor-not-allowed"
                 }`}
               >
                 {isProcessing ? (
@@ -240,7 +262,11 @@ export default function PaymentPage() {
                 )}
               </motion.button>
 
-              <div className="mt-6 flex justify-center items-center gap-4 font-body text-xs text-white/50 font-medium tracking-wide">
+              {errorMessage && (
+                <p className="mt-3 text-center text-sm text-red-600 font-semibold">{errorMessage}</p>
+              )}
+
+              <div className="mt-6 flex justify-center items-center gap-4 font-body text-xs text-[#6f86a6] font-medium tracking-wide">
                 <span>💳 Card</span>
                 <span>•</span>
                 <span>📱 UPI</span>

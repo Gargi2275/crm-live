@@ -41,39 +41,39 @@ export function KanbanCard({
       {...listeners}
       {...attributes}
       className={cn(
-        "bg-white p-3 rounded-lg border border-blue-100 cursor-grab active:cursor-grabbing hover:border-[#33A1FD]/50 transition-colors mb-2 z-10",
-        isDragging && "opacity-90 shadow-lg scale-105 border-[#33A1FD] rotate-2",
-        slaBreached && !isDragging && "border-red-500/60 shadow-[0_0_10px_rgba(239,68,68,0.25)]"
+        "bg-white p-3 rounded-[12px] border-[0.5px] border-[#D9E1EA] cursor-grab active:cursor-grabbing hover:border-[#009877]/45 transition-all mb-2 z-10",
+        isDragging && "opacity-90 shadow-lg scale-105 border-[#009877] rotate-1",
+        slaBreached && !isDragging && "border-[#B42318]/45 shadow-[0_0_0_1px_rgba(180,35,24,0.08)]"
       )}
       onClick={onClick}
     >
       <div className="flex justify-between items-start mb-2">
-        <span className="text-xs font-bold text-slate-500">{id}</span>
-        <button className="text-slate-500 hover:text-slate-900">
+        <span className="text-xs font-heading font-semibold text-[#627D98]">{id}</span>
+        <button className="text-[#627D98] hover:text-[#102A43]">
           <MoreHorizontal className="w-4 h-4" />
         </button>
       </div>
       
-      <h4 className="font-semibold text-slate-900 text-sm">{customer}</h4>
-      <p className="text-xs text-slate-400 mt-1">{flag} {assignedTo ?? "Unassigned"}</p>
+      <h4 className="font-heading font-semibold text-[#102A43] text-sm">{customer}</h4>
+      <p className="text-xs text-[#627D98] mt-1">{flag} {assignedTo ?? "Unassigned"}</p>
       
       <div className="flex items-center justify-between mt-3 gap-2">
-        <span className="text-xs font-medium bg-[#33A1FD]/15 text-[#33A1FD] border border-[#33A1FD]/30 px-2 py-0.5 rounded text-[10px]">
+        <span className="text-xs font-medium bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-0.5 rounded-full text-[10px]">
           {serviceType}
         </span>
         <span
           className={cn(
-            "text-[10px] font-semibold px-2 py-0.5 rounded",
-            paymentStatus === "Paid" && "bg-green-500/20 text-green-300",
-            paymentStatus === "Pending" && "bg-red-500/20 text-red-300",
-            paymentStatus === "Prepaid" && "bg-amber-500/20 text-amber-300",
+            "text-[10px] font-heading font-semibold px-2 py-0.5 rounded-full",
+            paymentStatus === "Paid" && "bg-[#009877]/12 text-[#006F57]",
+            paymentStatus === "Pending" && "bg-[#B87333]/12 text-[#9C4F17]",
+            paymentStatus === "Prepaid" && "bg-[#33A1FD]/12 text-[#0B69B7]",
           )}
         >
           {paymentStatus}
         </span>
       </div>
 
-      <div className={cn("mt-3 flex items-center gap-1 text-xs", slaBreached ? "text-red-300" : "text-slate-400")}>
+      <div className={cn("mt-3 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full", slaBreached ? "text-[#B42318] bg-[#B42318]/12" : "text-[#486581] bg-[#F5F7FA]")}>
         {slaBreached ? <AlertCircle className="w-3.5 h-3.5" /> : <Clock3 className="w-3.5 h-3.5" />}
         <span>{slaBreached ? `Overdue ${slaTimer}` : `SLA ${slaTimer}`}</span>
       </div>

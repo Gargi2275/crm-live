@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&family=Raleway:wght@400;500;600&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -26,9 +25,15 @@
 
 html {
 	scroll-behavior: smooth;
+	scrollbar-gutter: stable both-edges;
+	overflow-x: clip;
+	overscroll-behavior-y: none;
 }
 
 body {
+	width: 100%;
+	overflow-x: clip;
+	overscroll-behavior-y: none;
 	color: var(--text-body);
 	background:
 		radial-gradient(circle at 8% 0%, rgba(51, 161, 253, 0.12), transparent 32%),
@@ -58,7 +63,22 @@ button,
 input,
 textarea,
 select {
-	transition: all 0.3s var(--ease-premium);
+	transition-property: color, background-color, border-color, opacity, transform, box-shadow;
+	transition-duration: 0.3s;
+	transition-timing-function: var(--ease-premium);
+}
+
+img,
+svg,
+video,
+canvas {
+	max-width: 100%;
+}
+
+/* Avoid horizontal jitter from transformed/absolute decorative elements. */
+main,
+section {
+	overflow-x: clip;
 }
 
 ::selection {

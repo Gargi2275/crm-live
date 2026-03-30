@@ -59,13 +59,13 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
         if (error) stateClass = "border-red text-red-600";
 
         else if (success) stateClass = "border-green bg-greenL text-green-700";
-        else if (digit) stateClass = "border-accent/60 bg-[#FFFBF0] text-primary";
+        else if (digit) stateClass = "border-accent/60 bg-[#ffffff] text-primary";
 
         return (
           <motion.div
             key={i}
             initial={false}
-            animate={success ? { backgroundColor: "#DCFCE7", borderColor: "#16A34A" } : {}}
+            animate={success ? { backgroundColor: "#DCFCE7", borderColor: "#16A34A" } : {}} 
             transition={{ delay: success ? i * 0.05 : 0, duration: 0.2 }}
             className={`w-[48px] h-[54px] rounded-[10px] overflow-hidden ${stateClass}`}
           >
@@ -77,7 +77,7 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
               onChange={(e) => handleChange(i, e.target.value.replace(/[^0-9]/g, ''))}
               onKeyDown={(e) => handleKeyDown(i, e)}
               onPaste={handlePaste}
-              className="w-full h-full text-center font-mono text-[22px] font-bold outline-none transition-colors border-2 border-black focus:border-accent focus:shadow-[0_0_0_3px_rgba(245,166,35,0.15)] bg-transparent disabled:opacity-100 placeholder:text-transparent"
+              className="w-full h-full text-center font-mono text-[22px] font-bold outline-none transition-colors border-2 border-blue-400 focus:border-accent focus:shadow-[0_0_0_3px_rgba(245,166,35,0.15)] bg-transparent disabled:opacity-100 placeholder:text-transparent"
               maxLength={1}
               disabled={success}
             />

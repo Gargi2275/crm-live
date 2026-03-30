@@ -1,21 +1,15 @@
 "use client";
 
-import { Bell, Search, Wallet, LogOut } from "lucide-react";
+import { Bell, Search, LogOut, ChevronDown } from "lucide-react";
 import { useState, useEffect } from "react";
-import { format } from "date-fns";
 import { useConsole } from "./ConsoleContext";
+import { motion } from "framer-motion";
+import toast from "react-hot-toast";
 
 export function TopHeader() {
-  const [time, setTime] = useState(new Date());
-  const [mounted, setMounted] = useState(false);
   const [showIdleWarning, setShowIdleWarning] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const { role, setRole, roles } = useConsole();
-
-  useEffect(() => {
-    setMounted(true);
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     const idleTimer = setTimeout(() => setShowIdleWarning(true), 3000);
@@ -23,54 +17,38 @@ export function TopHeader() {
   }, []);
 
   return (
-    <header className="bg-white border-b border-blue-100 sticky top-0 z-10 shadow-sm">
+    <header className="bg-white border-b border-[0.5px] border-[#D9E1EA] sticky top-0 z-10">
       {showIdleWarning && (
-        <div className="px-6 py-2 text-xs bg-amber-100 text-amber-700 border-b border-amber-200 flex items-center justify-between">
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="px-6 py-2 text-xs bg-[#FFF7ED] text-[#92400E] border-b border-[0.5px] border-[#F3D5B5] flex items-center justify-between font-body"
+        >
           <span>You will be logged out in 5 minutes</span>
-          <button className="inline-flex items-center gap-1 hover:text-white" onClick={() => setShowIdleWarning(false)}>
+          <button className="inline-flex items-center gap-1 hover:text-[#6B2A00]" onClick={() => setShowIdleWarning(false)}>
             <LogOut className="w-3 h-3" /> Stay active
           </button>
-        </div>
+        </motion.div>
       )}
-      <div className="h-16 flex items-center justify-between px-6">
+      <div className="h-16 flex items-center justify-between gap-4 px-6">
       {/* Search Bar */}
-      <div className="flex-1 max-w-md">
+      <div className="flex-1 max-w-lg">
         <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-[#33A1FD]" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-[#009877]" />
           <input 
             type="text" 
             placeholder="Search cases, customers, or leads..." 
-            className="w-full pl-9 pr-4 py-2 bg-[#F0F4FF] border border-blue-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-[#33A1FD]/25 focus:border-[#33A1FD] transition-all text-slate-900 placeholder:text-slate-500"
+            className="w-full pl-9 pr-4 py-2.5 bg-[#F8FAFC] border border-[0.5px] border-[#D9E1EA] rounded-[12px] text-sm font-body focus:outline-none focus:ring-2 focus:ring-[#009877]/20 focus:border-[#009877] transition-all text-slate-900 placeholder:text-slate-500"
           />
         </div>
       </div>
 
-      <div className="flex items-center gap-6">
-        {/* Live Clock */}
-        <div className="hidden md:flex flex-col items-end min-w-[120px]">
-          {mounted ? (
-            <>
-              <span className="text-sm font-semibold text-slate-900 tabular-nums">{format(time, "hh:mm:ss a")}</span>
-              <span className="text-xs text-slate-400">{format(time, "EEE, MMM d, yyyy")}</span>
-            </>
-          ) : (
-            <>
-              <span className="text-sm font-semibold text-slate-900 tabular-nums">--:--:--</span>
-              <span className="text-xs text-slate-400 text-transparent">Loading date</span>
-            </>
-          )}
-        </div>
-
-        <div className="hidden lg:flex items-center gap-3 text-sm text-slate-700 bg-[#F0F4FF] border border-blue-200 rounded-lg px-3 py-2">
-          <Wallet className="w-4 h-4 text-[#22C55E]" />
-          <span>Wallet: ₹1,82,300</span>
-          <button className="bg-[#B87333] text-white text-xs px-2.5 py-1 rounded-md font-semibold">Recharge</button>
-        </div>
+      <div className="flex items-center gap-3">
 
         <select
           value={role}
           onChange={(e) => setRole(e.target.value as typeof role)}
-          className="bg-white border border-blue-200 text-sm rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#33A1FD]/40"
+          className="hidden md:block bg-white border border-[0.5px] border-[#D9E1EA] text-sm rounded-[12px] px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#009877]/25 font-body"
         >
           {roles.map((item) => (
             <option key={item} value={item}>
@@ -80,21 +58,38 @@ export function TopHeader() {
         </select>
 
         {/* Notifications */}
-        <button className="relative p-2 text-slate-600 hover:bg-[#F0F4FF] rounded-full transition-colors">
+        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="relative p-2 text-slate-600 hover:bg-[#F5F7FA] rounded-full transition-colors">
           <Bell className="w-5 h-5" />
-          <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></span>
-        </button>
+          <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full animate-pulse"></span>
+        </motion.button>
 
-        {/* User Dropdown */}
-        <div className="flex items-center gap-3 pl-4 border-l border-blue-100 cursor-pointer hover:opacity-80 transition-opacity">
-          <div className="text-right hidden sm:block">
-            <p className="text-sm font-medium text-slate-900">Meera Jain</p>
-            <p className="text-xs text-slate-400">Console Operator</p>
-          </div>
-          <div className="w-9 h-9 bg-[#33A1FD]/15 text-[#33A1FD] rounded-full flex items-center justify-center font-bold text-sm border border-[#33A1FD]/30">
-            MJ
-          </div>
-          <span className="text-xs bg-[#33A1FD]/15 text-[#33A1FD] border border-[#33A1FD]/30 px-2 py-1 rounded-md">{role}</span>
+        <div className="relative pl-2 sm:pl-3 border-l border-[0.5px] border-[#D9E1EA]">
+          <button
+            onClick={() => setShowProfileMenu((prev) => !prev)}
+            className="inline-flex items-center gap-2 rounded-[12px] px-1.5 py-1 hover:bg-[#F5F7FA] transition-colors"
+          >
+            <div className="w-9 h-9 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center font-bold text-sm border border-[0.5px] border-[#009877]/30 font-heading">
+              MJ
+            </div>
+            <ChevronDown className="w-4 h-4 text-[#627D98]" />
+          </button>
+
+          {showProfileMenu && (
+            <div className="absolute right-0 mt-2 w-[220px] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-20">
+              <p className="text-sm font-semibold text-[#102A43] font-heading">Meera Jain</p>
+              <p className="text-xs text-[#627D98]">Console Operator</p>
+              <p className="mt-2 text-xs inline-flex bg-[#009877]/12 text-[#006F57] border border-[0.5px] border-[#009877]/30 px-2 py-1 rounded-md font-heading">{role}</p>
+              <button
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  toast.success("Logged out (demo)");
+                }}
+                className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm text-[#334E68] hover:bg-[#F5F7FA]"
+              >
+                <LogOut className="w-4 h-4" /> Logout
+              </button>
+            </div>
+          )}
         </div>
         </div>
       </div>

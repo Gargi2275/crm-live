@@ -23,9 +23,9 @@ export function ProgressStepper({ currentStep }: ProgressStepperProps) {
               <motion.div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold relative z-10 transition-colors duration-300 ${
                   isDone
-                    ? "bg-green text-white shadow-[0_0_0_4px_rgba(22,163,74,0.2)]"
+                    ? "bg-green text-black shadow-[0_0_0_4px_rgba(22,163,74,0.2)]"
                     : isActive
-                    ? "bg-accent text-primary"
+                    ? "bg-accent text-white"
                     : "bg-border text-muted"
                 }`}
               >

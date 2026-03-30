@@ -15,7 +15,7 @@ export function CTABanner() {
         <motion.h2 
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
+          viewport={{ once: true}}
           transition={{ duration: 0.6 }}
           className="text-3xl md:text-5xl font-heading font-bold text-dark mb-6"
         >

@@ -8,7 +8,7 @@ import React from "react";
 export function Breadcrumb() {
   const pathname = usePathname();
   
-  if (!pathname || pathname === "/console") {
+  if (!pathname || pathname === "/admin") {
     return null;
   }
 
@@ -16,12 +16,12 @@ export function Breadcrumb() {
   
   return (
     <div className="flex items-center text-sm text-gray-500 mb-6 bg-white px-4 py-2 rounded-lg shadow-sm border border-gray-100">
-      <Link href="/console" className="hover:text-blue-600 transition-colors flex items-center gap-1">
+      <Link href="/admin" className="hover:text-blue-600 transition-colors flex items-center gap-1">
         <Home className="w-4 h-4" />
       </Link>
       
       {paths.map((path, index) => {
-        if (path === "console") return null;
+        if (path === "admin") return null;
         
         const href = `/${paths.slice(0, index + 1).join("/")}`;
         const isLast = index === paths.length - 1;

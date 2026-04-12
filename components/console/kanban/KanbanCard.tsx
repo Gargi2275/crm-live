@@ -4,7 +4,7 @@ import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import { Clock3, AlertCircle, MoreHorizontal } from "lucide-react";
-import { type PipelineCase } from "@/lib/data/mockConsoleData";
+import { type PipelineCase } from "@/lib/kanban";
 
 interface KanbanCardProps extends PipelineCase {
   onClick: () => void;

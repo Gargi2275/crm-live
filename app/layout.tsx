@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Raleway, Poppins } from "next/font/google";
 import "./globals.css";
+import "swiper/css";
+import "swiper/css/navigation";
+import { AuthProvider } from "@/context/AuthContext";
 
 const raleway = Raleway({
   subsets: ["latin"],
@@ -28,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${raleway.variable} ${poppins.variable} font-body antialiased bg-background text-textPrimary`}>
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

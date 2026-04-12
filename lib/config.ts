@@ -10,11 +10,20 @@ export const API_ENDPOINTS = {
   AUTH: {
     REGISTER: '/auth/register/',
     LOGIN: '/auth/login/',
+    LOGIN_REQUEST_OTP: '/auth/login/request-otp/',
+    LOGIN_VERIFY_OTP: '/auth/login/verify-otp/',
     LOGOUT: '/auth/logout/',
     REFRESH: '/auth/refresh/',
     ME: '/auth/me/',
     MAGIC_LINK_REQUEST: '/auth/magic-link/request/',
     MAGIC_LINK_VERIFY: '/auth/magic-link/verify/',
+  },
+  ADMIN: {
+    LOGIN: '/admin/login/',
+    STAFF_CREATE: '/admin/staff/create/',
+    STAFF_LIST: '/admin/staff/list/',
+    STAFF_UPDATE: '/admin/staff/:staff_id/update/',
+    STAFF_DEACTIVATE: '/admin/staff/:staff_id/deactivate/',
   },
   // Services
   SERVICES: {

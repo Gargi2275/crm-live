@@ -52,18 +52,33 @@ export default function FAQsPage() {
 
   return (
     <>
-      <section className="pt-32 pb-16 px-4 sm:px-6 lg:px-8 bg-bg-page relative overflow-hidden">
+      <section className="pt-28 pb-14 px-4 sm:px-6 lg:px-8 bg-[linear-gradient(180deg,#f5f9ff_0%,#ffffff_72%)] relative overflow-hidden">
+        <div className="absolute -top-16 -right-20 h-56 w-56 rounded-full bg-[#deedff] blur-3xl opacity-80 pointer-events-none motion-safe:animate-pulse" />
         <FadeInUp className="text-center max-w-3xl mx-auto">
           <h1 className="text-4xl md:text-5xl font-heading font-bold text-primary mb-6">Frequently Asked Questions</h1>
           <p className="text-lg text-textMuted font-body mb-8">
             Got a question? We&apos;re here to answer. If you don&apos;t see your question here, feel free to contact us.
           </p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-[#d9e8ff] bg-white px-4 py-3 text-left shadow-[0_8px_22px_rgba(30,74,135,0.08)]">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-[#2b5e93] font-semibold">Before You Start</p>
+              <p className="mt-1 text-sm font-semibold text-primary">Process and document basics</p>
+            </div>
+            <div className="rounded-xl border border-[#d9e8ff] bg-white px-4 py-3 text-left shadow-[0_8px_22px_rgba(30,74,135,0.08)]">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-[#2b5e93] font-semibold">Payments</p>
+              <p className="mt-1 text-sm font-semibold text-primary">Audit fee and service credits</p>
+            </div>
+            <div className="rounded-xl border border-[#d9e8ff] bg-white px-4 py-3 text-left shadow-[0_8px_22px_rgba(30,74,135,0.08)]">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-[#2b5e93] font-semibold">Support</p>
+              <p className="mt-1 text-sm font-semibold text-primary">Secure uploads and updates</p>
+            </div>
+          </div>
         </FadeInUp>
       </section>
 
       <section className="pb-24 px-4 sm:px-6 lg:px-8 bg-bg-page">
         <div className="max-w-4xl mx-auto">
-          <FadeInUp>
+          <FadeInUp className="rounded-2xl border border-[#d9e8ff] bg-white p-2 sm:p-3 shadow-[0_12px_28px_rgba(30,74,135,0.08)]">
             <Accordion items={faqs} />
           </FadeInUp>
         </div>

@@ -1,20 +1,214 @@
 "use client";
 
 import toast from "react-hot-toast";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { CircleDashed, CircleCheck, AlertTriangle } from "lucide-react";
-
-const MOCK_TASKS = [
-  { id: "t1", caseId: "LEAD-1001", customer: "Devkishan Suthar", title: "Audit Customer - Devkishan Suthar", deadline: "Due in 2 hours", priority: "High", status: "In Progress" },
-  { id: "t2", caseId: "LEAD-1002", customer: "Priya Sharma", title: "Request additional documents", deadline: "Due in 4 hours", priority: "Normal", status: "Pending" },
-  { id: "t3", caseId: "LEAD-1003", customer: "Arjun Mehta", title: "Form review for E-Visa", deadline: "Due today", priority: "Normal", status: "In Review" },
-];
+import { useRouter } from "next/navigation";
+import {
+  AdminStaffUser,
+  StaffRole,
+  createStaffUserWithPassword,
+  deleteStaffUser,
+  deactivateStaffUser,
+  listStaffUsers,
+  resetStaffUserPassword,
+  updateStaffUser,
+} from "@/lib/admin-auth";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 
 export default function StaffPage() {
-  const tasks = MOCK_TASKS;
-  const inProgressCount = tasks.filter((task) => task.status === "In Progress").length;
-  const pendingCount = tasks.filter((task) => task.status === "Pending").length;
-  const reviewCount = tasks.filter((task) => task.status === "In Review").length;
+  const router = useRouter();
+  const { adminUser, logout } = useAdminAuth();
+  const [staffUsers, setStaffUsers] = useState<AdminStaffUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [resettingStaffId, setResettingStaffId] = useState<number | null>(null);
+  const [newStaff, setNewStaff] = useState({
+    full_name: "",
+    username: "",
+    email: "",
+    phone: "",
+    password: "",
+    role: "case_processor" as StaffRole,
+  });
+
+  const canCreate = adminUser?.role === "admin";
+  const isAdmin = adminUser?.role === "admin";
+  const visibleStaffUsers = useMemo(() => staffUsers.filter((row) => row.role !== "admin"), [staffUsers]);
+
+  const handleAuthFailure = (error: unknown): boolean => {
+    const message = error instanceof Error ? error.message : "";
+    const normalized = message.toLowerCase();
+    const isSessionError =
+      normalized.includes("expired") ||
+      normalized.includes("unauthorized") ||
+      normalized.includes("401") ||
+      normalized.includes("login again");
+
+    if (isSessionError) {
+      toast.error("Session expired. Please login again.");
+      logout();
+      router.replace("/admin/login");
+      return true;
+    }
+
+    return false;
+  };
+
+  const loadStaffUsers = async () => {
+    setLoading(true);
+    try {
+      const rows = await listStaffUsers();
+      setStaffUsers(rows);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load staff users.";
+      toast.error(message);
+      if (message.toLowerCase().includes("expired")) {
+        logout();
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadStaffUsers();
+  }, []);
+
+  const activeCount = useMemo(() => visibleStaffUsers.filter((row) => row.is_active !== false).length, [visibleStaffUsers]);
+  const inactiveCount = useMemo(() => visibleStaffUsers.filter((row) => row.is_active === false).length, [visibleStaffUsers]);
+  const hasActiveAdmin = useMemo(
+    () => staffUsers.some((row) => row.role === "admin" && row.is_active !== false),
+    [staffUsers],
+  );
+
+  const roleCounts = useMemo(() => {
+    return visibleStaffUsers.reduce<Record<string, number>>((acc, row) => {
+      acc[row.role] = (acc[row.role] || 0) + 1;
+      return acc;
+    }, {});
+  }, [visibleStaffUsers]);
+
+  const allStaffRoles: StaffRole[] = ["admin", "ops_manager", "case_processor", "reviewer", "support_agent"];
+  const allowedCreateRoles: StaffRole[] = hasActiveAdmin
+    ? ["ops_manager", "case_processor", "reviewer", "support_agent"]
+    : allStaffRoles;
+
+  useEffect(() => {
+    if (hasActiveAdmin && newStaff.role === "admin") {
+      setNewStaff((prev) => ({ ...prev, role: "case_processor" }));
+    }
+  }, [hasActiveAdmin, newStaff.role]);
+
+  const handleCreate = async () => {
+    if (!newStaff.full_name || !newStaff.username || !newStaff.password) {
+      toast.error("Full name, username, and password are required.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await createStaffUserWithPassword(newStaff);
+      toast.success("Staff user created successfully.");
+      setNewStaff({ full_name: "", username: "", email: "", phone: "", password: "", role: "case_processor" });
+      await loadStaffUsers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create staff user.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRoleChange = async (staffId: number, role: StaffRole) => {
+    setSaving(true);
+    try {
+      await updateStaffUser(staffId, { role });
+      toast.success("Role updated.");
+      await loadStaffUsers();
+    } catch (error) {
+      if (!handleAuthFailure(error)) {
+        toast.error(error instanceof Error ? error.message : "Failed to update role.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleActive = async (staffId: number, isActive: boolean) => {
+    setSaving(true);
+    try {
+      await updateStaffUser(staffId, { is_active: isActive });
+      toast.success("Status updated.");
+      if (!isActive && adminUser?.id === staffId) {
+        logout();
+        router.replace("/admin/login");
+        return;
+      }
+      await loadStaffUsers();
+    } catch (error) {
+      if (!handleAuthFailure(error)) {
+        toast.error(error instanceof Error ? error.message : "Failed to update status.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeactivate = async (staffId: number) => {
+    setSaving(true);
+    try {
+      await deactivateStaffUser(staffId);
+      toast.success("Staff user deactivated.");
+      if (adminUser?.id === staffId) {
+        logout();
+        router.replace("/admin/login");
+        return;
+      }
+      await loadStaffUsers();
+    } catch (error) {
+      if (!handleAuthFailure(error)) {
+        toast.error(error instanceof Error ? error.message : "Failed to deactivate user.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (staffId: number) => {
+    if (!confirm("Delete this staff user permanently?")) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await deleteStaffUser(staffId);
+      toast.success("Staff user deleted.");
+      await loadStaffUsers();
+    } catch (error) {
+      if (!handleAuthFailure(error)) {
+        toast.error(error instanceof Error ? error.message : "Failed to delete user.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleResetPassword = async (staffId: number) => {
+    const password = prompt("Enter new password for this staff user:");
+    if (!password) {
+      return;
+    }
+    setResettingStaffId(staffId);
+    try {
+      await resetStaffUserPassword(staffId, password);
+      toast.success("Password reset successfully.");
+    } catch (error) {
+      if (!handleAuthFailure(error)) {
+        toast.error(error instanceof Error ? error.message : "Failed to reset password.");
+      }
+    } finally {
+      setResettingStaffId(null);
+    }
+  };
 
   return (
     <motion.div
@@ -23,100 +217,183 @@ export default function StaffPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="animate-in fade-in zoom-in-95 duration-500 max-w-[1300px] mx-auto space-y-6 font-body"
     >
-      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Orders / Cases</h1>
+      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Staff User Management</h1>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-3">
-          <p className="text-xs text-[#627D98]">In progress</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><CircleDashed className="w-4 h-4 text-[#0B69B7]" />{inProgressCount}</p>
+          <p className="text-xs text-[#627D98]">Total staff</p>
+          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffUsers.length}</p>
         </div>
         <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-3">
-          <p className="text-xs text-[#627D98]">Pending</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-[#9C4F17]" />{pendingCount}</p>
+          <p className="text-xs text-[#627D98]">Active</p>
+          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{activeCount}</p>
         </div>
         <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-3">
-          <p className="text-xs text-[#627D98]">In review</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><CircleCheck className="w-4 h-4 text-[#009877]" />{reviewCount}</p>
+          <p className="text-xs text-[#627D98]">Inactive</p>
+          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{inactiveCount}</p>
         </div>
       </div>
 
-      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-        <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-3">My Daily Worklist</h2>
-        <div className="space-y-3">
-            {tasks.map((task) => (
-              <motion.div key={task.id} whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 shadow-sm">
-                <div className="flex justify-between gap-2 flex-wrap">
-                  <div>
-                    <p className="text-[#102A43] text-sm font-medium">{task.title}</p>
-                    <p className="text-xs text-[#627D98]">{task.customer} • {task.caseId} • {task.deadline}</p>
-                  </div>
-                  <div className={`text-xs px-2 py-1 rounded-full ${
-                    task.status === "In Progress" ? "bg-[#33A1FD]/12 text-[#0B69B7]" :
-                    task.status === "Pending" ? "bg-[#B87333]/12 text-[#9C4F17]" :
-                    "bg-[#009877]/12 text-[#006F57]"
-                  }`}>{task.status}</div>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  <button className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full" onClick={() => toast.success("Requested documents")}>Request Documents</button>
-                  <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full">Generate WhatsApp Template</button>
-                  <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full">Mark Audit Complete</button>
-                  <button className="text-xs bg-[#B87333]/12 text-[#9C4F17] border-[0.5px] border-[#B87333]/35 px-2 py-1 rounded-full">Move to Next Stage</button>
-                  <button className="text-xs bg-[#B42318]/12 text-[#B42318] border-[0.5px] border-[#B42318]/25 px-2 py-1 rounded-full">Upload & Tag Documents</button>
-                </div>
-              </motion.div>
-            ))}
+      {canCreate && (
+        <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
+          <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-3">Create Staff User</h2>
+          {hasActiveAdmin ? (
+            <p className="mb-3 text-xs text-[#9C4F17]">
+              Only one active admin is allowed. Deactivate or change the current admin role first.
+            </p>
+          ) : null}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input
+              value={newStaff.full_name}
+              onChange={(e) => setNewStaff((prev) => ({ ...prev, full_name: e.target.value }))}
+              placeholder="Full name"
+              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+            />
+            <input
+              value={newStaff.username}
+              onChange={(e) => setNewStaff((prev) => ({ ...prev, username: e.target.value.toLowerCase() }))}
+              placeholder="Username"
+              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+            />
+            <input
+              value={newStaff.email}
+              onChange={(e) => setNewStaff((prev) => ({ ...prev, email: e.target.value }))}
+              placeholder="Email (optional)"
+              type="email"
+              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+            />
+            <input
+              value={newStaff.phone}
+              onChange={(e) => setNewStaff((prev) => ({ ...prev, phone: e.target.value }))}
+              placeholder="Phone (optional)"
+              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+            />
+            <input
+              value={newStaff.password}
+              type="password"
+              onChange={(e) => setNewStaff((prev) => ({ ...prev, password: e.target.value }))}
+              placeholder="Password"
+              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+            />
+            <select
+              value={newStaff.role}
+              onChange={(e) => setNewStaff((prev) => ({ ...prev, role: e.target.value as StaffRole }))}
+              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+            >
+              {allowedCreateRoles.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
           </div>
+          <button
+            onClick={handleCreate}
+            disabled={saving}
+            className="mt-3 rounded-[10px] bg-[#009877] px-4 py-2 text-sm font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Create User"}
+          </button>
         </div>
-      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-        <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-3">Accountability Panel</h2>
-        <div className="space-y-1 text-xs text-[#486581]">
-          <p>Requested docs | Devkishan Suthar | 10:34 AM</p>
-          <p>Audit complete | Priya Sharma | 10:12 AM</p>
-          <p>Moved stage to REVIEW_PENDING | Arjun Mehta | 09:51 AM</p>
-        </div>
-      </div>
+      )}
 
       <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
-        <h2 className="text-[#102A43] font-heading font-semibold mb-2">Operator quick notes</h2>
-        <p className="text-sm text-[#486581]">Use document requests first for missing data, then move cases to next stage once attachments are tagged.</p>
+        <h2 className="text-[#102A43] font-heading font-semibold mb-2">Role distribution</h2>
+        <p className="text-sm text-[#486581]">
+          {Object.entries(roleCounts)
+            .map(([role, count]) => `${role}: ${count}`)
+            .join(" | ") || "No staff records found."}
+        </p>
       </div>
 
       <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] overflow-hidden">
         <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
-          <h2 className="text-sm font-heading font-semibold text-[#102A43]">Task queue table</h2>
-          <span className="text-xs text-[#627D98]">Dummy data</span>
+          <h2 className="text-sm font-heading font-semibold text-[#102A43]">Staff users</h2>
+          <span className="text-xs text-[#627D98]">{loading ? "Loading..." : `${visibleStaffUsers.length} records`}</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-[#F5F7FA] text-[#486581]">
               <tr>
-                <th className="px-4 py-2.5 text-left">Case</th>
-                <th className="px-4 py-2.5 text-left">Task</th>
-                <th className="px-4 py-2.5 text-left">Deadline</th>
-                <th className="px-4 py-2.5 text-left">Priority</th>
+                <th className="px-4 py-2.5 text-left">Name</th>
+                <th className="px-4 py-2.5 text-left">Email</th>
+                <th className="px-4 py-2.5 text-left">Role</th>
+                <th className="px-4 py-2.5 text-left">Active</th>
+                <th className="px-4 py-2.5 text-left">Last login</th>
+                <th className="px-4 py-2.5 text-left">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              {tasks.map((task) => (
-                <tr key={task.id}>
-                  <td className="px-4 py-2.5">{task.caseId}</td>
-                  <td className="px-4 py-2.5">{task.title}</td>
-                  <td className="px-4 py-2.5">{task.deadline}</td>
-                  <td className="px-4 py-2.5">{task.priority}</td>
+              {visibleStaffUsers.map((row) => (
+                <tr key={row.id}>
+                  <td className="px-4 py-2.5">{row.full_name}</td>
+                  <td className="px-4 py-2.5">{row.email}</td>
+                  <td className="px-4 py-2.5">
+                    {isAdmin ? (
+                      <select
+                        value={row.role}
+                        onChange={(e) => handleRoleChange(row.id, e.target.value as StaffRole)}
+                        className="rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-xs"
+                      >
+                        {(hasActiveAdmin && row.role !== "admin"
+                          ? ["ops_manager", "case_processor", "reviewer", "support_agent"]
+                          : allStaffRoles).map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      row.role
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {isAdmin ? (
+                      <input
+                        type="checkbox"
+                        checked={row.is_active !== false}
+                        onChange={(e) => handleToggleActive(row.id, e.target.checked)}
+                      />
+                    ) : row.is_active !== false ? (
+                      "Yes"
+                    ) : (
+                      "No"
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">{row.last_login ? new Date(row.last_login).toLocaleString() : "Never"}</td>
+                  <td className="px-4 py-2.5">
+                    {isAdmin && (
+                      <div className="flex flex-wrap gap-2">
+                        {row.is_active !== false && (
+                          <button
+                            className="rounded-[8px] bg-[#B42318]/10 px-2 py-1 text-xs text-[#B42318]"
+                            onClick={() => handleDeactivate(row.id)}
+                          >
+                            Deactivate
+                          </button>
+                        )}
+                        <button
+                          className="rounded-[8px] bg-[#0B69B7]/10 px-2 py-1 text-xs text-[#0B69B7] disabled:opacity-50"
+                          onClick={() => handleResetPassword(row.id)}
+                          disabled={resettingStaffId === row.id}
+                        >
+                          {resettingStaffId === row.id ? "Resetting..." : "Reset Password"}
+                        </button>
+                        <button
+                          className="rounded-[8px] bg-[#7A1E12]/10 px-2 py-1 text-xs text-[#7A1E12]"
+                          onClick={() => handleDelete(row.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-
-      <details className="bg-white border border-[#D9E1EA] rounded-[12px] p-3 group">
-        <summary className="list-none cursor-pointer text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
-          Case worker SOP (quick)
-          <span className="text-[#627D98] group-open:rotate-180 transition-transform">⌄</span>
-        </summary>
-        <p className="mt-2 text-sm text-[#486581]">Always validate identity documents first, write one clear note per action, and only move stage after checklist completion.</p>
-      </details>
     </motion.div>
   );
 }

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { motion } from "framer-motion";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import { 
   BarChart3,
   Briefcase,
@@ -21,10 +22,11 @@ import {
 
 export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCollapsed: (val: boolean) => void }) {
   const pathname = usePathname();
+  const { adminUser } = useAdminAuth();
 
-  const menuItems = [
+  const baseMenuItems = [
     { name: "Dashboard", href: "/admin", icon: BarChart3 },
-    { name: "Orders / Cases", href: "/admin/staff", icon: Briefcase },
+    { name: "Staff Management", href: "/admin/staff", icon: Briefcase },
     { name: "Kanban Pipeline", href: "/admin/kanban", icon: KanbanSquare },
     { name: "Reports", href: "/admin/reports", icon: PieChart },
     { name: "NDR / SLA Alerts", href: "/admin/alerts", icon: TriangleAlert },
@@ -33,6 +35,24 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
     { name: "Billing", href: "/admin/billing", icon: CreditCard },
     { name: "Settings", href: "/admin/settings", icon: Settings },
   ];
+
+  const role = adminUser?.role;
+  const menuItems = baseMenuItems.filter((item) => {
+    if (role === "admin") return true;
+    if (role === "ops_manager") {
+      return item.href !== "/admin/revenue" && item.href !== "/admin/billing" && item.href !== "/admin/staff";
+    }
+    if (role === "case_processor") {
+      return ["/admin", "/admin/kanban"].includes(item.href);
+    }
+    if (role === "reviewer") {
+      return ["/admin", "/admin/kanban", "/admin/reports"].includes(item.href);
+    }
+    if (role === "support_agent") {
+      return ["/admin"].includes(item.href);
+    }
+    return item.href === "/admin";
+  });
 
   return (
     <aside 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/ui/console/StatCard";
 import {
   Users,
@@ -30,56 +30,87 @@ import {
   Legend,
 } from "recharts";
 import { useConsole } from "@/components/console/ConsoleContext";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
-  KPI_SNAPSHOT,
-  DAILY_REVENUE,
-  MONTHLY_REVENUE,
-  SERVICE_REVENUE_BREAKDOWN,
-  STAFF_MEMBERS,
-  ACCESS_LOGS,
-} from "@/lib/data/mockConsoleData";
+  getAdminDashboardOverview,
+  type AdminDashboardOverview,
+} from "@/lib/admin-auth";
 import toast from "react-hot-toast";
 
 export default function ConsoleDashboard() {
-  const { role, autoAssignTasks } = useConsole();
+  const { autoAssignTasks } = useConsole();
+  const { adminUser } = useAdminAuth();
   const [period, setPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
-  const isFounderView = role === "Admin / CEO";
-  const isOpsView = role === "Operations Manager";
-  const isStaffView = role === "Staff / Case Worker";
+  const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+  const userRole = adminUser?.role;
+  const roleLabelMap: Record<string, string> = {
+    admin: "Admin",
+    ops_manager: "Operations Manager",
+    case_processor: "Case Processor",
+    reviewer: "Reviewer",
+    support_agent: "Support Agent",
+  };
+  const roleLabel = userRole ? roleLabelMap[userRole] || userRole : "Staff";
+  const isFounderView = userRole === "admin";
+  const isOpsView = userRole === "ops_manager";
+  const isStaffView = userRole === "case_processor" || userRole === "reviewer" || userRole === "support_agent";
   const chartColors = ["#009877", "#33A1FD", "#B87333", "#DCE7F3"];
-  const pipelineOverview = [
-    { stage: "Lead", openCases: 24, avgAge: "2h 10m", breached: 1 },
-    { stage: "Audit", openCases: 17, avgAge: "3h 08m", breached: 3 },
-    { stage: "Payment", openCases: 11, avgAge: "5h 42m", breached: 2 },
-    { stage: "Document Upload", openCases: 14, avgAge: "8h 26m", breached: 4 },
-    { stage: "Application Preparation", openCases: 9, avgAge: "4h 11m", breached: 1 },
-    { stage: "Final Submission", openCases: 6, avgAge: "9h 04m", breached: 2 },
-    { stage: "Delivery", openCases: 13, avgAge: "1h 32m", breached: 0 },
-  ];
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        const payload = await getAdminDashboardOverview();
+        setDashboardData(payload);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load dashboard overview.");
+      }
+    };
+
+    void loadDashboard();
+  }, []);
+
+  const kpiSnapshot = dashboardData?.kpi_snapshot ?? {
+    total_leads: 0,
+    todays_leads: 0,
+    converted: 0,
+    conversion: "0%",
+    revenue_today: 0,
+    pending_payments: 0,
+    avg_ticket_size: 0,
+  };
+  const dailyRevenue = dashboardData?.daily_revenue ?? [];
+  const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
+  const serviceRevenueBreakdown = dashboardData?.service_revenue_breakdown ?? [];
+  const staffMembers = dashboardData?.staff_members ?? [];
+  const accessLogs = dashboardData?.access_logs ?? [];
+  const pipelineOverview = dashboardData?.pipeline_overview ?? [];
+  const failedLogins = dashboardData?.failed_logins ?? 0;
 
   const healthMetrics = useMemo(
     () => [
-      ["Total Leads Generated", KPI_SNAPSHOT.totalLeads],
-      ["Leads Converted", KPI_SNAPSHOT.converted],
-      ["Conversion %", KPI_SNAPSHOT.conversion],
-      ["Revenue per Service Type", "OCI 48% | Passport 25% | E-Visa 19%"],
-      ["Pending Payments", `₹${KPI_SNAPSHOT.pendingPayments.toLocaleString("en-IN")}`],
-      ["Refunds/Disputes", "₹4,500"],
-      ["Audits Requested", "38"],
-      ["Audit Success Ratio", "91%"],
-      ["Avg Processing Time", "14.2h"],
-      ["Customer Satisfaction Rating", "4.7 / 5"],
+      ["Total Leads Generated", dashboardData?.health_metrics.total_leads ?? 0],
+      ["Leads Converted", dashboardData?.health_metrics.leads_converted ?? 0],
+      ["Conversion %", dashboardData?.health_metrics.conversion ?? "0%"],
+      ["Revenue per Service Type", dashboardData?.health_metrics.revenue_per_service ?? "N/A"],
+      ["Pending Payments", `₹${(dashboardData?.health_metrics.pending_payments ?? 0).toLocaleString("en-IN")}`],
+      ["Refunds/Disputes", `₹${(dashboardData?.health_metrics.refunds_disputes ?? 0).toLocaleString("en-IN")}`],
+      ["Audits Requested", dashboardData?.health_metrics.audits_requested ?? 0],
+      ["Audit Success Ratio", dashboardData?.health_metrics.audit_success_ratio ?? "0%"],
+      ["Avg Processing Time", dashboardData?.health_metrics.avg_processing_time ?? "0h"],
+      ["Customer Satisfaction Rating", dashboardData?.health_metrics.customer_satisfaction ?? "0 / 5"],
     ],
-    [],
+    [dashboardData],
   );
 
+  const insightIconMap = useMemo(() => ({ TrendingUp, Target, Workflow }), []);
+
   const revenueInsights = useMemo(
-    () => [
-      { label: "Profitability tracking", value: "34.8%", note: "Margin this month", icon: TrendingUp },
-      { label: "Cost per acquisition", value: "₹1,240", note: "Marketing linked", icon: Target },
-      { label: "Revenue per service", value: "OCI leading", note: "48% contribution", icon: Workflow },
-    ],
-    [],
+    () =>
+      (dashboardData?.revenue_insights ?? []).map((item) => ({
+        ...item,
+        icon: insightIconMap[item.icon as keyof typeof insightIconMap] ?? Workflow,
+      })),
+    [dashboardData, insightIconMap],
   );
 
   return (
@@ -87,14 +118,14 @@ export default function ConsoleDashboard() {
       <div className="flex justify-between items-center mb-2">
         <div>
           <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">FlyOCI Console</h1>
-          <p className="text-[#486581] text-sm mt-1">{role} dashboard overview</p>
+          <p className="text-[#486581] text-sm mt-1">{roleLabel} dashboard overview</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
         <StatCard 
           title="Total Leads" 
-          value={KPI_SNAPSHOT.totalLeads}
+          value={kpiSnapshot.total_leads}
           trend="Last 30 days"
           isPositive={true} 
           icon={Users}
@@ -103,7 +134,7 @@ export default function ConsoleDashboard() {
         />
         <StatCard 
           title="Today's Leads" 
-          value="12"
+          value={kpiSnapshot.todays_leads}
           trend="Live"
           isPositive={true} 
           icon={Briefcase}
@@ -112,8 +143,8 @@ export default function ConsoleDashboard() {
         />
         <StatCard 
           title="Leads Converted"
-          value={KPI_SNAPSHOT.converted}
-          trend={KPI_SNAPSHOT.conversion}
+          value={kpiSnapshot.converted}
+          trend={kpiSnapshot.conversion}
           isPositive={true} 
           icon={SearchCheck}
           colorClass="text-[#009877]"
@@ -121,7 +152,7 @@ export default function ConsoleDashboard() {
         />
         <StatCard 
           title="Total Revenue ₹" 
-          value={`₹${KPI_SNAPSHOT.revenueToday.toLocaleString("en-IN")}`}
+          value={`₹${kpiSnapshot.revenue_today.toLocaleString("en-IN")}`}
           trend="Today"
           isPositive={true}
           icon={IndianRupee}
@@ -130,7 +161,7 @@ export default function ConsoleDashboard() {
         />
         <StatCard 
           title="Avg. Ticket Size" 
-          value="₹5,845"
+          value={`₹${kpiSnapshot.avg_ticket_size.toLocaleString("en-IN")}`}
           trend="Rolling"
           isPositive={true} 
           icon={Banknote}
@@ -139,7 +170,7 @@ export default function ConsoleDashboard() {
         />
         <StatCard 
           title="Pending Payments" 
-          value={`₹${KPI_SNAPSHOT.pendingPayments.toLocaleString("en-IN")}`}
+          value={`₹${kpiSnapshot.pending_payments.toLocaleString("en-IN")}`}
           trend="Attention"
           isPositive={false}
           icon={Clock}
@@ -160,7 +191,7 @@ export default function ConsoleDashboard() {
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            {STAFF_MEMBERS.map((item) => (
+            {staffMembers.map((item) => (
               <div key={item.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
                 <p className="text-[#102A43] font-heading font-semibold">{item.name} ({item.initials})</p>
                 <p className="text-xs text-[#627D98]">{item.role}</p>
@@ -188,7 +219,7 @@ export default function ConsoleDashboard() {
           <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">Revenue Dashboard</h2>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={DAILY_REVENUE}>
+              <ComposedChart data={dailyRevenue}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
                 <XAxis dataKey="day" tick={{ fill: "#486581", fontSize: 12 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: "#486581", fontSize: 12 }} axisLine={false} tickLine={false} />
@@ -208,8 +239,8 @@ export default function ConsoleDashboard() {
           <div className="h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={SERVICE_REVENUE_BREAKDOWN} dataKey="value" nameKey="name" outerRadius={90}>
-                  {SERVICE_REVENUE_BREAKDOWN.map((_, index) => (
+                <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={90}>
+                  {serviceRevenueBreakdown.map((_, index) => (
                     <Cell key={index} fill={chartColors[index % chartColors.length]} />
                   ))}
                 </Pie>
@@ -342,7 +373,7 @@ export default function ConsoleDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E5EAF0]">
-                  {STAFF_MEMBERS.map((staff) => (
+                  {staffMembers.map((staff) => (
                     <tr key={staff.id} className="hover:bg-[#F8FAFC] transition-colors">
                       <td className="px-5 py-3 text-[#102A43] font-medium">{staff.name}</td>
                       <td className="px-5 py-3 text-center text-[#0B69B7]">{staff.assigned}</td>
@@ -364,11 +395,11 @@ export default function ConsoleDashboard() {
             <div className="space-y-3">
               <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between">
                 <span className="text-[#486581] text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-[#B42318]" /> Failed logins</span>
-                <span className="text-[#B42318] font-heading font-semibold">6</span>
+                <span className="text-[#B42318] font-heading font-semibold">{failedLogins}</span>
               </div>
               <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
                 <p className="text-[#486581] text-sm mb-2">Recent data access log</p>
-                {ACCESS_LOGS.map((log) => (
+                {accessLogs.map((log) => (
                   <p key={`${log.staff}-${log.time}`} className="text-xs text-[#627D98]">
                     {log.staff} | {log.file} | {log.time}
                   </p>
@@ -415,7 +446,7 @@ export default function ConsoleDashboard() {
         <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">Monthly Revenue Trend</h2>
         <div className="h-[220px]">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={MONTHLY_REVENUE}>
+            <ComposedChart data={monthlyRevenue}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
               <XAxis dataKey="month" tick={{ fill: "#486581", fontSize: 12 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: "#486581", fontSize: 12 }} axisLine={false} tickLine={false} />

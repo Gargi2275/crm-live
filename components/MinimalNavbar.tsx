@@ -1,21 +1,62 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, MessageCircle, Menu, X } from "lucide-react";
+import { FileText, MessageCircle, Menu, X, CircleUserRound } from "lucide-react";
 import { useEVisa } from "@/context/EVisaContext";
+import { useAuth } from "@/context/AuthContext";
 import Image from "next/image";
 
 export function MinimalNavbar() {
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
   const { data } = useEVisa();
+  const { isAuthenticated, loading, logout } = useAuth();
   const isRegistrationPage = pathname === "/indian-e-visa";
 
   // Show file number badge on pages 2-5
   const showFileNumber = !isRegistrationPage && data.fileNumber;
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      setMobileMenuOpen(false);
+      router.push("/");
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+
+    const onOutsideClick = (event: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onOutsideClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [profileMenuOpen]);
 
   return (
     <motion.nav
@@ -54,12 +95,53 @@ export function MinimalNavbar() {
               <Link href="/contact" className="font-body font-semibold text-[#486581] hover:text-primary transition-colors">
                 Contact
               </Link>
-              <Link
-                href="/track"
-                className="rounded-lg border border-[#009877] px-4 py-2 text-sm font-semibold text-[#006F57] transition-colors hover:bg-[#ECFAF5]"
-              >
-                Track
-              </Link>
+              {loading ? (
+                <span className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-500">
+                  Loading...
+                </span>
+              ) : isAuthenticated ? (
+                <div className="relative" ref={profileMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setProfileMenuOpen((prev) => !prev)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#bfd3ff] bg-white text-primary hover:bg-[#f6faff]"
+                    aria-label="Open profile menu"
+                    aria-haspopup="menu"
+                    aria-expanded={profileMenuOpen}
+                  >
+                    <CircleUserRound className="h-5 w-5" />
+                  </button>
+                  {profileMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-44 rounded-xl border border-[#d6e2f5] bg-white shadow-[0_14px_34px_rgba(20,48,96,0.15)] p-2" role="menu">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          router.push("/dashboard");
+                        }}
+                        className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-[#294d84] hover:bg-[#f6faff]"
+                      >
+                        Dashboard
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-[#d04b4b] hover:bg-[#fff1f1] disabled:opacity-60"
+                      >
+                        {isLoggingOut ? "Logging out..." : "Logout"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Link
+                  href="/track"
+                  className="rounded-lg border border-[#009877] px-4 py-2 text-sm font-semibold text-[#006F57] transition-colors hover:bg-[#ECFAF5]"
+                >
+                  Track
+                </Link>
+              )}
             </>
           ) : (
             <>
@@ -81,6 +163,42 @@ export function MinimalNavbar() {
                 <MessageCircle className="w-5 h-5" />
                 Need Help?
               </a>
+              {!loading && isAuthenticated && (
+                <div className="relative" ref={profileMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setProfileMenuOpen((prev) => !prev)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#bfd3ff] bg-white text-primary hover:bg-[#f6faff]"
+                    aria-label="Open profile menu"
+                    aria-haspopup="menu"
+                    aria-expanded={profileMenuOpen}
+                  >
+                    <CircleUserRound className="h-5 w-5" />
+                  </button>
+                  {profileMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-44 rounded-xl border border-[#d6e2f5] bg-white shadow-[0_14px_34px_rgba(20,48,96,0.15)] p-2" role="menu">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          router.push("/dashboard");
+                        }}
+                        className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-[#294d84] hover:bg-[#f6faff]"
+                      >
+                        Dashboard
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-[#d04b4b] hover:bg-[#fff1f1] disabled:opacity-60"
+                      >
+                        {isLoggingOut ? "Logging out..." : "Logout"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -156,6 +274,29 @@ export function MinimalNavbar() {
                   >
                     Contact
                   </Link>
+                  {loading ? (
+                    <span className="font-body font-bold text-lg text-slate-500">Loading...</span>
+                  ) : isAuthenticated ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          router.push("/dashboard");
+                        }}
+                        className="text-left font-body font-bold text-lg text-primary"
+                      >
+                        Dashboard
+                      </button>
+                      <button
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="text-left font-body font-bold text-lg text-red-600 disabled:opacity-60"
+                      >
+                        {isLoggingOut ? "Logging out..." : "Logout"}
+                      </button>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -181,6 +322,27 @@ export function MinimalNavbar() {
                     <MessageCircle className="w-5 h-5" />
                     Need Help?
                   </a>
+                  {!loading && isAuthenticated && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          router.push("/dashboard");
+                        }}
+                        className="text-left font-body font-bold text-lg text-primary"
+                      >
+                        Dashboard
+                      </button>
+                      <button
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="text-left font-body font-bold text-lg text-red-600 disabled:opacity-60"
+                      >
+                        {isLoggingOut ? "Logging out..." : "Logout"}
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </motion.div>

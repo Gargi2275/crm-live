@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2,Check } from "lucide-react";
@@ -12,16 +12,28 @@ import { FileDropZone } from "@/components/FileDropZone";
 import { AnimatedCheckmark } from "@/components/AnimatedCheckmark";
 import { eVisaApi } from "@/lib/api-client";
 
+const PASSPORT_MAX_BYTES = 5 * 1024 * 1024;
+const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+const SUPPORTING_MAX_BYTES = 5 * 1024 * 1024;
+const PASSPORT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const PHOTO_TYPES = new Set(["image/jpeg", "image/png"]);
+const SUPPORTING_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+function formatMb(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data, updateData } = useEVisa();
   const caseNumber = searchParams.get("case") || data.fileNumber || "";
+  const emailFromQuery = searchParams.get("email") || "";
 
   const [passportRef, setPassportRef] = useState<File | null>(null);
   const [photoRef, setPhotoRef] = useState<File | null>(null);
   const [supportingFiles, setSupportingFiles] = useState<File[]>([]);
-  const [applicantEmail, setApplicantEmail] = useState(data.email || "");
+  const [applicantEmail, setApplicantEmail] = useState(emailFromQuery || data.email || "");
   
   const [arrivalDate, setArrivalDate] = useState("");
   const [portOfEntry, setPortOfEntry] = useState("");
@@ -33,14 +45,159 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [passportError, setPassportError] = useState("");
+  const [photoError, setPhotoError] = useState("");
+  const [supportingError, setSupportingError] = useState("");
 
   const fileNumber = caseNumber || "FO-EV-...";
 
+  useEffect(() => {
+    // Rehydrate draft fields after refresh. Keep user-typed values if already present.
+    if (data.email && !applicantEmail) {
+      setApplicantEmail(data.email);
+    }
+    if (data.travelDetails.arrivalDate && !arrivalDate) {
+      setArrivalDate(data.travelDetails.arrivalDate);
+    }
+    if (data.travelDetails.portOfEntry && !portOfEntry) {
+      setPortOfEntry(data.travelDetails.portOfEntry);
+    }
+    if (data.travelDetails.addressInIndia && !addressInIndia) {
+      setAddressInIndia(data.travelDetails.addressInIndia);
+    }
+    if (data.travelDetails.emergencyContact && !emergencyContact) {
+      setEmergencyContact(data.travelDetails.emergencyContact);
+    }
+    if (data.travelDetails.additionalNotes && !notes) {
+      setNotes(data.travelDetails.additionalNotes);
+    }
+  }, [
+    data.email,
+    data.travelDetails.arrivalDate,
+    data.travelDetails.portOfEntry,
+    data.travelDetails.addressInIndia,
+    data.travelDetails.emergencyContact,
+    data.travelDetails.additionalNotes,
+    applicantEmail,
+    arrivalDate,
+    portOfEntry,
+    addressInIndia,
+    emergencyContact,
+    notes,
+  ]);
+
+  useEffect(() => {
+    updateData({
+      fileNumber: caseNumber || data.fileNumber,
+      email: applicantEmail || data.email,
+      travelDetails: {
+        arrivalDate,
+        portOfEntry,
+        addressInIndia,
+        emergencyContact,
+        additionalNotes: notes,
+      },
+    });
+  }, [
+    caseNumber,
+    applicantEmail,
+    arrivalDate,
+    portOfEntry,
+    addressInIndia,
+    emergencyContact,
+    notes,
+    updateData,
+    data.fileNumber,
+    data.email,
+  ]);
+
   // Validate Required Fields
-  const isFormValid = passportRef && photoRef && arrivalDate && portOfEntry && addressInIndia && applicantEmail && caseNumber;
+  const isFormValid =
+    passportRef &&
+    photoRef &&
+    arrivalDate &&
+    portOfEntry &&
+    addressInIndia &&
+    applicantEmail &&
+    caseNumber &&
+    !passportError &&
+    !photoError &&
+    !supportingError;
+
+  const handlePassportUpload = (file: File | null) => {
+    setUploadError("");
+    setPassportError("");
+    if (!file) {
+      setPassportRef(null);
+      return;
+    }
+    if (!PASSPORT_TYPES.has(file.type)) {
+      setPassportRef(null);
+      setPassportError("Passport file must be JPG, PNG, or PDF.");
+      return;
+    }
+    if (file.size > PASSPORT_MAX_BYTES) {
+      setPassportRef(null);
+      setPassportError(`Passport file is too large (${formatMb(file.size)}). Maximum allowed is 5 MB.`);
+      return;
+    }
+    setPassportRef(file);
+  };
+
+  const handlePhotoUpload = (file: File | null) => {
+    setUploadError("");
+    setPhotoError("");
+    if (!file) {
+      setPhotoRef(null);
+      return;
+    }
+    if (!PHOTO_TYPES.has(file.type)) {
+      setPhotoRef(null);
+      setPhotoError("Photograph must be JPG or PNG only.");
+      return;
+    }
+    if (file.size > PHOTO_MAX_BYTES) {
+      setPhotoRef(null);
+      setPhotoError(`Photograph is too large (${formatMb(file.size)}). Maximum allowed is 2 MB.`);
+      return;
+    }
+    setPhotoRef(file);
+  };
+
+  const handleSupportingFilesChange = (files: File[]) => {
+    setUploadError("");
+    setSupportingError("");
+    if (!files.length) {
+      setSupportingFiles([]);
+      return;
+    }
+
+    for (const file of files) {
+      if (!SUPPORTING_TYPES.has(file.type)) {
+        setSupportingFiles([]);
+        setSupportingError("Supporting documents must be JPG, PNG, or PDF.");
+        return;
+      }
+      if (file.size > SUPPORTING_MAX_BYTES) {
+        setSupportingFiles([]);
+        setSupportingError(`Supporting file ${file.name} is too large (${formatMb(file.size)}). Maximum allowed is 5 MB each.`);
+        return;
+      }
+    }
+
+    setSupportingFiles(files);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!passportRef) {
+      setPassportError("Passport bio page is required.");
+    }
+    if (!photoRef) {
+      setPhotoError("Applicant photograph is required.");
+    }
+
     if (!isFormValid) return;
 
     setUploadError("");
@@ -50,7 +207,7 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append("case_number", caseNumber);
-      formData.append("email", applicantEmail.toLowerCase());
+      formData.append("email", applicantEmail);
       formData.append("passport_bio_page", passportRef as File);
       formData.append("applicant_photograph", photoRef as File);
       formData.append("intended_arrival_date", arrivalDate);
@@ -77,7 +234,12 @@ export default function UploadPage() {
         },
       });
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : "Upload failed");
+      const message = error instanceof Error ? error.message : "Upload failed";
+      if (message.toLowerCase().includes("email does not match case owner")) {
+        setUploadError("Email does not match this case. Please use the same email used during registration/payment.");
+      } else {
+        setUploadError(message);
+      }
     } finally {
       setIsUploading(false);
     }
@@ -167,6 +329,9 @@ export default function UploadPage() {
             <p className="font-body text-muted text-[16px] text-center max-w-[440px] mx-auto">
               Application cannot be submitted until uploads are complete.
             </p>
+            <p className="font-body text-[13px] text-center text-primary/80 mt-3">
+              All uploaded files are encrypted using AES-256 before secure storage.
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -187,7 +352,8 @@ export default function UploadPage() {
                 accept=".pdf,image/jpeg,image/png"
                 maxSizeMsg="Upload a clear photo or scan of the photo page of your passport."
                 file={passportRef}
-                onUpload={(f) => setPassportRef(f)}
+                onUpload={handlePassportUpload}
+                error={passportError}
               />
             </div>
 
@@ -215,7 +381,8 @@ export default function UploadPage() {
                 accept="image/jpeg,image/png"
                 maxSizeMsg="Ensure your photo meets the requirements above to avoid delays."
                 file={photoRef}
-                onUpload={(f) => setPhotoRef(f)}
+                onUpload={handlePhotoUpload}
+                error={photoError}
               />
             </div>
 
@@ -292,7 +459,8 @@ export default function UploadPage() {
                <input 
                   type="file" 
                   multiple 
-                onChange={(e) => setSupportingFiles(Array.from(e.target.files || []))}
+                  accept=".pdf,image/jpeg,image/png"
+                  onChange={(e) => handleSupportingFilesChange(Array.from(e.target.files || []))}
                   className="block w-full font-body text-sm text-muted
                   file:mr-4 file:py-2 file:px-4
                   file:rounded-btn file:border-0
@@ -300,6 +468,9 @@ export default function UploadPage() {
                   file:bg-primary/5 file:text-primary
                   hover:file:bg-primary/10 file:transition-colors mb-6"
                />
+               {supportingError && (
+                 <p className="text-sm text-red-600 font-semibold mb-4">{supportingError}</p>
+               )}
 
                <label className="block font-body font-bold text-primary text-sm mb-2">Notes to FlyOCI team</label>
                <textarea

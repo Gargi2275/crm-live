@@ -11,10 +11,17 @@ interface OTPInputProps {
 export function OTPInput({ onComplete, error, success }: OTPInputProps) {
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const lastSubmittedOtpRef = useRef<string>("");
 
   useEffect(() => {
-    if (digits.every((d) => d !== "") && digits.length === 6) {
-      onComplete(digits.join(""));
+    const otp = digits.join("");
+    const isComplete = digits.every((d) => d !== "") && otp.length === 6;
+    if (isComplete && otp !== lastSubmittedOtpRef.current) {
+      lastSubmittedOtpRef.current = otp;
+      onComplete(otp);
+    }
+    if (!isComplete) {
+      lastSubmittedOtpRef.current = "";
     }
   }, [digits, onComplete]);
 

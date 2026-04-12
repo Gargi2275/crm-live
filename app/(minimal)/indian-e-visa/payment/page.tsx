@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
@@ -10,6 +10,89 @@ import { Reveal } from "@/components/Reveal";
 import { ProgressStepper } from "@/components/ProgressStepper";
 import { AnimatedCheckmark } from "@/components/AnimatedCheckmark";
 import { eVisaApi } from "@/lib/api-client";
+
+type RazorpayCheckoutResponse = {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+};
+
+type RazorpayCheckoutOptions = {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  image?: string;
+  description: string;
+  order_id: string;
+  handler: (response: RazorpayCheckoutResponse) => void;
+  prefill?: {
+    name?: string;
+    email?: string;
+    contact?: string;
+  };
+  theme?: {
+    color?: string;
+  };
+  modal?: {
+    ondismiss?: () => void;
+  };
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayCheckoutOptions) => {
+      open: () => void;
+      on: (eventName: string, callback: (event: { error?: { description?: string } }) => void) => void;
+    };
+  }
+}
+
+async function loadRazorpayScript(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  if (window.Razorpay) return true;
+
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
+function getRazorpayLogoUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_RAZORPAY_LOGO_URL?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}/logo.png`;
+  }
+  return "/logo.png";
+}
+
+async function getLogoDataUrlFromPublic(): Promise<string> {
+  const response = await fetch("/logo.png", { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("Logo file not found");
+  }
+
+  const blob = await response.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Unable to read logo file"));
+      }
+    };
+    reader.onerror = () => reject(new Error("Unable to load logo file"));
+    reader.readAsDataURL(blob);
+  });
+}
 
 const framerConfetti = Array.from({ length: 50 }).map((_, i) => ({
   id: i,
@@ -30,9 +113,30 @@ export default function PaymentPage() {
   const [acknowledged, setAcknowledged] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [uploadUrl, setUploadUrl] = useState("");
+  const [checkoutLogoUrl, setCheckoutLogoUrl] = useState("");
 
   const price = data.visaDuration === "5-Year" ? 150 : 88;
   const fileNumber = caseNumber || "FO-EV-...";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getLogoDataUrlFromPublic()
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setCheckoutLogoUrl(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCheckoutLogoUrl(getRazorpayLogoUrl());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handlePayment = async () => {
     if (!caseNumber) {
@@ -44,11 +148,64 @@ export default function PaymentPage() {
     setIsProcessing(true);
 
     try {
-      const paymentReference = `LOCAL-${Date.now()}`;
-      const response = await eVisaApi.paymentConfirm(caseNumber, paymentReference);
-      setUploadUrl(response.data.upload_url);
-      updateData({ hasPaid: true, fileNumber: caseNumber });
-      setIsSuccess(true);
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded || !window.Razorpay) {
+        throw new Error("Unable to load Razorpay checkout. Please try again.");
+      }
+
+      const orderResponse = await eVisaApi.createPaymentOrder(caseNumber);
+      const orderData = orderResponse.data;
+      const finalLogoUrl = checkoutLogoUrl || getRazorpayLogoUrl();
+      const rawContact = orderData.prefill?.contact;
+      const normalizedContact = typeof rawContact === "string" ? rawContact.replace(/\D/g, "") : "";
+      const safePrefill = {
+        ...orderData.prefill,
+        contact:
+          normalizedContact.length >= 10 && normalizedContact.length <= 15
+            ? normalizedContact
+            : undefined,
+      };
+
+      const razorpay = new window.Razorpay({
+        key: orderData.razorpay_key_id,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: orderData.name || "Fly OCI",
+        image: finalLogoUrl,
+        description: orderData.description || `Indian e-Visa assistance - ${caseNumber}`,
+        order_id: orderData.razorpay_order_id,
+        prefill: safePrefill,
+        theme: {
+          color: "#4d576c",
+        },
+        handler: async (rzpResponse) => {
+          try {
+            const response = await eVisaApi.paymentConfirm(caseNumber, {
+              payment_reference: rzpResponse.razorpay_payment_id,
+              razorpay_order_id: rzpResponse.razorpay_order_id,
+              razorpay_payment_id: rzpResponse.razorpay_payment_id,
+              razorpay_signature: rzpResponse.razorpay_signature,
+            });
+
+            setUploadUrl(response.data.upload_url);
+            updateData({ hasPaid: true, fileNumber: caseNumber });
+            setIsSuccess(true);
+          } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : "Payment verification failed");
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessing(false);
+          },
+        },
+      });
+
+      razorpay.on("payment.failed", (event) => {
+        setErrorMessage(event.error?.description || "Payment failed. Please try again.");
+      });
+
+      razorpay.open();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Payment confirmation failed");
     } finally {
@@ -57,12 +214,13 @@ export default function PaymentPage() {
   };
 
   const handleContinue = () => {
+    const emailQuery = data.email ? `&email=${encodeURIComponent(data.email)}` : "";
     if (uploadUrl && uploadUrl.includes("?case=")) {
       const caseParam = uploadUrl.split("?case=")[1] || caseNumber;
-      router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseParam)}`);
+      router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseParam)}${emailQuery}`);
       return;
     }
-    router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}`);
+    router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}${emailQuery}`);
   };
 
   if (isSuccess) {

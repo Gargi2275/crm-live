@@ -5,8 +5,6 @@ import { motion } from "framer-motion";
 
 export default function SettingsPage() {
   const [otpEnabled, setOtpEnabled] = useState(true);
-  const [idleBannerEnabled, setIdleBannerEnabled] = useState(true);
-  const [sessionTimeout, setSessionTimeout] = useState("15");
 
   return (
     <motion.div
@@ -36,29 +34,22 @@ export default function SettingsPage() {
 
           <div className="flex items-center justify-between rounded-[12px] border border-[#D9E1EA] p-3">
             <div>
-              <p className="text-[#102A43] font-medium">Auto-logout warning banner</p>
-              <p className="text-xs text-[#627D98]">Show idle warning in the top header</p>
+              <p className="text-[#102A43] font-medium">Session persistence</p>
+              <p className="text-xs text-[#627D98]">Keep admin users signed in until they explicitly log out</p>
             </div>
             <button
-              onClick={() => setIdleBannerEnabled((prev) => !prev)}
-              className={`h-6 w-11 rounded-full p-0.5 transition-colors ${idleBannerEnabled ? "bg-[#009877]" : "bg-slate-300"}`}
-              aria-label="Toggle idle warning"
+              onClick={() => {}}
+              className="h-6 w-11 rounded-full p-0.5 transition-colors bg-[#009877] cursor-default"
+              aria-label="Session persistence enabled"
+              disabled
             >
-              <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${idleBannerEnabled ? "translate-x-5" : "translate-x-0"}`} />
+              <span className="block h-5 w-5 rounded-full bg-white transition-transform translate-x-5" />
             </button>
           </div>
 
           <div className="rounded-[12px] border border-[#D9E1EA] p-3">
-            <p className="text-[#102A43] font-medium mb-2">Session timeout (minutes)</p>
-            <select
-              value={sessionTimeout}
-              onChange={(event) => setSessionTimeout(event.target.value)}
-              className="w-full max-w-[220px] rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#334E68] focus:outline-none focus:ring-2 focus:ring-[#009877]/20"
-            >
-              <option value="15">15</option>
-              <option value="30">30</option>
-              <option value="60">60</option>
-            </select>
+            <p className="text-[#102A43] font-medium mb-2">Session timeout</p>
+            <p className="text-sm text-[#486581]">Disabled. Admin sessions remain active until logout.</p>
           </div>
         </div>
       </motion.div>
@@ -93,7 +84,7 @@ export default function SettingsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              <tr><td className="px-4 py-2.5">Idle logout</td><td className="px-4 py-2.5">15 minutes</td><td className="px-4 py-2.5">Today 10:12 AM</td></tr>
+              <tr><td className="px-4 py-2.5">Session persistence</td><td className="px-4 py-2.5">Until logout</td><td className="px-4 py-2.5">Today 10:12 AM</td></tr>
               <tr><td className="px-4 py-2.5">2FA mode</td><td className="px-4 py-2.5">OTP required</td><td className="px-4 py-2.5">Today 9:48 AM</td></tr>
               <tr><td className="px-4 py-2.5">Export policy</td><td className="px-4 py-2.5">Admin + Ops only</td><td className="px-4 py-2.5">Yesterday 7:10 PM</td></tr>
             </tbody>

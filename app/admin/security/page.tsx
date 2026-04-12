@@ -56,8 +56,8 @@ export default function SecurityPage() {
             <p>Role-based restrictions for Admin, Ops Manager, Audit Officer, Case Worker, and Viewer.</p>
           </div>
           <div className="rounded-[10px] border border-[#D9E1EA] p-3 bg-[#F8FAFC]">
-            <p className="font-semibold text-[#102A43] mb-1">OTP + auto logout</p>
-            <p>OTP on login and idle timeout with warning for account safety.</p>
+            <p className="font-semibold text-[#102A43] mb-1">OTP + persistent session</p>
+            <p>OTP on login and sessions remain active until the user logs out manually.</p>
           </div>
           <div className="rounded-[10px] border border-[#D9E1EA] p-3 bg-[#F8FAFC]">
             <p className="font-semibold text-[#102A43] mb-1">Traceable audit logs</p>

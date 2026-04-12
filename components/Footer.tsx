@@ -111,7 +111,7 @@ export function Footer({ compact = false }: { compact?: boolean }) {
             </p>
           </div>
           <div className="text-center text-[#6f8498] text-sm flex flex-col items-center">
-            <p>&copy; {new Date().getFullYear()} FlyOCI. All rights reserved.</p>
+            <p>&© COPYRIGHT 2025 |  All Rights Reserved | Developed & Maintain by TechnoAdviser</p>
           </div>
         </div>
       </div>

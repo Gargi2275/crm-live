@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import { EVISA_DEFAULTS } from "@/lib/evisa-config";
 
 interface TravelDetails {
   arrivalDate: string;
@@ -20,6 +21,10 @@ interface EVisaState {
   nationality: string;
   countryOfResidence: string;
   purposeOfVisit: string;
+  consentAccepted: boolean;
+  otpExpiresInMinutes: number;
+  resendCooldownSeconds: number;
+  maxResends: number;
   
   // Progression
   isEmailConfirmed: boolean;
@@ -45,6 +50,10 @@ const initialState: EVisaState = {
   nationality: "",
   countryOfResidence: "",
   purposeOfVisit: "",
+  consentAccepted: false,
+  otpExpiresInMinutes: EVISA_DEFAULTS.otpExpiresInMinutes,
+  resendCooldownSeconds: EVISA_DEFAULTS.resendCooldownSeconds,
+  maxResends: EVISA_DEFAULTS.maxResends,
   isEmailConfirmed: false,
   hasPaid: false,
   hasUploaded: false,
@@ -58,22 +67,57 @@ const initialState: EVisaState = {
 };
 
 const EVisaContext = createContext<EVisaContextType | undefined>(undefined);
+const EVISA_STORAGE_KEY = "flyoci:evisa-state";
 
 export function EVisaProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<EVisaState>(initialState);
   const [isClient, setIsClient] = useState(false);
 
-  // Use localStorage for persistence if desired, but for now memory state
   useEffect(() => {
     setIsClient(true);
+
+    try {
+      const raw = localStorage.getItem(EVISA_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<EVisaState>;
+      setData((prev) => ({
+        ...prev,
+        ...parsed,
+        travelDetails: {
+          ...prev.travelDetails,
+          ...(parsed.travelDetails || {}),
+        },
+      }));
+    } catch {
+      // Ignore invalid persisted payloads.
+    }
   }, []);
 
+  useEffect(() => {
+    if (!isClient) return;
+    try {
+      localStorage.setItem(EVISA_STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      // Ignore quota/storage errors.
+    }
+  }, [data, isClient]);
+
   const updateData = (updates: Partial<EVisaState>) => {
-    setData((prev) => ({ ...prev, ...updates }));
+    setData((prev) => ({
+      ...prev,
+      ...updates,
+      travelDetails: {
+        ...prev.travelDetails,
+        ...(updates.travelDetails || {}),
+      },
+    }));
   };
 
   const resetData = () => {
     setData(initialState);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(EVISA_STORAGE_KEY);
+    }
   };
 
   if (!isClient) return null; // Avoid hydration mismatch if relying on localstorage later

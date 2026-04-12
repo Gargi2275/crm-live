@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Menu, X, ChevronDown } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Menu, X, ChevronDown, CircleUserRound } from "lucide-react";
 import { Button } from "./ui/Button";
 import Image from "next/image";
+import { useAuth } from "@/context/AuthContext";
 
 const navLinks = [
   { name: "Home", href: "/" },
@@ -30,11 +31,29 @@ const navLinks = [
 ];
 
 export function Navbar() {
+  const router = useRouter();
+  const { isAuthenticated, logout, loading } = useAuth();
   const [isScrolled, setIsScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
   const { scrollY } = useScroll();
+  const isDashboardRoute = pathname === "/dashboard";
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      setMenuOpen(false);
+      router.push("/");
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   useMotionValueEvent(scrollY, "change", (latest) => {
     if (latest > 80) {
@@ -48,7 +67,31 @@ export function Navbar() {
   useEffect(() => {
     setMenuOpen(false);
     setActiveDropdown(false);
+    setProfileMenuOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+
+    const onDocumentClick = (event: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocumentClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [profileMenuOpen]);
 
   return (
     <>
@@ -77,6 +120,7 @@ export function Navbar() {
             </Link>
 
             {/* Desktop Navigation */}
+            {!isDashboardRoute && (
             <div className="hidden lg:flex items-center space-x-2 lg:space-x-1">
               {navLinks.map((link) => (
                 <div
@@ -129,14 +173,85 @@ export function Navbar() {
                 </div>
               ))}
             </div>
+            )}
 
-            {/* CTA Button */}
-            <div className="hidden lg:flex items-center">
-              <Link href="/document-audit">
-                <Button variant="primary" className="text-sm">
-                  Get My Documents Checked
-                </Button>
-              </Link>
+            {/* CTA / Auth Buttons */}
+            <div className="hidden lg:flex items-center gap-2">
+              {isDashboardRoute ? (
+                <>
+                  <Link
+                    href="/contact"
+                    className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    Need Help
+                  </Link>
+                  {isAuthenticated && (
+                    <div className="relative" ref={profileMenuRef}>
+                      <button
+                        type="button"
+                        onClick={() => setProfileMenuOpen((prev) => !prev)}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                        aria-label="Open profile menu"
+                        aria-haspopup="menu"
+                        aria-expanded={profileMenuOpen}
+                      >
+                        <CircleUserRound className="h-5 w-5" />
+                      </button>
+                      <AnimatePresence>
+                        {profileMenuOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 8 }}
+                            transition={{ duration: 0.16 }}
+                            className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 bg-white shadow-[0_14px_34px_rgba(20,48,96,0.15)] p-2"
+                            role="menu"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProfileMenuOpen(false);
+                                router.push("/dashboard");
+                              }}
+                              className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                              Dashboard
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleLogout}
+                              disabled={isLoggingOut}
+                              className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              {isLoggingOut ? "Logging out..." : "Logout"}
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                </>
+              ) : loading ? (
+                <Button variant="outline" className="text-sm" disabled>Loading...</Button>
+              ) : isAuthenticated ? (
+                <>
+                  <Link href="/dashboard">
+                    <Button variant="outline" className="text-sm">Dashboard</Button>
+                  </Link>
+                  <Button
+                    variant="primary"
+                    className="text-sm"
+                    onClick={handleLogout}
+                    disabled={isLoggingOut}
+                  >
+                    {isLoggingOut ? "Logging out..." : "Logout"}
+                  </Button>
+                </>
+              ) : (
+                <Link href="/auth/login">
+                  <Button variant="outline" className="text-sm">Login</Button>
+                </Link>
+              )}
             </div>
 
 
@@ -202,9 +317,28 @@ export function Navbar() {
                 </div>
               ))}
               <div className="pt-6 border-t border-border mt-6">
-                <Link href="/document-audit">
-                  <Button className="w-full">Get My Documents Checked</Button>
-                </Link>
+                {loading ? (
+                  <Button className="w-full" variant="outline" disabled>Loading...</Button>
+                ) : isAuthenticated ? (
+                  <div className="space-y-3">
+                    <Link href="/dashboard">
+                      <Button className="w-full" variant="outline">Dashboard</Button>
+                    </Link>
+                    <Button
+                      className="w-full"
+                      onClick={handleLogout}
+                      disabled={isLoggingOut}
+                    >
+                      {isLoggingOut ? "Logging out..." : "Logout"}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <Link href="/auth/login">
+                      <Button className="w-full" variant="outline">Login</Button>
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>

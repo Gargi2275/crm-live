@@ -4,17 +4,88 @@ import { useState } from "react";
 import { Sidebar } from "@/components/console/Sidebar";
 import { TopHeader } from "@/components/console/TopHeader";
 import { motion, AnimatePresence } from "framer-motion";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ConsoleProvider } from "@/components/console/ConsoleContext";
 import { Toaster } from "react-hot-toast";
+import { AdminAuthProvider, useAdminAuth } from "@/context/AdminAuthContext";
+import { useEffect } from "react";
 
 export default function ConsoleLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <AdminAuthProvider>
+      <AdminLayoutContent>{children}</AdminLayoutContent>
+    </AdminAuthProvider>
+  );
+}
+
+function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const { isAuthenticated, isBootstrapped, logout, adminUser } = useAdminAuth();
+  const isPublicAdminAuthRoute = pathname === "/admin/login" || pathname === "/admin/reset-password";
+
+  useEffect(() => {
+    if (!isBootstrapped) {
+      return;
+    }
+    if (!isAuthenticated && !isPublicAdminAuthRoute) {
+      router.replace("/admin/login");
+    }
+    if (isAuthenticated && isPublicAdminAuthRoute) {
+      router.replace("/admin");
+    }
+  }, [isAuthenticated, isBootstrapped, isPublicAdminAuthRoute, router]);
+
+  useEffect(() => {
+    if (!adminUser || isPublicAdminAuthRoute || pathname === "/admin") {
+      return;
+    }
+
+    const role = adminUser.role;
+    if (role === "admin") {
+      return;
+    }
+
+    const roleAccess: Record<string, string[]> = {
+      ops_manager: ["/admin", "/admin/kanban", "/admin/reports", "/admin/alerts", "/admin/team", "/admin/settings"],
+      case_processor: ["/admin", "/admin/kanban"],
+      reviewer: ["/admin", "/admin/kanban", "/admin/reports"],
+      support_agent: ["/admin"],
+    };
+
+    const allowedRoots = roleAccess[role] || ["/admin"];
+    const hasAccess = allowedRoots.some((root) => pathname === root || (root !== "/admin" && pathname.startsWith(root)));
+    if (!hasAccess) {
+      router.replace("/admin");
+    }
+  }, [adminUser, isPublicAdminAuthRoute, pathname, router]);
+
+  if (!isBootstrapped) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F5F7FA] text-slate-700">
+        Checking admin session...
+      </div>
+    );
+  }
+
+  if (isPublicAdminAuthRoute) {
+    return (
+      <>
+        {children}
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            style: { background: "#FFFFFF", color: "#0F172A", border: "0.5px solid #D9E1EA", borderRadius: "12px" },
+          }}
+        />
+      </>
+    );
+  }
 
   return (
     <ConsoleProvider>

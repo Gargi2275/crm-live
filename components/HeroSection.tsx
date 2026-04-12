@@ -111,6 +111,7 @@
 import { motion } from "framer-motion";
 import { CheckCircle, ShieldCheck, Clock, MessageCircle } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "./ui/Button";
 
 const containerVariants = {
@@ -140,85 +141,85 @@ const badges = [
 
 export function HeroSection() {
   return (
-    <section className="relative min-h-[85vh] flex items-center justify-center px-4 sm:px-6 lg:px-8 pt-32 pb-16 bg-hero overflow-hidden">
-      
-      {/* ✅ Softer background (less distracting) */}
+    <section className="relative min-h-[72vh] flex items-center justify-center px-4 sm:px-6 lg:px-8 pt-28 sm:pt-36 lg:pt-32 pb-16 overflow-hidden">
+      <Image
+        src="/hero_section_banner.jpeg"
+        alt="OCI assistance banner"
+        fill
+        priority
+        className="object-cover object-center"
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(98deg,rgba(8,22,52,0.82)_0%,rgba(10,34,82,0.66)_45%,rgba(31,86,183,0.24)_100%)]" />
+
       <motion.div
-        animate={{ x: [0, 26, 0], y: [0, -14, 0] }}
+        animate={{ x: [0, 20, 0], y: [0, -12, 0] }}
         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.18)_0%,transparent_70%)] blur-3xl z-0"
+        className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.24)_0%,transparent_70%)] blur-3xl z-0"
       />
       <motion.div
-        animate={{ x: [0, -26, 0], y: [0, 18, 0] }}
+        animate={{ x: [0, -24, 0], y: [0, 14, 0] }}
         transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.14)_0%,transparent_70%)] blur-3xl z-0"
+        className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(143,206,255,0.3)_0%,transparent_70%)] blur-3xl z-0"
       />
 
       <motion.div
         variants={containerVariants}
         initial="hidden"
         animate="visible"
-        className="relative z-10 w-full max-w-3xl mx-auto text-center"
+        className="relative z-10 w-full max-w-6xl mx-auto"
       >
-        {/* ✅ Fixed heading (balanced + gradient only on key text) */}
-<motion.h1
-  className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight leading-tight"
->
-  <span className="text-[#0B1F3A]">
-    Hassle-Free
-  </span>{" "}
-  
-  <span className="bg-gradient-to-r from-[#33A1FD] to-[#1E7ED8] bg-clip-text text-transparent">
-    OCI, e-Visa & Passport
-  </span>{" "}
-  
-  <span className="text-[#0B1F3A]">
-    Services
-  </span>
-</motion.h1>
+        <div className="max-w-3xl mx-auto text-center">
+        <motion.h1
+          variants={itemVariants}
+          className="font-heading text-[24px] sm:text-[34px] lg:text-[44px] font-bold tracking-[-0.02em] leading-[1.06] text-white"
+        >
+          Hassle-Free OCI,
+          <span className="block mt-2 bg-gradient-to-r from-[#9dd3ff] to-white bg-clip-text text-transparent">
+            Indian e-Visa and Passport Services
+          </span>
+          <span className="block mt-2 text-[0.58em] font-semibold text-[#d9e8ff]">Done For You</span>
+        </motion.h1>
 
-        {/* ✅ Supporting text */}
         <motion.p
           variants={itemVariants}
-          className="text-base sm:text-lg text-muted max-w-xl mx-auto mb-8 leading-relaxed"
+          className="mt-5 text-[13px] sm:text-[15px] text-[#ecf3ff] max-w-2xl mx-auto mb-6 leading-relaxed"
         >
-          For UK & US residents of Indian origin. We handle the forms, documents and appointments so you don&apos;t lose time or miss travel plans.
+          For UK and US residents of Indian origin. We handle forms, documents, and appointments so you avoid delays and travel stress.
         </motion.p>
 
-        {/* ✅ Buttons */}
         <motion.div
           variants={itemVariants}
-          className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10"
+          className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6"
         >
-          <Link href="/document-audit" className="w-full sm:w-auto">
-            <Button className="w-full sm:w-auto px-6 py-3 text-base rounded-full">
-              Get Documents Checked
+          <Link href="/auth/login?next=%2Findian-e-visa" className="w-full sm:w-auto">
+            <Button className="w-full sm:w-auto px-6 py-3 text-[15px] rounded-full shadow-[0_10px_24px_rgba(28,105,221,0.34)]">
+              Start My Application
             </Button>
           </Link>
 
-          <Link href="/services" className="w-full sm:w-auto">
-            <Button variant="outline" className="w-full sm:w-auto px-6 py-3 text-base rounded-full bg-white/75">
-              View Services & Pricing
+          <Link href="/document-audit" className="w-full sm:w-auto">
+            <Button variant="outline" className="w-full sm:w-auto px-6 py-3 text-[15px] rounded-full border-white/70 text-white bg-[#ffffff1a] hover:bg-[#ffffff26]">
+              Get My Documents Checked
             </Button>
           </Link>
         </motion.div>
 
-        {/* ✅ Badges */}
         <motion.div
           variants={itemVariants}
-          className="flex flex-wrap justify-center gap-3"
+          className="flex flex-wrap justify-center gap-2"
         >
           {badges.map((badge, index) => (
             <motion.div
               key={index}
               whileHover={{ y: -2 }}
-              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/90 border border-primary/15 shadow-[0_8px_18px_rgba(51,161,253,0.12)] text-sm text-[#365067]"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#0b1f45]/45 border border-white/40 shadow-[0_8px_18px_rgba(8,23,56,0.2)] text-[12px] text-white"
             >
               {badge.icon}
               {badge.text}
             </motion.div>
           ))}
         </motion.div>
+        </div>
       </motion.div>
     </section>
   );

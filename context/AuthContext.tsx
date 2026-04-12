@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { authService, UserProfile, LoginCredentials, RegisterCredentials } from '@/lib/auth';
-
 interface AuthContextType {
   user: UserProfile | null;
   loading: boolean;
@@ -22,27 +21,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isClient, setIsClient] = useState(false);
+
+  const isSessionExpiredError = (message: string) => {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('session expired') ||
+      normalized.includes('no active session') ||
+      normalized.includes('no access token') ||
+      normalized.includes('please log in')
+    );
+  };
 
   // Initialize auth on mount
   useEffect(() => {
-    setIsClient(true);
     checkAuth();
   }, []);
 
-  const checkAuth = async () => {
-    try {
-      if (authService.isLoggedIn()) {
-        const profile = await authService.getProfile();
-        setUser(profile);
+ const checkAuth = async () => {
+  try {
+    if (authService.isLoggedIn()) {
+      const cachedUser = authService.getCachedUser();
+
+      if (cachedUser) {
+        setUser(cachedUser); // ✅ KEEP THIS
       }
-    } catch (err) {
-      console.error('Auth check failed:', err);
+
+      try {
+        const profile = await authService.getProfile();
+        setUser(profile); // ✅ update if success
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "";
+        if (isSessionExpiredError(errorMessage)) {
+          authService.clearLocalSession();
+          setUser(null);
+          setError('Session expired. Please log in again.');
+        } else {
+          console.warn("Profile fetch failed, using cached user");
+        }
+      }
+
+    } else {
+      authService.clearCachedUser();
       setUser(null);
-    } finally {
-      setLoading(false);
     }
-  };
+  } catch (err) {
+    console.error('Auth check failed:', err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const login = async (credentials: LoginCredentials) => {
     try {
@@ -99,15 +126,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to refresh user';
-      setError(errorMessage);
+      if (isSessionExpiredError(errorMessage)) {
+        authService.clearLocalSession();
+        setError('Session expired. Please log in again.');
+      } else {
+        setError(errorMessage);
+      }
       setUser(null);
     }
   };
 
   const clearError = () => setError(null);
-
-  // Prevent hydration mismatch
-  if (!isClient) return <>{children}</>;
 
   return (
     <AuthContext.Provider

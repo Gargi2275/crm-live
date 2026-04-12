@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Download, MessageCircle, Mail, CheckCircle2, Circle } from "lucide-react";
+import { ArrowLeft, Download, MessageCircle, Mail, CheckCircle2, Circle, Upload } from "lucide-react";
 
 export default function TrackFileNumberPage() {
 	const searchParams = useSearchParams();
@@ -10,13 +10,13 @@ export default function TrackFileNumberPage() {
 
 	const stages = [
 		{ label: "Registered", state: "done" },
-		{ label: "Email", state: "done" },
-		{ label: "Payment", state: "done" },
-		{ label: "Docs", state: "done" },
-		{ label: "Preparation", state: "active" },
+		{ label: "Email Confirmed", state: "done" },
+		{ label: "Payment Confirmed", state: "done" },
+		{ label: "Documents Received", state: "done" },
+		{ label: "In Preparation", state: "active" },
 		{ label: "Submitted", state: "pending" },
-		{ label: "Decision", state: "pending" },
-		{ label: "Closed", state: "pending" },
+		{ label: "Decision Received", state: "pending" },
+		{ label: "Completed", state: "pending" },
 	] as const;
 
 	const timelineRows = [
@@ -27,8 +27,12 @@ export default function TrackFileNumberPage() {
 		{ title: "In preparation", note: "In progress", state: "active" },
 		{ title: "Submitted to authorities", note: "Awaiting", state: "pending" },
 		{ title: "Decision received", note: "Awaiting", state: "pending" },
-		{ title: "Closed", note: "Awaiting", state: "pending" },
+		{ title: "Completed", note: "Awaiting", state: "pending" },
 	] as const;
+
+	const latestUpdate = "Your application is being prepared for submission.";
+	const canUploadMissingDocuments = false;
+	const canDownloadAcknowledgement = true;
 
 	return (
 		<div className="flex-1 w-full bg-[#eef5ff] pb-0 pt-0">
@@ -61,7 +65,7 @@ export default function TrackFileNumberPage() {
 									</span>
 								</div>
 								<span className="inline-flex items-center rounded-full border border-[#f2d8ac] bg-[#fff6e8] px-3 py-1 text-[10px] font-semibold text-[#a86500]">
-									In preparation
+									In Preparation
 								</span>
 							</div>
 
@@ -155,11 +159,26 @@ export default function TrackFileNumberPage() {
 								</div>
 
 								<div className="rounded-[12px] border border-[#d8e4f3] bg-white p-3">
+									<p className="font-body text-[10px] tracking-[0.06em] text-[#9bb0c8] uppercase font-semibold mb-2">Latest Update</p>
+									<div className="rounded-[8px] border border-[#d7e6fb] bg-[#f5f9ff] px-2.5 py-2">
+										<p className="font-body text-[12px] text-[#1f4f8f]">{latestUpdate}</p>
+									</div>
+									<p className="font-body text-[10px] text-[#8ea4bf] mt-1">Updated: 26 Mar 2026, 11:05 AM</p>
+								</div>
+
+								<div className="rounded-[12px] border border-[#d8e4f3] bg-white p-3">
 									<p className="font-body text-[10px] tracking-[0.06em] text-[#9bb0c8] uppercase font-semibold mb-2">Actions</p>
 									<div className="space-y-2">
-										<button className="w-full rounded-[8px] border border-[#d5e3f5] bg-[#f8fbff] px-3 py-2 text-left font-body text-[11px] font-semibold text-[#1f4f8f] hover:bg-[#eef5ff] transition-colors inline-flex items-center gap-2">
-											<Download className="h-4 w-4" /> Download acknowledgment
-										</button>
+										{canUploadMissingDocuments && (
+											<button className="w-full rounded-[8px] border border-[#d5e3f5] bg-[#f8fbff] px-3 py-2 text-left font-body text-[11px] font-semibold text-[#1f4f8f] hover:bg-[#eef5ff] transition-colors inline-flex items-center gap-2">
+												<Upload className="h-4 w-4" /> Upload missing documents
+											</button>
+										)}
+										{canDownloadAcknowledgement && (
+											<button className="w-full rounded-[8px] border border-[#d5e3f5] bg-[#f8fbff] px-3 py-2 text-left font-body text-[11px] font-semibold text-[#1f4f8f] hover:bg-[#eef5ff] transition-colors inline-flex items-center gap-2">
+												<Download className="h-4 w-4" /> Download acknowledgment
+											</button>
+										)}
 										<button className="w-full rounded-[8px] border border-[#cfe8d9] bg-[#edf9f2] px-3 py-2 text-left font-body text-[11px] font-semibold text-[#1e7348] hover:bg-[#e4f6ec] transition-colors inline-flex items-center gap-2">
 											<MessageCircle className="h-4 w-4" /> WhatsApp support
 										</button>

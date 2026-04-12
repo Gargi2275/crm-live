@@ -41,7 +41,8 @@ export default function HowItWorksPage() {
 
   return (
     <>
-      <section className="pt-32 pb-16 px-4 sm:px-6 lg:px-8 bg-bg-page relative overflow-hidden">
+      <section className="pt-28 pb-14 px-4 sm:px-6 lg:px-8 bg-[linear-gradient(180deg,#f5f9ff_0%,#ffffff_72%)] relative overflow-hidden">
+        <div className="absolute -top-16 -right-20 h-56 w-56 rounded-full bg-[#deedff] blur-3xl opacity-80 pointer-events-none motion-safe:animate-pulse" />
         <FadeInUp className="text-center max-w-3xl mx-auto">
           <h1 className="text-4xl md:text-5xl font-heading font-bold text-primary mb-6">How It Works</h1>
           <p className="text-lg text-textMuted font-body mb-8">
@@ -50,27 +51,22 @@ export default function HowItWorksPage() {
         </FadeInUp>
       </section>
 
-      <section className="py-20 bg-white">
+      <section className="py-20 bg-[#f7fbff]">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="relative">
-             {/* Left line tracking */}
-            <div className="absolute left-6 md:left-[51px] top-0 h-full w-1 bg-gray-100 rounded-full" />
-            
-            <div className="space-y-12">
+          <div className="space-y-5">
               {steps.map((step, index) => (
-                <FadeInUp key={index} delay={index * 0.1} className="relative z-10 flex">
-                  <div className="mr-6 md:mr-10 flex flex-col items-center">
-                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-primary text-white flex items-center justify-center font-heading font-bold text-xl md:text-2xl shadow-lg border-4 border-white shrink-0 shadow-primary/20">
+                <FadeInUp key={index} delay={index * 0.08} className="rounded-2xl border border-[#d9e8ff] bg-white p-5 md:p-6 shadow-[0_10px_24px_rgba(30,74,135,0.08)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(30,74,135,0.12)]">
+                  <div className="flex gap-4 md:gap-5 items-start">
+                    <div className="w-11 h-11 md:w-12 md:h-12 rounded-xl bg-primary text-white flex items-center justify-center font-heading font-bold text-lg shadow-lg shrink-0">
                       {index + 1}
                     </div>
-                  </div>
-                  <div className="pt-2">
-                    <h3 className="text-xl md:text-2xl font-heading font-bold text-primary mb-3">{step.title}</h3>
-                    <p className="text-textMuted font-body text-base md:text-lg leading-relaxed">{step.desc}</p>
+                    <div className="pt-0.5">
+                      <h3 className="text-lg md:text-xl font-heading font-bold text-primary mb-2">{step.title}</h3>
+                      <p className="text-textMuted font-body text-sm md:text-base leading-relaxed">{step.desc}</p>
+                    </div>
                   </div>
                 </FadeInUp>
               ))}
-            </div>
           </div>
           
           <FadeInUp delay={0.5} className="mt-20 text-center">

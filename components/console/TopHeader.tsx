@@ -1,35 +1,31 @@
 "use client";
 
-import { Bell, Search, LogOut, ChevronDown } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Bell, Search, LogOut, User } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
 import { useConsole } from "./ConsoleContext";
 import { motion } from "framer-motion";
-import toast from "react-hot-toast";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 
 export function TopHeader() {
-  const [showIdleWarning, setShowIdleWarning] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const { role, setRole, roles } = useConsole();
+  const { logout } = useAdminAuth();
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const idleTimer = setTimeout(() => setShowIdleWarning(true), 3000);
-    return () => clearTimeout(idleTimer);
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!profileMenuRef.current) return;
+      if (!profileMenuRef.current.contains(event.target as Node)) {
+        setShowProfileMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
   return (
     <header className="bg-white border-b border-[0.5px] border-[#D9E1EA] sticky top-0 z-10">
-      {showIdleWarning && (
-        <motion.div
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="px-6 py-2 text-xs bg-[#FFF7ED] text-[#92400E] border-b border-[0.5px] border-[#F3D5B5] flex items-center justify-between font-body"
-        >
-          <span>You will be logged out in 5 minutes</span>
-          <button className="inline-flex items-center gap-1 hover:text-[#6B2A00]" onClick={() => setShowIdleWarning(false)}>
-            <LogOut className="w-3 h-3" /> Stay active
-          </button>
-        </motion.div>
-      )}
       <div className="h-16 flex items-center justify-between gap-4 px-6">
       {/* Search Bar */}
       <div className="flex-1 max-w-lg">
@@ -63,26 +59,28 @@ export function TopHeader() {
           <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full animate-pulse"></span>
         </motion.button>
 
-        <div className="relative pl-2 sm:pl-3 border-l border-[0.5px] border-[#D9E1EA]">
+        <div
+          ref={profileMenuRef}
+          className="relative pl-2 sm:pl-3 border-l border-[0.5px] border-[#D9E1EA]"
+        >
           <button
             onClick={() => setShowProfileMenu((prev) => !prev)}
             className="inline-flex items-center gap-2 rounded-[12px] px-1.5 py-1 hover:bg-[#F5F7FA] transition-colors"
+            aria-label="Profile menu"
           >
-            <div className="w-9 h-9 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center font-bold text-sm border border-[0.5px] border-[#009877]/30 font-heading">
-              MJ
+            <div className="w-9 h-9 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[0.5px] border-[#009877]/30">
+              <User className="w-4.5 h-4.5" />
             </div>
-            <ChevronDown className="w-4 h-4 text-[#627D98]" />
           </button>
 
           {showProfileMenu && (
             <div className="absolute right-0 mt-2 w-[220px] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-20">
-              <p className="text-sm font-semibold text-[#102A43] font-heading">Meera Jain</p>
-              <p className="text-xs text-[#627D98]">Console Operator</p>
-              <p className="mt-2 text-xs inline-flex bg-[#009877]/12 text-[#006F57] border border-[0.5px] border-[#009877]/30 px-2 py-1 rounded-md font-heading">{role}</p>
+              <p className="text-sm font-semibold text-[#102A43] font-heading">Admin Console Session</p>
+              <p className="text-xs text-[#627D98]">Authenticated user</p>
               <button
                 onClick={() => {
                   setShowProfileMenu(false);
-                  toast.success("Logged out (demo)");
+                  logout();
                 }}
                 className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm text-[#334E68] hover:bg-[#F5F7FA]"
               >

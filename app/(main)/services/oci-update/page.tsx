@@ -1,5 +1,4 @@
 import { FadeInUp } from "@/components/FadeInUp";
-import { Button } from "@/components/ui/Button";
 import Link from "next/link";
 import { CheckCircle } from "lucide-react";
 
@@ -9,39 +8,63 @@ export const metadata = {
 
 export default function OCIUpdatePage() {
   return (
-    <section className="pt-32 pb-24 px-4 sm:px-6 lg:px-8 bg-bg-page relative overflow-hidden min-h-[80vh] flex flex-col items-center">
-      <div className="max-w-4xl mx-auto text-center w-full">
+    <section className="relative overflow-hidden pt-28 pb-20 px-4 sm:px-6 lg:px-8 bg-[linear-gradient(180deg,#f5f9ff_0%,#ffffff_70%)]">
+      <div className="pointer-events-none absolute -top-16 -right-16 h-52 w-52 rounded-full bg-[#e3efff] blur-3xl opacity-80 motion-safe:animate-pulse" />
+      <div className="max-w-6xl mx-auto grid gap-8 lg:grid-cols-[1.25fr_0.75fr] items-start relative z-10">
         <FadeInUp>
-          <h1 className="text-4xl md:text-5xl font-heading font-bold text-primary mb-6">
-            Mandatory OCI Updates — We Handle the Online Complexity
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">OCI Update Service</p>
+          <h1 className="mt-3 text-3xl md:text-4xl font-heading font-bold text-primary leading-tight">
+            Mandatory OCI Updates, Handled Professionally
           </h1>
-          <p className="text-lg md:text-xl text-textMuted font-body mb-8">
-            Some OCI updates on the government portal are &quot;gratis&quot; (no government fee), but the process is still technical and time-consuming. We charge a professional service fee to handle everything for you.
+          <p className="mt-4 text-base md:text-lg text-textMuted font-body max-w-3xl">
+            Even when government fee is nil, OCI update workflows are technical. We handle the portal work, document checks, and submission accuracy.
           </p>
-        </FadeInUp>
-
-        <FadeInUp delay={0.2} className="my-12 grid md:grid-cols-2 gap-8 text-left">
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-border">
-            <h3 className="text-xl font-heading font-bold text-primary mb-4">What We Do</h3>
-            <ul className="space-y-3 font-body text-textMuted text-sm">
-              <li className="flex items-start"><CheckCircle className="w-4 h-4 text-success mr-2 mt-0.5 shrink-0" /> Check whether an update is required in your case</li>
-              <li className="flex items-start"><CheckCircle className="w-4 h-4 text-success mr-2 mt-0.5 shrink-0" /> Prepare and upload documents on the government portal</li>
-              <li className="flex items-start"><CheckCircle className="w-4 h-4 text-success mr-2 mt-0.5 shrink-0" /> Ensure photos and signatures meet exact specifications</li>
-              <li className="flex items-start"><CheckCircle className="w-4 h-4 text-success mr-2 mt-0.5 shrink-0" /> Guide you through additional steps or acknowledgements</li>
-            </ul>
-          </div>
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-border">
-            <h3 className="text-xl font-heading font-bold text-primary mb-4">Pricing</h3>
-            <p className="text-3xl font-mono font-bold text-primary mb-2">£50</p>
-            <p className="text-sm font-body text-textMuted">Service Fee per applicant.</p>
-            <p className="text-sm font-body text-accent font-medium mt-4">*(If you have taken a Document Audit first, the £15 credit is deducted and you pay £35 at this stage).</p>
+          <div className="mt-6 space-y-3 text-sm text-textMuted">
+            <p>• Confirm if your case needs an update</p>
+            <p>• Upload-ready photo and signature checks</p>
+            <p>• End-to-end portal completion support</p>
           </div>
         </FadeInUp>
 
-        <FadeInUp delay={0.4} className="mt-8">
-          <Link href="/document-audit">
-            <Button className="py-4 px-8 text-lg">Update My OCI</Button>
-          </Link>
+        <FadeInUp delay={0.15}>
+          <div className="rounded-2xl border border-[#d9e8ff] bg-white p-6 shadow-[0_12px_36px_rgba(30,74,135,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_44px_rgba(30,74,135,0.13)]">
+            <h2 className="text-lg font-heading font-bold text-primary">Service Summary</h2>
+            <div className="mt-4 space-y-3 text-sm text-textMuted">
+              <div className="flex items-center justify-between"><span>Service fee</span><strong className="text-primary">£50</strong></div>
+              <div className="flex items-center justify-between"><span>Audit credit</span><strong className="text-primary">-£15</strong></div>
+              <div className="flex items-center justify-between"><span>After audit</span><strong className="text-primary">£35</strong></div>
+            </div>
+            <Link href="/document-audit" className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition-all duration-300 hover:bg-primary/90 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(28,105,221,0.3)]">
+              Start application
+            </Link>
+          </div>
+        </FadeInUp>
+      </div>
+
+      <div className="max-w-6xl mx-auto mt-10 grid gap-4 md:grid-cols-3">
+        <FadeInUp delay={0.05} className="rounded-xl border border-[#d9e8ff] bg-white px-5 py-4 text-left shadow-[0_10px_26px_rgba(30,74,135,0.08)]">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[#2b5e93] font-semibold">Ideal For</p>
+          <p className="mt-2 text-sm font-semibold text-primary">Mandatory OCI portal updates</p>
+        </FadeInUp>
+        <FadeInUp delay={0.1} className="rounded-xl border border-[#d9e8ff] bg-white px-5 py-4 text-left shadow-[0_10px_26px_rgba(30,74,135,0.08)]">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[#2b5e93] font-semibold">What We Prevent</p>
+          <p className="mt-2 text-sm font-semibold text-primary">Photo/signature format rejection</p>
+        </FadeInUp>
+        <FadeInUp delay={0.15} className="rounded-xl border border-[#d9e8ff] bg-white px-5 py-4 text-left shadow-[0_10px_26px_rgba(30,74,135,0.08)]">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[#2b5e93] font-semibold">Turnaround</p>
+          <p className="mt-2 text-sm font-semibold text-primary">Fast guided completion support</p>
+        </FadeInUp>
+      </div>
+
+      <div className="max-w-6xl mx-auto mt-10">
+        <FadeInUp className="rounded-2xl border border-[#d9e8ff] bg-white p-6 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_28px_rgba(30,74,135,0.09)]">
+          <h3 className="text-xl font-heading font-bold text-primary mb-4">What We Do</h3>
+          <ul className="space-y-3 font-body text-textMuted text-sm">
+            <li className="flex items-start"><CheckCircle className="w-4 h-4 text-[#1c69dd] mr-2 mt-0.5 shrink-0" /> Check whether an update is required in your case</li>
+            <li className="flex items-start"><CheckCircle className="w-4 h-4 text-[#1c69dd] mr-2 mt-0.5 shrink-0" /> Prepare and upload documents on the government portal</li>
+            <li className="flex items-start"><CheckCircle className="w-4 h-4 text-[#1c69dd] mr-2 mt-0.5 shrink-0" /> Ensure photos and signatures meet exact specifications</li>
+            <li className="flex items-start"><CheckCircle className="w-4 h-4 text-[#1c69dd] mr-2 mt-0.5 shrink-0" /> Guide you through additional steps or acknowledgements</li>
+          </ul>
         </FadeInUp>
       </div>
     </section>

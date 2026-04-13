@@ -36,6 +36,7 @@ function formatDateTime(value: string | null | undefined): string {
 function normalizeStatusLabel(label: string | null | undefined): string {
   const raw = (label || "").trim().toLowerCase();
   const map: Record<string, string> = {
+    draft: "Registered",
     registered: "Registered",
     "email": "Email Confirmed",
     "email confirmed": "Email Confirmed",
@@ -105,6 +106,7 @@ export default function TrackPage() {
 
     const internal = (summary?.internal_status || "").trim().toUpperCase();
     const map: Record<string, string> = {
+      DRAFT: "NEW_LEAD",
       REGISTERED: "NEW_LEAD",
       EMAIL_CONFIRMED: "PAYMENT_PENDING",
       PAYMENT_PENDING: "PAYMENT_PENDING",

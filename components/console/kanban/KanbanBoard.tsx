@@ -51,6 +51,56 @@ const normalizeServiceType = (serviceType?: string): PipelineCase["serviceType"]
   return "OCI";
 };
 
+const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
+  const rawStage = String(item.stage || item.current_stage || "").trim().toUpperCase().replace(/\s+/g, "_");
+  const auditResult = String(item.audit_result || "").toLowerCase();
+  const applicationStatus = String(item.application_status || "").toLowerCase();
+  const fullPaymentStatus = String(item.full_payment_status || "").toLowerCase();
+  const amountDue = Number(item.amount_due_pence || 0);
+
+  if (["SUBMITTED", "DELIVERED"].includes(rawStage)) {
+    return rawStage as PipelineCase["stage"];
+  }
+
+  if (auditResult === "red" || applicationStatus === "rejected") {
+    return "DOCUMENTS_REQUIRED";
+  }
+
+  if (rawStage === "REVIEW_PENDING" || rawStage === "READY_FOR_SUBMISSION") {
+    return rawStage as PipelineCase["stage"];
+  }
+
+  if (fullPaymentStatus === "paid" || amountDue <= 0) {
+    return "FORM_FILLING";
+  }
+
+  if (auditResult === "green" && ["pending", "created"].includes(fullPaymentStatus)) {
+    return "PAYMENT_PENDING";
+  }
+
+  if (rawStage === "PAYMENT_PENDING" || applicationStatus === "payment_pending") {
+    return "PAYMENT_PENDING";
+  }
+
+  if (rawStage === "FORM_FILLING" || rawStage === "IN_PREPARATION") {
+    return "FORM_FILLING";
+  }
+
+  if (rawStage === "CORRECTION_REQUESTED" || auditResult === "amber") {
+    return "DOCUMENTS_REQUIRED";
+  }
+
+  if (auditResult === "pending" || rawStage === "AUDIT_PENDING" || rawStage === "DOCS_RECEIVED") {
+    return "AUDIT_PENDING";
+  }
+
+  if (rawStage === "AUDIT_COMPLETED") {
+    return auditResult === "green" ? "PAYMENT_PENDING" : "AUDIT_COMPLETED";
+  }
+
+  return (STAGE_ALIAS[rawStage] || "NEW_LEAD") as PipelineCase["stage"];
+};
+
 const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"] => {
   if (item.full_payment_status === "paid" || item.audit_payment_status === "paid") {
     return "Paid";
@@ -77,7 +127,7 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
     flag: "",
     amount: 0,
     paymentStatus: getPaymentStatus(item),
-    stage: toStage(item.stage),
+    stage: resolveStage(item),
     assignedTo: item.assigned_staff || null,
     slaTimer: `${ageHours}h`,
     slaBreached: ageHours >= 24 * 7,
@@ -174,8 +224,30 @@ export function KanbanBoard() {
         }
 
         if (hasStageChange || hasNewCard || hasMetadataChange) {
-          setPendingCases(nextCases);
-          setHasNewUpdates(true);
+          setCases(nextCases);
+          setPendingCases(null);
+          setHasNewUpdates(false);
+          setLastRefreshedAt(new Date());
+
+          if (selectedCase) {
+            const updatedCase = nextCases.find((item) => item.applicationId === selectedCase.applicationId);
+            if (updatedCase) {
+              setSelectedCase(updatedCase);
+              setSelectedCaseDetails((prev) => (
+                prev
+                  ? {
+                      ...prev,
+                      stage: updatedCase.stage,
+                      current_stage: updatedCase.stage,
+                      application_status: updatedCase.applicationStatus,
+                      audit_result: (updatedCase.auditResult || prev.audit_result) as AdminApplication["audit_result"],
+                      full_payment_status: updatedCase.paymentStatus === "Paid" ? "paid" : prev.full_payment_status,
+                      updated_at: updatedCase.updatedAt,
+                    }
+                  : prev
+              ));
+            }
+          }
         } else {
           setLastRefreshedAt(new Date());
         }

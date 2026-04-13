@@ -74,6 +74,56 @@ const toDocumentDisplayTitle = (document: AdminApplicationDocument) => {
 
 const toPounds = (pence?: number) => ((pence || 0) / 100).toFixed(2);
 
+const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null, caseData?: PipelineCase | null): PipelineCase["stage"] => {
+  const rawStage = String(stage || details?.stage || caseData?.stage || "").trim().toUpperCase().replace(/\s+/g, "_");
+  const auditResult = String(details?.audit_result || "").toLowerCase();
+  const applicationStatus = String(details?.application_status || "").toLowerCase();
+  const fullPaymentStatus = String(details?.full_payment_status || "").toLowerCase();
+  const amountDue = Number(details?.amount_due_pence || 0);
+
+  if (["SUBMITTED", "DELIVERED"].includes(rawStage)) {
+    return rawStage as PipelineCase["stage"];
+  }
+
+  if (auditResult === "red" || applicationStatus === "rejected") {
+    return "DOCUMENTS_REQUIRED";
+  }
+
+  if (rawStage === "REVIEW_PENDING" || rawStage === "READY_FOR_SUBMISSION") {
+    return rawStage as PipelineCase["stage"];
+  }
+
+  if (fullPaymentStatus === "paid" || amountDue <= 0) {
+    return "FORM_FILLING";
+  }
+
+  if (auditResult === "green" && ["pending", "created"].includes(fullPaymentStatus)) {
+    return "PAYMENT_PENDING";
+  }
+
+  if (rawStage === "PAYMENT_PENDING" || applicationStatus === "payment_pending") {
+    return "PAYMENT_PENDING";
+  }
+
+  if (rawStage === "FORM_FILLING" || rawStage === "IN_PREPARATION") {
+    return "FORM_FILLING";
+  }
+
+  if (rawStage === "CORRECTION_REQUESTED" || auditResult === "amber") {
+    return "DOCUMENTS_REQUIRED";
+  }
+
+  if (auditResult === "pending" || rawStage === "AUDIT_PENDING" || rawStage === "DOCS_RECEIVED") {
+    return "AUDIT_PENDING";
+  }
+
+  if (rawStage === "AUDIT_COMPLETED") {
+    return auditResult === "green" ? "PAYMENT_PENDING" : "AUDIT_COMPLETED";
+  }
+
+  return (rawStage as PipelineCase["stage"]) || "NEW_LEAD";
+};
+
 interface SlideOverPanelProps {
   isOpen: boolean;
   onClose: () => void;
@@ -147,7 +197,7 @@ export function SlideOverPanel({
     setTargetStage(((details?.stage || caseData?.stage) || "NEW_LEAD") as PipelineCase["stage"]);
   }, [caseData?.id, details?.auditor_notes, details?.stage, caseData?.stage]);
 
-  const effectiveStage = ((details?.stage || caseData?.stage) || "").toUpperCase() as PipelineCase["stage"];
+  const effectiveStage = resolveEffectiveStage(details?.stage || caseData?.stage, details, caseData);
   const isAuditPending = effectiveStage === "AUDIT_PENDING";
   const isDocumentsRequired = effectiveStage === "DOCUMENTS_REQUIRED";
   const isRejected = isDocumentsRequired && details?.audit_result === "red" && details?.application_status === "rejected";

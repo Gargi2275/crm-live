@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, HelpCircle, MessageSquare, RefreshCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -22,6 +22,7 @@ import {
   verifyFullPayment,
 } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
+import { useRouter } from "next/navigation";
 type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "undecided";
 type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
 type QuestionId = "journeyType" | "nationality" | "ageGroup" | "maritalStatus" | "nameChanged" | "birthOutsideCore";
@@ -398,10 +399,12 @@ type DocumentAuditJourneyProps = {
 
 
 export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker = true, onUnreadCountChange }: DocumentAuditJourneyProps) {
+  const router = useRouter();
   void userEmail;
   void applicationIdProp;
   void serviceTypeProp;
   void onUnreadCountChange;
+  const stageRef = useRef<FlowStage>("service");
   const [loaded, setLoaded] = useState(false);
   const [stage, setStage] = useState<FlowStage>("service");
   const [selectedService, setSelectedService] = useState<ServiceId | null>(null);
@@ -448,6 +451,10 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [progressError, setProgressError] = useState<string | null>(null);
   const [messageRequestedDocIds, setMessageRequestedDocIds] = useState<string[]>([]);
   const [applicationStartError, setApplicationStartError] = useState<string | null>(null);
+
+  useEffect(() => {
+    stageRef.current = stage;
+  }, [stage]);
 
   const currentQuestion = QUESTION_LIST[questionIndex];
   const checklist = generatedChecklist;
@@ -621,6 +628,16 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     const auditPaymentStatus = String(record.audit_payment_status || "").toLowerCase();
     const fullPaymentStatus = String(record.full_payment_status || "").toLowerCase();
     const applicationStatus = String(record.application_status || "").toLowerCase();
+    const currentStage = String(record.current_stage || "").toLowerCase();
+    const isResumingExistingCase = Boolean(resumeReference);
+
+    if (applicationStatus === "rejected" || auditResult === "red") {
+      return "audit-result";
+    }
+
+    if (["registered", "draft"].includes(currentStage) || ["draft", "registered"].includes(applicationStatus)) {
+      return isResumingExistingCase ? "checklist" : "service";
+    }
 
     if (fullPaymentStatus === "paid" || record.payment_confirmed || applicationStatus === "paid") {
       return "processing";
@@ -698,7 +715,13 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
     const backendStage = deriveStageFromApplication(nextRecord);
     if (backendStage) {
-      setStage(backendStage);
+      const progressiveStages = ["checklist", "upload", "summary", "audit-pending", "audit-result", "full-payment", "processing", "completed"];
+      const currentStageIsProgressive = progressiveStages.includes(stageRef.current);
+      const backendWouldRegress = backendStage === "service" || backendStage === "questions";
+
+      if (!(currentStageIsProgressive && backendWouldRegress)) {
+        setStage(backendStage);
+      }
     }
 
     return nextRecord;
@@ -979,6 +1002,11 @@ useEffect(() => {
         if (resolvedService) {
           setSelectedService(resolvedService);
           setBannerMessage(`Resuming your ${serviceLabelMap[resolvedService]} application.`);
+        }
+
+        const backendStage = deriveStageFromApplication(app);
+        if (backendStage) {
+          setStage(backendStage);
         }
       } catch (error) {
         if (!active) return;
@@ -1720,6 +1748,8 @@ useEffect(() => {
         }
       );
 
+      router.push(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&resume=1&payment=success`);
+      // Optionally, you can still update state if you want to keep the in-component state in sync
       setStage("processing");
       setProcessingStep(1);
       setBannerMessage("Service confirmed. Your application is in process.");
@@ -2236,7 +2266,8 @@ useEffect(() => {
                 </p>
                 <div className="mt-4 text-sm">
                   {auditStatus === "green" && <p>Proceed directly to the full service payment stage.</p>}
-                  {auditStatus !== "green" && <p>Upload corrected documents, resubmit for review, or choose add-on services if required.</p>}
+                  {auditStatus === "amber" && <p>Upload corrected documents, resubmit for review, or choose add-on services if required.</p>}
+                  {auditStatus === "red" && <p>This application is rejected and closed. To continue, start a new application.</p>}
                 </div>
               </div>
 
@@ -2267,6 +2298,14 @@ useEffect(() => {
                           const applicationStatus = String(applicationRecord?.application_status || "").trim().toLowerCase();
 
                           // FLYOCI-FIX: BUG-REUPLOAD-6
+                          if (auditStatus === "red" || applicationStatus === "rejected") {
+                            return (
+                              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-100 px-3 py-2 text-xs font-medium text-rose-800">
+                                Rejected case: uploads are disabled for this application.
+                              </div>
+                            );
+                          }
+
                           if (applicationStatus === "reuploaded_pending_review") {
                             return (
                               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -2360,7 +2399,10 @@ useEffect(() => {
               {auditTimeline.length > 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-white p-5">
                   <h4 className="font-semibold text-primary">Audit Timeline</h4>
-                  <div className="mt-3 space-y-2">
+                  <div
+                    className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar"
+                    style={{ scrollbarGutter: 'stable' }}
+                  >
                     {auditTimeline.map((entry, index) => (
                       <div key={`timeline-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
                         <p className="font-semibold text-slate-800">{String(entry.action || "status_update").replaceAll("_", " ")}</p>
@@ -2376,7 +2418,7 @@ useEffect(() => {
             </div>
           )}
 
-          {auditStatus !== "green" && (
+          {auditStatus === "amber" && (
             <div className="mt-6 rounded-2xl border border-border bg-bg-page p-5">
               <h4 className="font-semibold text-primary">Optional add-on services</h4>
               <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -2432,9 +2474,32 @@ useEffect(() => {
             </div>
           )}
 
+          {auditStatus === "red" && (
+            <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-5">
+              <h4 className="font-semibold text-rose-900">Application Closed</h4>
+              <p className="mt-2 text-sm text-rose-800">
+                This case is rejected and cannot proceed further. Please contact support or start a new application.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Button variant="outline" onClick={() => router.push("/dashboard")}>Back to Dashboard</Button>
+                <Button onClick={() => router.push("/dashboard/document-audit")}>Start New Application</Button>
+              </div>
+            </div>
+          )}
+
           {auditStatus === "green" && (
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button isLoading={apiLoading} onClick={proceedToFullPayment}>Proceed to Full Service Payment</Button>
+              <Button isLoading={apiLoading} onClick={async () => {
+                setApiLoading(true);
+                try {
+                  const refNum = requireReferenceNumber();
+                  router.push(`/dashboard/payment?reference=${encodeURIComponent(refNum)}`);
+                } finally {
+                  setApiLoading(false);
+                }
+              }}>
+                Proceed to Full Service Payment
+              </Button>
             </div>
           )}
         </div>

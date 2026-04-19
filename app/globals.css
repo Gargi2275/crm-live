@@ -25,15 +25,18 @@
 
 html {
 	scroll-behavior: smooth;
-	scrollbar-gutter: stable both-edges;
 	overflow-x: clip;
 	overscroll-behavior-y: none;
+	-ms-overflow-style: none;
+	scrollbar-width: none;
 }
 
 body {
 	width: 100%;
 	overflow-x: clip;
 	overscroll-behavior-y: none;
+	-ms-overflow-style: none;
+	scrollbar-width: none;
 	color: var(--text-body);
 	background:
 		radial-gradient(circle at 8% 0%, rgba(51, 161, 253, 0.12), transparent 32%),
@@ -86,18 +89,11 @@ section {
 	color: #062747;
 }
 
-::-webkit-scrollbar {
-	width: 10px;
-}
-
-::-webkit-scrollbar-track {
-	background: #eef5ff;
-}
-
-::-webkit-scrollbar-thumb {
-	border-radius: 999px;
-	border: 2px solid #eef5ff;
-	background: linear-gradient(180deg, #76c0ff 0%, #2e90f3 100%);
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+	display: none;
+	width: 0;
+	height: 0;
 }
 
 @layer components {

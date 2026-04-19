@@ -21,12 +21,15 @@ export interface AdminDashboardOverview {
     converted: number;
     conversion: string;
     revenue_today: number;
+    order_revenue_today?: number;
+    audit_revenue_today?: number;
+    full_payment_revenue_today?: number;
     pending_payments: number;
     avg_ticket_size: number;
   };
   daily_revenue: Array<{ day: string; expected: number; actual: number }>;
   monthly_revenue: Array<{ month: string; revenue: number }>;
-  service_revenue_breakdown: Array<{ name: string; value: number }>;
+  service_revenue_breakdown: Array<{ name: string; value: number; amount?: number }>;
   pipeline_overview: Array<{ stage: string; openCases: number; avgAge: string; breached: number }>;
   health_metrics: {
     total_leads: number;
@@ -58,6 +61,89 @@ export interface AdminDashboardOverview {
   }>;
   failed_logins: number;
   access_logs: Array<{ staff: string; file: string; time: string }>;
+  alerts_summary?: {
+    open: number;
+    acknowledged: number;
+    critical: number;
+  };
+}
+
+export interface StaffAccuracyRow {
+  staff_id: number;
+  staff_name: string;
+  staff_role: StaffRole;
+  rank: number;
+  audit_accuracy: number;
+  form_fill_accuracy: number;
+  sla_compliance: number;
+  correction_rate_score: number;
+  overall_accuracy: number;
+  badge: "Excellent" | "Good" | "Needs Improvement";
+  period: {
+    from: string;
+    to: string;
+  };
+}
+
+export interface StaffAccuracyAllResponse {
+  period: {
+    from: string;
+    to: string;
+  };
+  total_staff: number;
+  results: StaffAccuracyRow[];
+}
+
+export interface StaffPerformanceBadge {
+  staff_id: number;
+  badge: "Excellent" | "Good" | "Needs Improvement";
+}
+
+export interface AdminAlert {
+  id: number;
+  key: string;
+  alert_type:
+    | "sla_breach"
+    | "payment_pending"
+    | "security"
+    | "security_breach"
+    | "correction"
+    | "follow_up_required"
+    | "lead_converted"
+    | "staff_idle"
+    | "system";
+  severity: "critical" | "high" | "medium" | "low";
+  status: "open" | "acknowledged" | "resolved" | "dismissed";
+  title: string;
+  message: string;
+  formatted_message?: string;
+  alert_type_label?: string;
+  source_reference?: string;
+  metadata?: Record<string, unknown>;
+  occurrences: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  acknowledged_at?: string | null;
+  resolved_at?: string | null;
+  resolved_by_name?: string;
+}
+
+export interface AdminNotification {
+  id: number | string;
+  type: string;
+  type_label?: string;
+  message: string;
+  timestamp: string;
+}
+
+export interface AdminAlertsResponse {
+  alerts: AdminAlert[];
+  notifications: AdminNotification[];
+  summary: {
+    open: number;
+    acknowledged: number;
+    critical: number;
+  };
 }
 
 export interface AdminApplication {
@@ -82,6 +168,16 @@ export interface AdminApplication {
   correction_requested_at?: string | null;
   correction_resubmitted_at?: string | null;
   audit_logs?: Array<{ action: string; timestamp: string; actor: string }>;
+  admin_messages?: Array<{
+    created_at: string;
+    subject: string;
+    message: string;
+  }>;
+  reupload_requests?: Array<{
+    created_at: string;
+    note: string;
+    flagged_documents: Array<any>;
+  }>;
   flagged_documents?: Array<{
     document_type?: string;
     document_name?: string;
@@ -91,6 +187,23 @@ export interface AdminApplication {
     reuploaded?: boolean;
     reuploaded_at?: string | null;
   }>;
+  document_overview?: {
+    requested_documents?: Array<{
+      document_type?: string;
+      document_name?: string;
+      issue_reason?: string;
+      required_action?: string;
+      status?: string;
+    }>;
+    uploaded_documents?: Array<{
+      document_type?: string;
+      document_name?: string;
+      verification_status?: string;
+      uploaded_at?: string | null;
+      is_requested?: boolean;
+      is_reupload?: boolean;
+    }>;
+  };
   kanban_stage?: string | null;
   audit_fee_pence?: number;
   audit_credit_pence?: number;
@@ -106,6 +219,9 @@ export interface AdminApplication {
   }>;
   audit_payment_status?: string;
   full_payment_status?: string;
+  quote_status?: string;
+  quote_set_at?: string | null;
+  quote_expires_at?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -140,6 +256,12 @@ export interface AdminAuditResultPayload {
   overall_status: "pass" | "needs_correction" | "incomplete";
   auditor_notes: string;
   findings: AdminAuditFindingInput[];
+}
+
+export interface AdminPassportSetQuotePayload {
+  quote_amount_pence: number;
+  quote_notes?: string;
+  valid_days?: number;
 }
 
 interface ApiEnvelope<T> {
@@ -214,12 +336,16 @@ const refreshAdminAccessToken = async (): Promise<string | null> => {
         return null;
       }
 
-      const payload = (await response.json()) as { access?: string };
+      const payload = (await response.json()) as { access?: string; refresh?: string };
       if (!payload.access) {
         return null;
       }
 
       localStorage.setItem(ADMIN_ACCESS_KEY, payload.access);
+      // SIMPLE_JWT rotates refresh tokens; persist the new refresh when present.
+      if (payload.refresh) {
+        localStorage.setItem(ADMIN_REFRESH_KEY, payload.refresh);
+      }
       return payload.access;
     })()
       .catch(() => null)
@@ -391,6 +517,30 @@ export const getAdminDashboardOverview = async () => {
   return payload.data;
 };
 
+export const getAdminAlerts = async () => {
+  const response = await adminAuthenticatedFetch("/admin/alerts/", { method: "GET" });
+  const payload = await parseApiResponse<AdminAlertsResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing admin alerts payload.");
+  }
+  return payload.data;
+};
+
+export const updateAdminAlertStatus = async (
+  alertId: number,
+  status: "acknowledged" | "resolved" | "dismissed",
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/alerts/${alertId}/status/`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+  const payload = await parseApiResponse<AdminAlert>(response);
+  if (!payload.data) {
+    throw new Error("Missing updated alert payload.");
+  }
+  return payload.data;
+};
+
 export const listAdminApplications = async () => {
   const response = await adminAuthenticatedFetch("/applications/", { method: "GET" });
   const payload = await parseApiResponse<AdminApplication[]>(response);
@@ -414,14 +564,42 @@ export const getAdminApplicationDocuments = async (referenceNumber: string) => {
   return payload.data || [];
 };
 
-export const updateAdminApplicationStage = async (applicationId: number, stage: string) => {
+export const updateAdminApplicationStage = async (
+  applicationId: number,
+  stage: string,
+  options?: { correctionCause?: "staff_error" | "customer_error" },
+) => {
+  const payloadBody: Record<string, unknown> = { stage };
+  if (options?.correctionCause) {
+    payloadBody.correction_cause = options.correctionCause;
+  }
+
   const response = await adminAuthenticatedFetch(`/applications/${applicationId}/`, {
     method: "PATCH",
-    body: JSON.stringify({ stage }),
+    body: JSON.stringify(payloadBody),
   });
   const payload = await parseApiResponse<AdminApplication>(response);
   if (!payload.data) {
     throw new Error("Application update response missing.");
+  }
+  return payload.data;
+};
+
+export const getStaffAccuracyAll = async (fromDate: string, toDate: string) => {
+  const query = new URLSearchParams({ from: fromDate, to: toDate }).toString();
+  const response = await adminAuthenticatedFetch(`/staff/accuracy/all/?${query}`, { method: "GET" });
+  const payload = await parseApiResponse<StaffAccuracyAllResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing staff accuracy payload.");
+  }
+  return payload.data;
+};
+
+export const getStaffPerformanceBadge = async () => {
+  const response = await adminAuthenticatedFetch("/staff/me/performance-badge/", { method: "GET" });
+  const payload = await parseApiResponse<StaffPerformanceBadge>(response);
+  if (!payload.data) {
+    throw new Error("Missing staff performance badge payload.");
   }
   return payload.data;
 };
@@ -477,20 +655,28 @@ export const sendAdminApplicationReminder = async (applicationId: number, type: 
   return parseApiResponse<{ reference_number: string; type: string }>(response);
 };
 
+export const setAdminPassportRenewalQuote = async (
+  applicationId: number,
+  payloadBody: AdminPassportSetQuotePayload,
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/passport-renewal/${applicationId}/set-quote/`, {
+    method: "POST",
+    body: JSON.stringify(payloadBody),
+  });
+  return parseApiResponse<{ success: boolean; quote_set: boolean }>(response);
+};
+
 export const sendAdminCustomerMessage = async (payloadBody: {
+  application_id: number;
   reference_number: string;
   subject?: string;
   description: string;
 }) => {
-  const response = await adminAuthenticatedFetch("/support/tickets/", {
+  const response = await adminAuthenticatedFetch(`/admin/applications/${payloadBody.application_id}/message/`, {
     method: "POST",
     body: JSON.stringify({
-      ticket_number: `STAFF-${Date.now()}`,
       subject: payloadBody.subject || `Staff message for ${payloadBody.reference_number}`,
       description: payloadBody.description,
-      category: "status_update",
-      priority: "medium",
-      ticket_status: "open",
     }),
   });
   return parseApiResponse(response);

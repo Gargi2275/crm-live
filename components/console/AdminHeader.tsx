@@ -15,8 +15,8 @@ export function AdminHeader() {
       setIsLoggingOut(true);
       await logout();
       router.push('/');
-    } catch (error) {
-      console.error('Logout failed:', error);
+    } catch {
+      // No-op: session cleanup still runs via logout finally handling.
     } finally {
       setIsLoggingOut(false);
     }

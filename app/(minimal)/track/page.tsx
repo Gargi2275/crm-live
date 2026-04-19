@@ -89,6 +89,24 @@ export default function TrackPage() {
 
   const isDashboardVisible = !!summary;
 
+  useEffect(() => {
+    if (!summary || !authService.isLoggedIn()) {
+      return;
+    }
+
+    const resolvedCase = (summary.file_number || caseNumber || "").trim();
+    if (!resolvedCase) {
+      return;
+    }
+
+    const nextUrl = `/indian-e-visa?case=${encodeURIComponent(resolvedCase)}&view=details`;
+    const timeoutId = window.setTimeout(() => {
+      router.replace(nextUrl);
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [summary, caseNumber, router]);
+
   const hasMissingDocuments = useMemo(() => {
     if (!documents.length) {
       return false;
@@ -270,26 +288,17 @@ export default function TrackPage() {
 
   // prevent duplicate verify (Strict Mode safe)
   if (verifiedMagicTokenRef.current === magicToken) {
-    console.info('[track] magic token already processed, skipping duplicate verify');
     return;
   }
   verifiedMagicTokenRef.current = magicToken;
 
-  console.info('[track] magic token detected', {
-    caseFromUrl: caseNumber || initialCase,
-    tokenPreview: magicToken.slice(0, 8),
-  });
-
   const verifyAndLoad = async () => {
-    console.info('[track] verifyAndLoad started');
     setIsMagicVerifying(true);
     setError("");
     setMessage("Verifying your magic link...");
 
     try {
       const verifyRes = await authService.verifyMagicLink(magicToken);
-
-      console.info('[track] verify success', verifyRes);
 
       const nextStep = verifyRes.data.next_step || "track";
       const resumeUrl = verifyRes.data.resume_url;
@@ -321,10 +330,8 @@ export default function TrackPage() {
       router.replace(`/track?case=${encodeURIComponent(caseFromResponse)}&otp=${encodeURIComponent(otpFromResponse)}`);
 
     } catch (magicErr) {
-      console.error('[track] verifyAndLoad failed', magicErr);
       setError(magicErr instanceof Error ? magicErr.message : "Magic link verification failed.");
     } finally {
-      console.info('[track] verifyAndLoad finished');
       setIsMagicVerifying(false);
     }
   };

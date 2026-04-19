@@ -30,7 +30,7 @@ export default function PassportRenewalPage() {
           <div className="rounded-2xl border border-[#d9e8ff] bg-white p-6 shadow-[0_12px_36px_rgba(30,74,135,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_44px_rgba(30,74,135,0.13)]">
             <h2 className="text-lg font-heading font-bold text-primary">Service Summary</h2>
             <div className="mt-4 space-y-3 text-sm text-textMuted">
-              <div className="flex items-center justify-between"><span>Pricing</span><strong className="text-primary">On request</strong></div>
+              <div className="flex items-center justify-between"><span>Pricing</span><strong className="text-primary">Price on request</strong></div>
               <div className="flex items-center justify-between"><span>Audit review</span><strong className="text-primary">Recommended</strong></div>
               <div className="flex items-center justify-between"><span>Support</span><strong className="text-primary">End-to-end</strong></div>
             </div>

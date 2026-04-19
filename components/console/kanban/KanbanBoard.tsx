@@ -26,6 +26,7 @@ type KanbanCase = PipelineCase & {
 
 const STAGE_ALIAS: Record<string, PipelineCase["stage"]> = {
   NEW_LEAD: "NEW_LEAD",
+  PASSPORT_QUOTE_PENDING: "PASSPORT_QUOTE_PENDING",
   AUDIT_PENDING: "AUDIT_PENDING",
   AUDIT_COMPLETED: "AUDIT_COMPLETED",
   DOCUMENTS_REQUIRED: "DOCUMENTS_REQUIRED",
@@ -56,21 +57,94 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
   const auditResult = String(item.audit_result || "").toLowerCase();
   const applicationStatus = String(item.application_status || "").toLowerCase();
   const fullPaymentStatus = String(item.full_payment_status || "").toLowerCase();
-  const amountDue = Number(item.amount_due_pence || 0);
+  const serviceHint = String(item.service_type || item.service_name || "").toLowerCase();
+  const quoteStatus = String((item as any).quote_status || "").trim().toUpperCase();
+  const isEVisaCase = serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
+  const isPassportCase = serviceHint.includes("passport");
+  const hasDocuments = Number(item.document_count || 0) > 0;
 
-  if (["SUBMITTED", "DELIVERED"].includes(rawStage)) {
-    return rawStage as PipelineCase["stage"];
+  if (rawStage === "CORRECTION_REQUESTED" || applicationStatus === "correction_requested" || applicationStatus === "reuploaded_pending_review") {
+    return "DOCUMENTS_REQUIRED";
   }
 
   if (auditResult === "red" || applicationStatus === "rejected") {
     return "DOCUMENTS_REQUIRED";
   }
 
+  if (
+    isPassportCase &&
+    (
+      rawStage === "INITIAL_REVIEW" ||
+      applicationStatus === "pending_quote" ||
+      quoteStatus === "PENDING_QUOTE"
+    )
+  ) {
+    return "PASSPORT_QUOTE_PENDING";
+  }
+
+  if (
+    isPassportCase &&
+    (
+      applicationStatus === "quoted" ||
+      ["QUOTED", "EXPIRED", "QUOTE_ACCEPTED"].includes(quoteStatus)
+    )
+  ) {
+    return "PAYMENT_PENDING";
+  }
+
+  if (isEVisaCase) {
+    if (rawStage === "DELIVERED" || rawStage === "CLOSED" || rawStage === "DECISION_RECEIVED") {
+      return "DELIVERED";
+    }
+
+    if (rawStage === "SUBMITTED") {
+      return "SUBMITTED";
+    }
+
+    if (rawStage === "READY_FOR_SUBMISSION") {
+      return "READY_FOR_SUBMISSION";
+    }
+
+    if (rawStage === "REVIEW_PENDING") {
+      return "REVIEW_PENDING";
+    }
+
+    if (rawStage === "FORM_FILLING" || rawStage === "IN_PREPARATION" || rawStage === "DOCS_RECEIVED") {
+      return "FORM_FILLING";
+    }
+
+    if (rawStage === "PAID") {
+      return hasDocuments ? "FORM_FILLING" : "DOCUMENT_UPLOAD_PENDING";
+    }
+
+    if (rawStage === "CORRECTION_REQUESTED") {
+      return "DOCUMENT_UPLOAD_PENDING";
+    }
+
+    if (rawStage === "PAYMENT_PENDING" || rawStage === "EMAIL_CONFIRMED" || applicationStatus === "payment_pending") {
+      return "PAYMENT_PENDING";
+    }
+
+    if (rawStage === "REGISTERED" || applicationStatus === "draft") {
+      return "NEW_LEAD";
+    }
+
+    return (STAGE_ALIAS[rawStage] || "FORM_FILLING") as PipelineCase["stage"];
+  }
+
+  if (rawStage === "REGISTERED" || applicationStatus === "draft") {
+    return "NEW_LEAD";
+  }
+
+  if (["SUBMITTED", "DELIVERED"].includes(rawStage)) {
+    return rawStage as PipelineCase["stage"];
+  }
+
   if (rawStage === "REVIEW_PENDING" || rawStage === "READY_FOR_SUBMISSION") {
     return rawStage as PipelineCase["stage"];
   }
 
-  if (fullPaymentStatus === "paid" || amountDue <= 0) {
+  if (fullPaymentStatus === "paid") {
     return "FORM_FILLING";
   }
 
@@ -309,7 +383,9 @@ export function KanbanBoard() {
       setColumnLoading((prev) => ({ ...prev, [targetStage]: true }));
       setColumnErrors((prev) => ({ ...prev, [targetStage]: null }));
       try {
-        await updateAdminApplicationStage(targetCase.applicationId, targetStage);
+        await updateAdminApplicationStage(targetCase.applicationId, targetStage, {
+          correctionCause: targetStage === "DOCUMENTS_REQUIRED" ? "customer_error" : undefined,
+        });
         toast.success(`${active.id} moved to ${columnTitle}`);
       } catch (error) {
         moveCase(caseId, previousStage);
@@ -416,7 +492,9 @@ export function KanbanBoard() {
           setSelectedCaseDetails((prev) => (prev ? { ...prev, stage: nextStage } : prev));
 
           try {
-            await updateAdminApplicationStage(selectedCase.applicationId, nextStage);
+            await updateAdminApplicationStage(selectedCase.applicationId, nextStage, {
+              correctionCause: nextStage === "DOCUMENTS_REQUIRED" ? "customer_error" : undefined,
+            });
           } catch (error) {
             moveCase(caseId, previousStage);
             setSelectedCase((prev) => (prev ? { ...prev, stage: previousStage } : prev));

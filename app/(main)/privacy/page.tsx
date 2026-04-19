@@ -7,7 +7,11 @@ export default function PrivacyPage() {
         <FadeInUp>
           <h1 className="text-4xl md:text-5xl font-heading font-bold text-primary mb-8">Privacy Policy</h1>
           <div className="prose prose-lg text-textMuted font-body leading-relaxed">
-            <p>(Standard Privacy Policy placeholder)</p>
+            <p>What information we collect (name, contact details, document copies)</p>
+            <p>How we use it (to provide services, comply with regulations)</p>
+            <p>How long we store it</p>
+            <p>Third-party processors (payment gateway, hosting, CRM etc.)</p>
+            <p>Rights of the user (access, correction, deletion where applicable)</p>
           </div>
         </FadeInUp>
       </div>

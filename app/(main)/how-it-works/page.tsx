@@ -27,7 +27,7 @@ export default function HowItWorksPage() {
     },
     {
       title: 'Step 5 — Full Service Confirmation',
-      desc: 'If you proceed, we deduct the £15 audit from the final fee. You pay the remaining balance. If you do not proceed, you keep the advice.'
+      desc: 'If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update), we deduct the £15 audit from the final fee. Audit credit does not apply to e-Visa or Passport Renewal. If you do not proceed, you keep the advice.'
     },
     {
       title: 'Step 6 — Application Preparation & Submission',

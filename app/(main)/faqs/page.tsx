@@ -14,7 +14,7 @@ export default function FAQsPage() {
     },
     {
       question: "Why do I have to pay £15 for a Document Audit?",
-      answer: "Most applications fail because of incorrect or incomplete documents. Our £15 audit fee covers the time of an expert who reviews your documents and sends you a clear written plan. This £15 is fully deducted from your service price when you proceed with any full application within 30 days, so it is not an extra cost."
+      answer: "Most applications fail because of incorrect or incomplete documents. Our £15 audit fee covers the time of an expert who reviews your documents and sends you a clear written plan. This £15 is fully deducted from your service price when you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within 30 days. Audit credit does not apply to e-Visa or Passport Renewal."
     },
     {
       question: "Can I skip the Document Audit and pay directly for the full service?",

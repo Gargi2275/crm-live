@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Outfit } from "next/font/google";
 import { motion } from "framer-motion";
@@ -21,7 +21,6 @@ import { API_BASE_URL } from "@/lib/config";
 const registrationSchema = z.object({
   visaDuration: z.enum(["1-Year", "5-Year"], { message: "Select visa duration" }),
   email: z.string().min(1, 'Email is required').email("Enter a valid email address"),
-  confirmEmail: z.string().email("Enter a valid email address"),
   countryCode: z.string().min(1),
   phone: z.string().min(7, "Enter a valid phone number"),
   fullName: z.string().min(2, "Enter your full name as per passport"),
@@ -29,9 +28,6 @@ const registrationSchema = z.object({
   countryOfResidence: z.string().min(1, "Select your country of residence"),
   purposeOfVisit: z.enum(["Tourism", "Business", "Medical", "Conference", "Other"], { message: "Select purpose of visit" }),
   consent: z.literal(true, { message: "You must agree to continue" }),
-}).refine(d => d.email === d.confirmEmail, {
-  message: "Email addresses do not match",
-  path: ["confirmEmail"],
 });
 
 type RegistrationData = z.infer<typeof registrationSchema>;
@@ -58,6 +54,39 @@ const outfit = Outfit({
 
 const REGISTER_DRAFT_SESSION_KEY = "flyoci:evisa-register-draft-active";
 
+function splitPhoneNumber(combined: string): {
+  countryCode: string;
+  phone: string;
+} {
+  if (!combined || !combined.trim()) {
+    return { countryCode: "+44", phone: "" };
+  }
+
+  // Check longer codes first to avoid
+  // "+1" matching "+971" etc.
+  const codes = [
+    "+971", "+972", "+973", "+974",
+    "+975", "+976", "+977", "+965",
+    "+966", "+968", "+354", "+353",
+    "+352", "+351", "+350",
+    "+44", "+91", "+61", "+65", "+1",
+  ];
+
+  const cleaned = combined.trim();
+
+  for (const code of codes) {
+    if (cleaned.startsWith(code)) {
+      return {
+        countryCode: code,
+        phone: cleaned.slice(code.length).trim(),
+      };
+    }
+  }
+
+  // Fallback if no known code found
+  return { countryCode: "+44", phone: cleaned };
+}
+
 export default function RegistrationPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -81,6 +110,9 @@ export default function RegistrationPage() {
   const [applicationRecord, setApplicationRecord] = useState<{
     reference_number?: string;
     application_status?: string;
+    unified_status?: string;
+    stage?: string;
+    kanban_stage?: string | null;
     current_stage?: string;
     application_date?: string | null;
     submission_date?: string | null;
@@ -89,6 +121,32 @@ export default function RegistrationPage() {
     created_at?: string;
     updated_at?: string;
     notes?: string;
+    audit_logs?: Array<{
+      action?: string;
+      timestamp?: string;
+      actor?: string;
+      metadata?: {
+        subject?: string;
+        description?: string;
+        message?: string;
+        notes?: string;
+      };
+    }>;
+    admin_messages?: Array<{
+      created_at?: string;
+      subject?: string;
+      message?: string;
+    }>;
+    reupload_requests?: Array<{
+      created_at?: string;
+      note?: string;
+      flagged_documents?: Array<{
+        document_type?: string;
+        document_name?: string;
+        issue_reason?: string;
+        required_action?: string;
+      }>;
+    }>;
     service_name?: string;
     audit_result?: "pending" | "green" | "amber" | "red" | string;
     auditor_notes?: string;
@@ -113,8 +171,12 @@ export default function RegistrationPage() {
   const [documents, setDocuments] = useState<Array<{
     id: number;
     document_type: string;
+    document_name?: string;
+    original_filename?: string;
+    stored_filename?: string;
     verification_status: string;
     upload_date: string | null;
+    created_at?: string;
     updated_at: string;
   }>>([]);
   const [reuploadingDocumentKey, setReuploadingDocumentKey] = useState("");
@@ -130,7 +192,7 @@ export default function RegistrationPage() {
   const isExistingCase = Boolean(caseFromQuery);
   const isReadOnlyApplication = searchParams.get("readonly") === "1";
   const shouldHydrateFromPersistedState = Boolean(magicToken || caseFromQuery || resumeMode || detailsMode || hasActiveDraftSession);
-  const nationalityOptions = new Set(["British", "American", "Canadian", "Australian", "Indian", "Other"]);
+  const nationalityOptions = new Set(["British", "American", "Canadian", "Indian", "Other"]);
   const residenceOptions = new Set([
     "United Kingdom",
     "United States",
@@ -142,12 +204,11 @@ export default function RegistrationPage() {
   ]);
   const purposeOptions = new Set(["Tourism", "Business", "Medical", "Conference", "Other"]);
 
-  const { register, handleSubmit, control, setValue, watch, reset } = useForm<RegistrationData>({
+  const { register, handleSubmit, control, setValue, watch, reset, resetField } = useForm<RegistrationData>({
     resolver: zodResolver(registrationSchema),
     defaultValues: {
       visaDuration: shouldHydrateFromPersistedState ? data.visaDuration || undefined : undefined,
       email: shouldHydrateFromPersistedState ? data.email || "" : "",
-      confirmEmail: shouldHydrateFromPersistedState ? data.email || "" : "",
       countryCode: shouldHydrateFromPersistedState ? data.countryCode || "+44" : "+44",
       phone: shouldHydrateFromPersistedState ? data.phone || "" : "",
       fullName: shouldHydrateFromPersistedState ? data.fullName || "" : "",
@@ -188,7 +249,6 @@ export default function RegistrationPage() {
     reset({
       visaDuration: undefined,
       email: "",
-      confirmEmail: "",
       countryCode: "+44",
       phone: "",
       fullName: "",
@@ -199,6 +259,64 @@ export default function RegistrationPage() {
     });
     loadedResumeCaseRef.current = "";
     processedResumeMagicRef.current = "";
+
+    // Profile prefill runs AFTER reset
+    // so it never gets wiped
+    if (!authService.isLoggedIn()) return;
+
+    const prefillFromProfile = async () => {
+      try {
+        const res = await authenticatedFetch(
+          `${API_BASE_URL}/auth/me/`,
+          { method: "GET" }
+        );
+        if (!res.ok) return;
+
+        const json = await res.json().catch(() => ({}));
+        const coreUser = (json as any)?.data?.core_user;
+        if (!coreUser) return;
+
+        console.log("[prefillFromProfile] coreUser data:", coreUser);
+
+        // Phone
+        const rawPhone = coreUser.phone_number || "";
+        console.log("[prefillFromProfile] rawPhone:", rawPhone);
+        if (rawPhone) {
+          const { countryCode, phone } =
+            splitPhoneNumber(rawPhone);
+          console.log("[prefillFromProfile] split phone:", { countryCode, phone });
+          setValue("countryCode", countryCode);
+          setValue("phone", phone);
+          updateData({ phone, countryCode });
+        }
+
+        // Nationality and Country of Residence
+        const nationality = coreUser.nationality || "";
+        const country = coreUser.country || "";
+        console.log("[prefillFromProfile] nationality:", nationality, "country:", country);
+
+        // Email
+        if (coreUser.email) {
+          setValue("email", coreUser.email);
+          updateData({ email: coreUser.email });
+        }
+
+        // Full name
+        const fullName = [
+          coreUser.first_name || "",
+          coreUser.last_name || "",
+        ].filter(Boolean).join(" ").trim();
+        if (fullName) {
+          setValue("fullName", fullName);
+          updateData({ fullName });
+        }
+
+      } catch {
+        // Silent fail
+      }
+    };
+
+    void prefillFromProfile();
   }, [draftSessionChecked, shouldHydrateFromPersistedState, resetData, reset]);
 
   useEffect(() => {
@@ -213,7 +331,6 @@ export default function RegistrationPage() {
     reset({
       visaDuration: data.visaDuration || undefined,
       email: data.email || "",
-      confirmEmail: data.email || "",
       countryCode: data.countryCode || "+44",
       phone: data.phone || "",
       fullName: data.fullName || "",
@@ -227,9 +344,9 @@ export default function RegistrationPage() {
   const applyRegistrationPrefill = (caseNumber: string, prefill?: {
     visaDuration?: "1-Year" | "5-Year";
     email?: string;
-    confirmEmail?: string;
     countryCode?: string;
     phone?: string;
+    phone_number?: string;
     fullName?: string;
     nationality?: string;
     countryOfResidence?: string;
@@ -240,19 +357,17 @@ export default function RegistrationPage() {
     if (prefill?.minimalPrefillOnly) {
       const visaDuration = prefill?.visaDuration === "5-Year" ? "5-Year" : "1-Year";
       const email = prefill?.email || "";
-      const confirmEmail = prefill?.confirmEmail || email;
       const fullName = prefill?.fullName || "";
 
       setValue("visaDuration", visaDuration);
       setValue("email", email);
-      setValue("confirmEmail", confirmEmail);
       setValue("countryCode", "+44");
       setValue("phone", "");
       setValue("fullName", fullName);
-      setValue("nationality", undefined);
-      setValue("countryOfResidence", undefined);
-      setValue("purposeOfVisit", undefined);
-      setValue("consent", undefined);
+      resetField("nationality");
+      resetField("countryOfResidence");
+      resetField("purposeOfVisit");
+      resetField("consent");
 
       updateData({
         fileNumber: caseNumber || null,
@@ -276,12 +391,26 @@ export default function RegistrationPage() {
     const nationality = nationalityOptions.has(prefill?.nationality || "") ? (prefill?.nationality as RegistrationData["nationality"]) : undefined;
     const countryOfResidence = residenceOptions.has(prefill?.countryOfResidence || "") ? (prefill?.countryOfResidence as RegistrationData["countryOfResidence"]) : undefined;
     const purposeOfVisit = purposeOptions.has(prefill?.purposeOfVisit || "") ? (prefill?.purposeOfVisit as RegistrationData["purposeOfVisit"]) : "Tourism";
+    const rawCombined = (prefill as any)?.phone_number || "";
+    const splitCombined = rawCombined && !prefill?.phone ? splitPhoneNumber(rawCombined) : null;
+    const resolvedCountryCode = rawCombined && !prefill?.phone
+      ? splitCombined?.countryCode || "+44"
+      : (prefill?.countryCode || watch("countryCode") || data.countryCode || "+44");
+    const resolvedPhone = rawCombined && !prefill?.phone
+      ? splitCombined?.phone || ""
+      : ((prefill?.phone && prefill.phone.trim()) || watch("phone") || data.phone || "");
+
+    console.log("[applyRegistrationPrefill] prefill data:", prefill);
+    console.log("[applyRegistrationPrefill] parsed values:", { visaDuration, nationality, countryOfResidence, purposeOfVisit });
+    if (rawCombined) {
+      const split = splitPhoneNumber(rawCombined);
+      console.log("[applyRegistrationPrefill] rawCombined phone:", rawCombined, "split:", split);
+    }
 
     setValue("visaDuration", visaDuration);
     setValue("email", prefill?.email || "");
-    setValue("confirmEmail", prefill?.confirmEmail || prefill?.email || "");
-    setValue("countryCode", prefill?.countryCode || "+44");
-    setValue("phone", prefill?.phone || "");
+    setValue("countryCode", resolvedCountryCode, { shouldValidate: true, shouldDirty: true });
+    setValue("phone", resolvedPhone, { shouldValidate: true, shouldDirty: true });
     setValue("fullName", prefill?.fullName || "");
     if (nationality) {
       setValue("nationality", nationality);
@@ -298,8 +427,8 @@ export default function RegistrationPage() {
       fileNumber: caseNumber || null,
       visaDuration,
       email: prefill?.email || "",
-      phone: prefill?.phone || "",
-      countryCode: prefill?.countryCode || "+44",
+      phone: resolvedPhone,
+      countryCode: resolvedCountryCode,
       fullName: prefill?.fullName || "",
       nationality: nationality || "",
       countryOfResidence: countryOfResidence || "",
@@ -314,8 +443,8 @@ export default function RegistrationPage() {
       lastSavedDetailsRef.current = JSON.stringify({
         case_number: caseNumber || "",
         email: prefill?.email || "",
-        confirm_email: prefill?.confirmEmail || prefill?.email || "",
-        mobile_number: `${prefill?.countryCode || "+44"}${prefill?.phone || ""}`,
+        confirm_email: prefill?.email || "",
+        mobile_number: `${resolvedCountryCode}${resolvedPhone}`,
         full_name: prefill?.fullName || "",
         nationality: nationality || "",
         country_of_residence: countryOfResidence || "",
@@ -389,7 +518,6 @@ export default function RegistrationPage() {
           reset({
             visaDuration: undefined,
             email: "",
-            confirmEmail: "",
             countryCode: "+44",
             phone: "",
             fullName: "",
@@ -454,7 +582,7 @@ export default function RegistrationPage() {
         const updateResponse = await eVisaApi.updateRegistration({
           case_number: caseFromQuery,
           email: data.email,
-          confirm_email: data.confirmEmail,
+          confirm_email: data.email,
           mobile_number: `${data.countryCode}${data.phone}`,
           full_name: data.fullName,
           nationality: data.nationality,
@@ -486,7 +614,7 @@ export default function RegistrationPage() {
 
       const response = await eVisaApi.register({
         email: data.email,
-        confirm_email: data.confirmEmail,
+        confirm_email: data.email,
         mobile_number: `${data.countryCode}${data.phone}`,
         full_name: data.fullName,
         nationality: data.nationality,
@@ -530,7 +658,6 @@ export default function RegistrationPage() {
         router.push(`/indian-e-visa/confirm-email?case=${encodeURIComponent(fileNumber)}&cooldown=${encodeURIComponent(String(cooldownSeconds))}`);
       }
     } catch (error) {
-      console.error('Registration error:', error);
       const message = error instanceof Error ? error.message : "Registration failed. Please try again.";
       toast.error(message);
       setHasSubmitError(true);
@@ -583,132 +710,198 @@ export default function RegistrationPage() {
     if (!value) return "-";
     return value.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
   };
-  const applicationStageLabel = resumeApplication?.current_stage
-    ? formatBackendLabel(resumeApplication.current_stage)
-    : "Registered";
+  const cleanedApplicationNote = useMemo(() => {
+    const raw = (applicationRecord?.notes || "").trim();
+    if (!raw) return "";
+
+    // Some backend updates can store serialized payload JSON in notes; don't show that to users.
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return "";
+      }
+    } catch {
+      // Non-JSON notes are fine.
+    }
+
+    const lowered = raw.toLowerCase();
+    if (
+      lowered.includes("registration snapshot") ||
+      (lowered.includes("purpose:") && lowered.includes("mobile_number")) ||
+      (lowered.includes("full_name") && lowered.includes("country_of_residence"))
+    ) {
+      return "";
+    }
+    if (raw.startsWith("{") && lowered.includes("case_number") && lowered.includes("purpose_of_visit")) {
+      return "";
+    }
+
+    return raw;
+  }, [applicationRecord?.notes]);
+  const pipelineStageRaw =
+    applicationRecord?.stage ||
+    applicationRecord?.kanban_stage ||
+    applicationRecord?.current_stage ||
+    resumeApplication?.current_stage ||
+    "registered";
+  const applicationStageLabel = formatBackendLabel(pipelineStageRaw);
+
+  const resolvedDashboardStatus = (() => {
+    const stageNormalized = String(pipelineStageRaw || "").toLowerCase();
+    if (["ready_for_submission", "submitted", "delivered"].includes(stageNormalized)) {
+      return formatBackendLabel(stageNormalized);
+    }
+    if (stageNormalized === "review_pending") {
+      return "Under Review";
+    }
+    return formatBackendLabel(applicationRecord?.unified_status || applicationRecord?.application_status || resumeApplication?.application_status || "under_review");
+  })();
+
+  const isPendingDocumentUpload = (() => {
+    const stageNormalized = String(pipelineStageRaw || "").toLowerCase();
+    const statusNormalized = String(applicationRecord?.unified_status || applicationRecord?.application_status || resumeApplication?.application_status || "").toLowerCase();
+
+    return (
+      ["document_upload_pending", "pending_docs"].includes(stageNormalized) ||
+      ["document_upload_pending", "pending_docs"].includes(statusNormalized)
+    );
+  })();
+
+  const resolvedDashboardMessage = (() => {
+    const stageNormalized = String(pipelineStageRaw || "").toLowerCase();
+    const statusNormalized = String(applicationRecord?.unified_status || applicationRecord?.application_status || "").toLowerCase();
+    if (["document_upload_pending", "pending_docs"].includes(stageNormalized) || ["document_upload_pending", "pending_docs"].includes(statusNormalized)) {
+      return "Your application is pending document upload. Please upload required documents to continue.";
+    }
+    if (stageNormalized === "ready_for_submission") {
+      return "Your documents are approved and your application is ready for submission.";
+    }
+    if (stageNormalized === "submitted") {
+      return "Your application has been submitted. We will update you when a decision is received.";
+    }
+    if (stageNormalized === "delivered") {
+      return "Your application is complete. You will receive your final e-Visa document and completion update shortly on your registered email.";
+    }
+    if (String(applicationRecord?.unified_status || applicationRecord?.application_status || "").toLowerCase() === "reuploaded_pending_review") {
+      return "Corrected documents received. Your re-upload is pending admin review.";
+    }
+    return cleanedApplicationNote || "Your application is being processed. We will update you as soon as there is progress.";
+  })();
 
   useEffect(() => {
     if (!detailsMode || !caseFromQuery || !authService.isLoggedIn()) {
       return;
     }
 
-    const fetchApplicationExtras = async () => {
-      try {
-        const [detailRes, docsRes] = await Promise.all([
-          authenticatedFetch(`${API_BASE_URL}/applications/${encodeURIComponent(caseFromQuery)}/`, { method: "GET" }),
-          authenticatedFetch(`${API_BASE_URL}/applications/${encodeURIComponent(caseFromQuery)}/documents/`, { method: "GET" }),
-        ]);
+   const fetchApplicationExtras = async () => {
+  try {
+    const [detailRes, docsRes, profileRes] = await Promise.all([
+      authenticatedFetch(`${API_BASE_URL}/applications/${encodeURIComponent(caseFromQuery)}/`, { method: "GET" }),
+      authenticatedFetch(`${API_BASE_URL}/applications/${encodeURIComponent(caseFromQuery)}/documents/`, { method: "GET" }),
+      authenticatedFetch(`${API_BASE_URL}/auth/me/`, { method: "GET" }),
+    ]);
 
-        const detailJson = await detailRes.json().catch(() => ({}));
-        const docsJson = await docsRes.json().catch(() => ({}));
+    const detailJson = await detailRes.json().catch(() => ({}));
+    const docsJson = await docsRes.json().catch(() => ({}));
 
-        if (detailRes.ok) {
-          setApplicationRecord(((detailJson as { data?: unknown }).data || null) as {
-            reference_number?: string;
-            application_status?: string;
-            current_stage?: string;
-            application_date?: string | null;
-            submission_date?: string | null;
-            approval_date?: string | null;
-            completion_date?: string | null;
-            created_at?: string;
-            updated_at?: string;
-            notes?: string;
-            service_name?: string;
-            audit_result?: "pending" | "green" | "amber" | "red" | string;
-            auditor_notes?: string;
-            correction_requested_at?: string | null;
-            flagged_documents?: Array<{
-              document_type?: string;
-              document_name?: string;
-              issue_reason?: string;
-              issue?: string;
-              required_action?: string;
-              status?: string;
-            }>;
-            latest_audit_findings?: Array<{
-              id?: number;
-              document_type?: string;
-              document_name?: string;
-              finding_description?: string;
-              required_action?: string;
-              priority?: string;
-            }>;
-          });
+    if (detailRes.ok) {
+      setApplicationRecord(((detailJson as { data?: unknown }).data || null) as {
+        reference_number?: string;
+        stage?: string;
+        kanban_stage?: string | null;
+        application_status?: string;
+        unified_status?: string;
+        current_stage?: string;
+        application_date?: string | null;
+        submission_date?: string | null;
+        approval_date?: string | null;
+        completion_date?: string | null;
+        created_at?: string;
+        updated_at?: string;
+        notes?: string;
+        service_name?: string;
+        audit_result?: "pending" | "green" | "amber" | "red" | string;
+        auditor_notes?: string;
+        correction_requested_at?: string | null;
+        flagged_documents?: Array<{
+          document_type?: string;
+          document_name?: string;
+          issue_reason?: string;
+          issue?: string;
+          required_action?: string;
+          status?: string;
+        }>;
+        latest_audit_findings?: Array<{
+          id?: number;
+          document_type?: string;
+          document_name?: string;
+          finding_description?: string;
+          required_action?: string;
+          priority?: string;
+        }>;
+      });
+    }
+
+    if (docsRes.ok) {
+      setDocuments((((docsJson as { data?: unknown[] }).data || []) as Array<{
+        id: number;
+        document_type: string;
+        verification_status: string;
+        upload_date: string | null;
+        updated_at: string;
+      }>));
+    }
+
+    // ✅ Fill missing fields from profile (only on first load, not on interval refetches)
+    if (profileRes.ok) {
+      const profileJson = await profileRes.json().catch(() => ({}));
+      const coreUser = (profileJson as any)?.data?.core_user;
+      console.log("[FETCH EXTRAS] coreUser received:", coreUser);
+      
+      if (coreUser) {
+        if (!watch("phone") && coreUser.phone_number) {
+          const { countryCode, phone } = splitPhoneNumber(coreUser.phone_number);
+          console.log("[FETCH EXTRAS] about to setValue phone:", phone, "countryCode:", countryCode);
+          setValue("countryCode", countryCode);
+          setValue("phone", phone);
+          console.log("[FETCH EXTRAS] after setValue - watch phone:", watch("phone"), "watch countryCode:", watch("countryCode"));
         }
 
-        if (docsRes.ok) {
-          setDocuments((((docsJson as { data?: unknown[] }).data || []) as Array<{
-            id: number;
-            document_type: string;
-            verification_status: string;
-            upload_date: string | null;
-            updated_at: string;
-          }>));
+        const residenceMap: Record<string, string> = {
+          "Australia": "Australia",
+          "United Kingdom": "United Kingdom",
+          "United States": "United States",
+          "Canada": "Canada",
+          "UAE": "UAE",
+          "Singapore": "Singapore",
+        };
+        if (!watch("countryOfResidence") && coreUser.country) {
+          const mapped = residenceMap[coreUser.country] ?? "Other";
+          setValue("countryOfResidence", mapped as RegistrationData["countryOfResidence"]);
         }
-      } catch {
-        // Keep showing available resume data if docs/details fetch fails.
       }
-    };
+    }
+
+  } catch {
+    // Keep showing available resume data if docs/details fetch fails.
+  }
+};
+
 
     void fetchApplicationExtras();
+
+    const intervalId = window.setInterval(() => {
+      void fetchApplicationExtras();
+    }, 15000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [detailsMode, caseFromQuery]);
 
-  useEffect(() => {
-    if (!detailsMode || !caseFromQuery) {
-      return;
-    }
 
-    const payload = {
-      case_number: caseFromQuery,
-      email: detailsSnapshot.email || data.email || "",
-      confirm_email: detailsSnapshot.email || data.email || "",
-      mobile_number: `${detailsSnapshot.countryCode || data.countryCode || "+44"}${detailsSnapshot.phone || data.phone || ""}`,
-      full_name: detailsSnapshot.fullName || data.fullName || "",
-      nationality: detailsSnapshot.nationality || data.nationality || "",
-      country_of_residence: detailsSnapshot.countryOfResidence || data.countryOfResidence || "",
-      purpose_of_visit: (detailsSnapshot.purposeOfVisit || data.purposeOfVisit || "Tourism") as "Tourism" | "Business" | "Medical" | "Conference" | "Other",
-      visa_duration: (detailsSnapshot.visaDuration || data.visaDuration || "1-Year") as "1-Year" | "5-Year",
-      consent: true,
-    };
 
-    const serialized = JSON.stringify(payload);
-    if (serialized === lastSavedDetailsRef.current) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        setIsSubmitting(true);
-        const response = await eVisaApi.updateRegistration(payload);
-        lastSavedDetailsRef.current = serialized;
-
-        updateData({
-          fileNumber: caseFromQuery,
-          visaDuration: payload.visa_duration,
-          email: payload.email,
-          phone: detailsSnapshot.phone || data.phone,
-          countryCode: detailsSnapshot.countryCode || data.countryCode,
-          fullName: payload.full_name,
-          nationality: payload.nationality,
-          countryOfResidence: payload.country_of_residence,
-          purposeOfVisit: payload.purpose_of_visit,
-          consentAccepted: true,
-        });
-
-        if (response.data.registration_prefill) {
-          lastSavedDetailsRef.current = JSON.stringify(payload);
-        }
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to update details.");
-      } finally {
-        setIsSubmitting(false);
-      }
-    }, 700);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [caseFromQuery, detailsMode, detailsSnapshot.email, detailsSnapshot.fullName, detailsSnapshot.phone, detailsSnapshot.countryCode, detailsSnapshot.countryOfResidence, detailsSnapshot.nationality, detailsSnapshot.purposeOfVisit, detailsSnapshot.visaDuration, data.email, data.phone, data.countryCode, data.fullName, data.countryOfResidence, data.nationality, data.purposeOfVisit, data.visaDuration, updateData]);
-
+  
   useEffect(() => {
     if (!detailsMode) return;
     if (!watch("visaDuration")) {
@@ -717,7 +910,6 @@ export default function RegistrationPage() {
     if (!watch("purposeOfVisit")) {
       setValue("purposeOfVisit", "Tourism");
     }
-    setValue("confirmEmail", watch("email") || "");
   }, [detailsMode, setValue, watch]);
 
   const inputClasses = () =>
@@ -728,10 +920,141 @@ export default function RegistrationPage() {
   const isPaymentConfirmed = resumeApplication?.payment_confirmed === true;
   const isEmailConfirmed = resumeApplication?.email_confirmed === true;
   const isFormLocked = detailsMode && isPaymentConfirmed && isEmailConfirmed;
+  const isEVisaCorrectionRequested =
+    String(applicationRecord?.application_status || "").toLowerCase() === "correction_requested" ||
+    String(applicationRecord?.current_stage || "").toLowerCase() === "correction_requested" ||
+    String(applicationRecord?.unified_status || "").toLowerCase() === "pending_docs";
+  const hasAnyFlaggedDocuments =
+    Array.isArray(applicationRecord?.flagged_documents) && applicationRecord.flagged_documents.length > 0;
+  const latestReuploadRequest = useMemo(() => {
+    const requests = Array.isArray(applicationRecord?.reupload_requests) ? applicationRecord.reupload_requests : [];
+    if (requests.length === 0) {
+      return null;
+    }
+    return [...requests].sort((left, right) => {
+      const leftTs = new Date(left.created_at || "").getTime();
+      const rightTs = new Date(right.created_at || "").getTime();
+      return rightTs - leftTs;
+    })[0] || null;
+  }, [applicationRecord?.reupload_requests]);
+
+  const activeFlaggedDocuments = useMemo(() => {
+    const normalize = (value?: string | null) => (value || "").trim().toLowerCase();
+
+    const pickActive = (source: Array<{
+      document_type?: string;
+      document_name?: string;
+      issue_reason?: string;
+      issue?: string;
+      required_action?: string;
+      status?: string;
+    }>) => {
+      const filtered = source.filter((item) => {
+        const status = normalize(item.status);
+        return !["reuploaded", "resolved", "done"].includes(status);
+      });
+
+      const deduped = filtered.reduce((acc, item) => {
+        const key = normalize(item.document_type) || normalize(item.document_name);
+        if (!key) return acc;
+        acc.set(key, item);
+        return acc;
+      }, new Map<string, (typeof filtered)[number]>());
+
+      return Array.from(deduped.values());
+    };
+
+    const latestRequested = Array.isArray(latestReuploadRequest?.flagged_documents)
+      ? latestReuploadRequest.flagged_documents
+      : [];
+    const latestActive = pickActive(latestRequested);
+    if (latestActive.length > 0) {
+      return latestActive;
+    }
+
+    const fallbackRequested = Array.isArray(applicationRecord?.flagged_documents)
+      ? applicationRecord.flagged_documents
+      : [];
+    return pickActive(fallbackRequested);
+  }, [latestReuploadRequest, applicationRecord?.flagged_documents]);
+  const correctionRequestedAtMs = useMemo(() => {
+    const candidate =
+      applicationRecord?.correction_requested_at ||
+      latestReuploadRequest?.created_at ||
+      "";
+    const parsed = candidate ? new Date(candidate).getTime() : 0;
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [
+    applicationRecord?.correction_requested_at,
+    latestReuploadRequest?.created_at,
+  ]);
+  const pendingFlaggedDocuments = useMemo(() => {
+    const flaggedItems = activeFlaggedDocuments;
+    if (flaggedItems.length === 0) {
+      return [];
+    }
+
+    const normalize = (value?: string | null) => (value || "").trim().toLowerCase();
+
+    return flaggedItems.filter((flagged) => {
+      const flaggedType = normalize(flagged.document_type);
+      const flaggedName = normalize(flagged.document_name);
+
+      const latestMatch = documents
+        .filter((doc) => {
+          const docType = normalize(doc.document_type);
+          const docName = normalize(doc.document_name);
+          const originalName = normalize(doc.original_filename);
+          const storedName = normalize(doc.stored_filename);
+
+          const matchType = Boolean(flaggedType) && docType === flaggedType;
+          const matchName =
+            Boolean(flaggedName) &&
+            (docName === flaggedName || originalName === flaggedName || storedName === flaggedName);
+
+          return matchType || matchName;
+        })
+        .sort((a, b) => {
+          const aTs = new Date(a.upload_date || a.created_at || a.updated_at || "").getTime();
+          const bTs = new Date(b.upload_date || b.created_at || b.updated_at || "").getTime();
+          return bTs - aTs;
+        })[0];
+
+      if (!latestMatch) {
+        return true;
+      }
+
+      const latestUploadedAt = new Date(
+        latestMatch.upload_date || latestMatch.created_at || latestMatch.updated_at || "",
+      ).getTime();
+
+      if (!Number.isFinite(latestUploadedAt) || correctionRequestedAtMs <= 0) {
+        return true;
+      }
+
+      return latestUploadedAt <= correctionRequestedAtMs;
+    });
+  }, [activeFlaggedDocuments, documents, correctionRequestedAtMs]);
   const canShowInteractiveCorrection =
-    applicationRecord?.audit_result === "amber" &&
-    Array.isArray(applicationRecord.flagged_documents) &&
-    applicationRecord.flagged_documents.length > 0;
+    pendingFlaggedDocuments.length > 0 &&
+    (isEVisaCorrectionRequested || applicationRecord?.audit_result === "amber");
+  const adminMessages = useMemo(() => {
+    const messagesFromApi = Array.isArray(applicationRecord?.admin_messages) ? applicationRecord.admin_messages : [];
+    if (messagesFromApi.length > 0) {
+      return messagesFromApi;
+    }
+
+    const auditLogs = Array.isArray(applicationRecord?.audit_logs) ? applicationRecord.audit_logs : [];
+    return auditLogs
+      .filter((item) => String(item.action || "").toLowerCase() === "admin_customer_message")
+      .map((item) => ({
+        created_at: item.timestamp,
+        subject: item.metadata?.subject || "FlyOCI update",
+        message: item.metadata?.description || item.metadata?.message || "",
+      }))
+      .filter((item) => item.message.trim().length > 0);
+  }, [applicationRecord?.admin_messages, applicationRecord?.audit_logs]);
+  const latestReuploadRequestNote = useMemo(() => latestReuploadRequest?.note || "", [latestReuploadRequest]);
 
   const fieldDisabledClass = isReadOnlyApplication ? "opacity-90" : "";
   
@@ -778,15 +1101,48 @@ export default function RegistrationPage() {
         throw new Error(message);
       }
 
+      const responseData = (json as {
+        data?: {
+          application_status?: string;
+          document?: {
+            id?: number;
+            document_type?: string;
+            document_name?: string;
+            original_filename?: string;
+            uploaded_at?: string | null;
+            verification_status?: string;
+          };
+        };
+      }).data;
+
       setReuploadConfirmationMessage("Re-upload submitted, our team will review shortly");
       setApplicationRecord((prev) => {
         if (!prev) return prev;
+        const nextApplicationStatus = responseData?.application_status || prev.application_status;
         return {
           ...prev,
-          application_status:
-            ((json as { data?: { application_status?: string } }).data?.application_status || prev.application_status),
+          application_status: nextApplicationStatus,
+          unified_status:
+            String(nextApplicationStatus || "").toLowerCase() === "reuploaded_pending_review"
+              ? "reuploaded_pending_review"
+              : prev.unified_status,
         };
       });
+
+      if (responseData?.document?.id && responseData.document.document_type) {
+        setDocuments((prev) => [
+          {
+            id: responseData.document?.id || 0,
+            document_type: responseData.document?.document_type || "other",
+            document_name: responseData.document?.document_name || responseData.document?.original_filename || file.name || flaggedDocumentName,
+            original_filename: responseData.document?.original_filename || file.name,
+            verification_status: responseData.document?.verification_status || "pending",
+            upload_date: responseData.document?.uploaded_at || new Date().toISOString(),
+            updated_at: responseData.document?.uploaded_at || new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+      }
       toast.success("Correction document uploaded.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to submit correction re-upload.");
@@ -817,11 +1173,50 @@ export default function RegistrationPage() {
                 Application: <span className="font-semibold text-[#173c78]">{resumeApplication?.service_name || "e-Visa Application"}</span>
               </p>
               <p>
-                Status: <span className="font-semibold text-[#173c78]">{formatBackendLabel(applicationRecord?.application_status || resumeApplication?.application_status || "draft")}</span> · Stage: <span className="font-semibold text-[#173c78]">{applicationStageLabel}</span>
+                Status: <span className="font-semibold text-[#173c78]">{resolvedDashboardStatus}</span> · Stage: <span className="font-semibold text-[#173c78]">{applicationStageLabel}</span>
               </p>
               <p>
                 Updated: <span className="font-semibold text-[#173c78]">{formatDate(applicationRecord?.updated_at || resumeApplication?.updated_at)}</span>
               </p>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[#d4e3ff] bg-white overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-[#edf3ff] border-b border-[#d9e6ff] px-4 py-3">
+              <h3 className="text-[16px] font-semibold text-[#173c78]">Application Status</h3>
+              <span className="text-[12px] font-semibold text-[#5f7ca8] uppercase">{resolvedDashboardStatus}</span>
+            </div>
+            <div className="p-4 sm:p-5 bg-[#f8fbff] space-y-3">
+              <p className="text-[13px] text-[#1d2f4f]">{resolvedDashboardMessage}</p>
+              {isPendingDocumentUpload ? (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseFromQuery || data.fileNumber || "")}`)}
+                  className="rounded-lg bg-[#0f2f66] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[#0c2551]"
+                >
+                  Upload Documents
+                </button>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[#d4e3ff] bg-white overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-[#edf3ff] border-b border-[#d9e6ff] px-4 py-3">
+              <h3 className="text-[16px] font-semibold text-[#173c78]">Admin Messages</h3>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#7a8bab]">Latest updates from team</span>
+            </div>
+            <div className="p-4 sm:p-5 space-y-3 bg-[#f8fbff]">
+              {adminMessages.length > 0 ? (
+                adminMessages.slice().reverse().map((messageItem, index) => (
+                  <div key={`${messageItem.created_at || "msg"}-${index}`} className="rounded-xl border border-[#d9e4f7] bg-white p-3">
+                    <p className="text-[13px] font-semibold text-[#1d2f4f]">{messageItem.subject || "FlyOCI update"}</p>
+                    <p className="mt-1 text-[12px] text-[#5e7599] whitespace-pre-wrap">{messageItem.message}</p>
+                    {messageItem.created_at ? <p className="mt-1 text-[11px] text-[#8aa0bf]">{formatDate(messageItem.created_at)}</p> : null}
+                  </div>
+                ))
+              ) : (
+                <p className="text-[13px] text-[#5e7599]">No admin messages yet.</p>
+              )}
             </div>
           </section>
 
@@ -859,32 +1254,72 @@ export default function RegistrationPage() {
           </section>
           )}
 
-          {applicationRecord?.audit_result && applicationRecord.audit_result !== "pending" ? (
+          {isEVisaCorrectionRequested && !hasAnyFlaggedDocuments && documents.length > 0 ? (
+          <section className="rounded-2xl border border-[#f0d89d] bg-[#fff6de] border-l-[3px] border-l-[#e6a72f] px-4 py-4 sm:px-5 sm:py-5">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#ffe2a8] text-[#a66800]">
+                <AlertTriangle className="h-3.5 w-3.5" />
+              </span>
+              <div>
+                <h2 className="text-[16px] font-semibold text-[#5f3a00]">Action Required: Re-upload Documents</h2>
+                <p className="mt-1 text-[13px] text-[#8a6a2d]">
+                  Our team requested updated documents for your e-Visa application. Please re-upload from the upload step.
+                </p>
+                {latestReuploadRequestNote ? (
+                  <p className="mt-2 text-[12px] text-[#7b5b23]">
+                    Admin note: <span className="font-semibold">{latestReuploadRequestNote}</span>
+                  </p>
+                ) : null}
+                {applicationRecord?.notes ? (
+                  <p className="mt-2 text-[12px] text-[#7b5b23]">
+                    Latest note: <span className="font-semibold">{applicationRecord.notes}</span>
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseFromQuery || data.fileNumber || "")}`)}
+                  className="mt-3 rounded-lg bg-[#0f2f66] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#0c2551]"
+                >
+                  Re-upload Documents
+                </button>
+              </div>
+            </div>
+          </section>
+          ) : null}
+
+          {(applicationRecord?.audit_result && applicationRecord.audit_result !== "pending") || canShowInteractiveCorrection ? (
           <section className="rounded-2xl border border-[#d4e3ff] bg-white overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 bg-[#edf3ff] border-b border-[#d9e6ff] px-4 py-3">
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#123c84]" />
                 <h3 className="text-[16px] font-semibold text-[#173c78]">Audit Result</h3>
               </div>
-              <span className="text-[12px] font-semibold text-[#5f7ca8] uppercase">{applicationRecord.audit_result}</span>
+              <span className="text-[12px] font-semibold text-[#5f7ca8] uppercase">{applicationRecord?.audit_result || "PENDING"}</span>
             </div>
             <div className="bg-[#f4f8ff] p-4 sm:p-5 space-y-3">
               <p className="text-[13px] text-[#1d2f4f]">
-                {applicationRecord.audit_result === "green"
+                {applicationRecord?.audit_result === "green"
                   ? "All checks passed. You can proceed to the next step."
                   : "Corrections are required before approval. Please upload corrected documents."}
               </p>
-              {applicationRecord.auditor_notes ? (
+              {applicationRecord?.auditor_notes ? (
                 <div className="rounded-xl border border-[#d9e4f7] bg-white p-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Auditor Notes</p>
-                  <p className="mt-2 text-[13px] text-[#1d2f4f] whitespace-pre-wrap">{applicationRecord.auditor_notes}</p>
+                  <p className="mt-2 text-[13px] text-[#1d2f4f] whitespace-pre-wrap">{applicationRecord?.auditor_notes}</p>
                 </div>
               ) : null}
               {/* // FLYOCI-FIX: BUG-5 */}
               {canShowInteractiveCorrection ? (
                 <div className="space-y-2">
-                  <h4 className="text-[14px] font-semibold text-[#173c78]">Documents need correction</h4>
-                  {applicationRecord.flagged_documents?.map((item, index) => {
+                  <h4 className="text-[14px] font-semibold text-[#173c78]">Reupload Required Documents</h4>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/indian-e-visa/upload?case=${encodeURIComponent(caseFromQuery || data.fileNumber || "")}`)}
+                    className="rounded-lg bg-[#0f2f66] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[#0c2551]"
+                  >
+                    Open Upload Page
+                  </button>
+                  {pendingFlaggedDocuments.map((item, index) => {
                     const documentLabel = item.document_name || item.document_type || `Document ${index + 1}`;
                     const documentKey = `${documentLabel}-${index}`;
                     const isUploading = reuploadingDocumentKey === documentKey;
@@ -940,11 +1375,14 @@ export default function RegistrationPage() {
                     <input {...register("fullName")} disabled={isFormLocked} className={`mt-2 ${inputClasses()}`} placeholder="Enter full name" />
                   </div>
                 )}
-                {(shouldShowField(detailsSnapshot.phone || data.phone) || shouldShowField(detailsSnapshot.countryCode || data.countryCode)) && (
+                
+                {(detailsMode ||shouldShowField(detailsSnapshot.phone || data.phone) || shouldShowField(detailsSnapshot.countryCode || data.countryCode)) && (() => {
+                  console.log("[DETAILS GRID RENDER] phone:", detailsSnapshot.phone, "countryCode:", detailsSnapshot.countryCode, "isFormLocked:", isFormLocked);
+                  return (
                   <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
                     <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Mobile number</label>
                     <div className="mt-2 flex gap-2">
-                      <select {...register("countryCode")} disabled={isFormLocked} className={`${inputClasses()} w-[96px]`}>
+                      <select {...register("countryCode")} disabled={false} style={isFormLocked ? {pointerEvents: "none", opacity: 0.7} : {}} className={`${inputClasses()} w-[96px]`}>
                         <option value="+44">+44</option>
                         <option value="+1">+1</option>
                         <option value="+91">+91</option>
@@ -952,17 +1390,20 @@ export default function RegistrationPage() {
                         <option value="+65">+65</option>
                         <option value="+61">+61</option>
                       </select>
-                      <input {...register("phone")} disabled={isFormLocked} className={`${inputClasses()} flex-1`} placeholder="Enter mobile number" />
+                      <input {...register("phone")} disabled={false} style={isFormLocked ? {pointerEvents: "none", opacity: 0.7} : {}} className={`${inputClasses()} flex-1`} placeholder="Enter mobile number" />
                     </div>
                   </div>
-                )}
+                  );
+                })()}
+
+
                 {shouldShowField(detailsSnapshot.email || data.email) && (
                   <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
                     <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Email</label>
                     <input {...register("email")} disabled={isFormLocked} type="email" className={`mt-2 ${inputClasses()}`} placeholder="Enter email" />
                   </div>
                 )}
-                {shouldShowField(detailsSnapshot.countryOfResidence || data.countryOfResidence) && (
+                {(detailsMode || shouldShowField(detailsSnapshot.countryOfResidence || data.countryOfResidence)) && (
                   <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
                     <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Country of residence</label>
                     <select {...register("countryOfResidence")} disabled={isFormLocked} className={`mt-2 ${inputClasses()}`}>
@@ -977,7 +1418,7 @@ export default function RegistrationPage() {
                     </select>
                   </div>
                 )}
-                {shouldShowField(detailsSnapshot.nationality || data.nationality) && (
+                {(detailsMode || shouldShowField(detailsSnapshot.nationality || data.nationality)) && (
                   <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
                     <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Nationality</label>
                     <select {...register("nationality")} disabled={isFormLocked} className={`mt-2 ${inputClasses()}`}>
@@ -985,7 +1426,6 @@ export default function RegistrationPage() {
                       <option value="British">British</option>
                       <option value="American">American</option>
                       <option value="Canadian">Canadian</option>
-                      <option value="Australian">Australian</option>
                       <option value="Indian">Indian</option>
                       <option value="Other">Other</option>
                     </select>
@@ -1001,21 +1441,14 @@ export default function RegistrationPage() {
 
               <input type="hidden" {...register("visaDuration")} />
               <input type="hidden" {...register("purposeOfVisit")} />
-              <input type="hidden" {...register("confirmEmail")} />
               <input type="hidden" {...register("consent")} />
 
               <div className="mt-4 flex flex-wrap items-center gap-3">
-                {isFormLocked ? (
-                  <div className="rounded-lg bg-[#e8f5e9] px-4 py-2 text-[13px] font-semibold text-[#2e7d32] border border-[#a5d6a7]">
-                    🔒 Form locked - Payment & email confirmed
-                  </div>
-                ) : (
-                  <div className="rounded-lg bg-[#edf3ff] px-4 py-2 text-[13px] font-semibold text-[#1d3f74]">
-                    {isSubmitting ? "Saving changes..." : "Auto-save is on"}
-                  </div>
-                )}
+                <div className="rounded-lg bg-[#edf3ff] px-4 py-2 text-[13px] font-semibold text-[#1d3f74]">
+                  {isSubmitting ? "Saving changes..." : "Auto-save is on"}
+                </div>
                 <p className="text-[12px] text-[#6d88b1]">
-                  {isFormLocked ? "This application cannot be edited further" : "Changes update the application record automatically."}
+                  Changes update the application record automatically.
                 </p>
               </div>
             </div>
@@ -1163,7 +1596,7 @@ export default function RegistrationPage() {
                     <span className="text-[#7b8fa7] group-open:rotate-180 transition-transform">⌄</span>
                   </summary>
                   <p className="mt-2 font-body text-[11px] text-[#6b7d92] leading-relaxed">
-                    After registration you confirm email, complete payment, then upload passport and photo for submission.
+                    After registration you complete payment, then upload passport and photo for submission.
                   </p>
                 </details>
 
@@ -1291,7 +1724,6 @@ export default function RegistrationPage() {
                   <input type="hidden" {...register("visaDuration")} />
                   <input type="hidden" {...register("purposeOfVisit")} />
                   <input type="hidden" {...register("consent")} />
-                  <input type="hidden" {...register("confirmEmail")} />
                 </>
               )}
 
@@ -1300,34 +1732,22 @@ export default function RegistrationPage() {
                 <div className="h-[1px] bg-[#e5edf7]" />
               </div>
 
-              {/* Fields 2 & 3: Emails */}
-              <div className={`grid ${detailsMode ? "sm:grid-cols-1" : "sm:grid-cols-2"} gap-4`}>
-                <div>
-                  <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Email address *</label>
-                  <input
-                    {...register("email")}
-                    type="email"
-                    disabled={isSubmitting || isReadOnlyApplication}
-                    readOnly={isReadOnlyApplication}
-                    placeholder="your@email.com"
-                    className={inputClasses() + " " + fieldDisabledClass}
-                  />
-                </div>
-                {!detailsMode && (
-                <div>
-                  <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Confirm email *</label>
-                  <input
-                    {...register("confirmEmail")}
-                    type="email"
-                    disabled={isSubmitting || isReadOnlyApplication}
-                    readOnly={isReadOnlyApplication}
-                    placeholder="your@email.com"
-                    className={inputClasses() + " " + fieldDisabledClass}
-                  />
-                </div>
-                )}
-              </div>
-
+              {/* Email */}
+             <div className="grid sm:grid-cols-1 gap-4">
+  <div>
+    <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>
+      Email address *
+    </label>
+    <input
+      {...register("email")}
+      type="email"
+      disabled={isSubmitting || isReadOnlyApplication}
+      readOnly={isReadOnlyApplication}
+      placeholder="your@email.com"
+      className={inputClasses() + " " + fieldDisabledClass}
+    />
+  </div>
+</div>
               {/* Field 4: Mobile */}
               <div>
                 <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Mobile number *</label>
@@ -1390,7 +1810,6 @@ export default function RegistrationPage() {
                     <option value="British">British</option>
                     <option value="American">American</option>
                     <option value="Canadian">Canadian</option>
-                    <option value="Australian">Australian</option>
                     <option value="Indian">Indian</option>
                     <option value="Other">Other</option>
                   </select>

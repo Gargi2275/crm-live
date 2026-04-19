@@ -1,15 +1,69 @@
 "use client";
 
+import { useEffect } from "react";
 import { motion } from "framer-motion";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, FileText, ShieldCheck, Sparkles } from "lucide-react";
 
+import { useEVisa } from "@/context/EVisaContext";
 import { ProgressStepper } from "@/components/ProgressStepper";
+import { eVisaApi } from "@/lib/api-client";
+import { authService } from "@/lib/auth";
+import { isCurrentPathAllowed, isMissingCaseError, resolveCanonicalEVisaRoute, resolveMissingCaseRedirect } from "@/lib/evisa-step-guard";
 
 export default function ReviewPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const caseNumber = searchParams.get("case") || "FO-EV-...";
+  const { data } = useEVisa();
+  const caseFromQuery = searchParams.get("case") || "";
+  const caseNumber = caseFromQuery || data.fileNumber || "FO-EV-...";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const enforceStepOrder = async () => {
+      const normalizedCase = (caseFromQuery || data.fileNumber || "").trim().toUpperCase();
+      if (!normalizedCase) {
+        if (!isCurrentPathAllowed(pathname, "/indian-e-visa")) {
+          router.replace("/indian-e-visa");
+        }
+        return;
+      }
+
+      let canonicalRoute = `/indian-e-visa/review?case=${encodeURIComponent(normalizedCase)}`;
+      if (!data.hasUploaded) {
+        canonicalRoute = `/indian-e-visa/upload?case=${encodeURIComponent(normalizedCase)}`;
+      }
+
+      if (authService.isLoggedIn()) {
+        try {
+          const resume = await eVisaApi.getResume(normalizedCase);
+          canonicalRoute = resolveCanonicalEVisaRoute(resume.data, normalizedCase);
+        } catch (error) {
+          if (isMissingCaseError(error)) {
+            canonicalRoute = resolveMissingCaseRedirect(true);
+          }
+        }
+      }
+
+      if (!cancelled && !isCurrentPathAllowed(pathname, canonicalRoute)) {
+        router.replace(canonicalRoute);
+      }
+    };
+
+    void enforceStepOrder();
+
+    const handlePopState = () => {
+      void enforceStepOrder();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [caseFromQuery, data.fileNumber, data.hasUploaded, pathname, router]);
 
   return (
     <div className="flex-1 w-full bg-bg relative pb-24 overflow-hidden">

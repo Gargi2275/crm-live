@@ -57,16 +57,16 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
 
   return (
     <motion.div
-      className="flex justify-center gap-2 sm:gap-3"
+      className="flex justify-center gap-2.5 sm:gap-3.5"
       animate={error ? { x: [0, -8, 8, -8, 0] } : {}}
       transition={{ duration: 0.4 }}
     >
       {digits.map((digit, i) => {
-        let stateClass = "border-border bg-white text-primary";
+        let stateClass = "border-[#d4dfec] bg-white text-[#102a43] shadow-[0_8px_18px_rgba(13,42,67,0.06)]";
         if (error) stateClass = "border-red text-red-600";
 
         else if (success) stateClass = "border-green bg-greenL text-green-700";
-        else if (digit) stateClass = "border-accent/60 bg-[#ffffff] text-primary";
+        else if (digit) stateClass = "border-[#33a1fd]/60 bg-[#f8fbff] text-[#102a43] shadow-[0_10px_20px_rgba(15,95,191,0.12)]";
 
         return (
           <motion.div
@@ -74,7 +74,7 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
             initial={false}
             animate={success ? { backgroundColor: "#DCFCE7", borderColor: "#16A34A" } : {}} 
             transition={{ delay: success ? i * 0.05 : 0, duration: 0.2 }}
-            className={`w-[48px] h-[54px] rounded-[10px] overflow-hidden ${stateClass}`}
+            className={`h-[58px] w-[48px] overflow-hidden rounded-[14px] border ${stateClass}`}
           >
             <input
               ref={(el) => { inputRefs.current[i] = el; }}
@@ -84,7 +84,7 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
               onChange={(e) => handleChange(i, e.target.value.replace(/[^0-9]/g, ''))}
               onKeyDown={(e) => handleKeyDown(i, e)}
               onPaste={handlePaste}
-              className="w-full h-full text-center font-mono text-[22px] font-bold outline-none transition-colors border-2 border-blue-400 focus:border-accent focus:shadow-[0_0_0_3px_rgba(245,166,35,0.15)] bg-transparent disabled:opacity-100 placeholder:text-transparent"
+              className="h-full w-full border-0 bg-transparent text-center font-mono text-[22px] font-bold tracking-[0.08em] text-inherit outline-none ring-0 transition focus:bg-[#eef6ff] focus:shadow-[inset_0_0_0_2px_rgba(51,161,253,0.5)] disabled:opacity-100 placeholder:text-transparent"
               maxLength={1}
               disabled={success}
             />

@@ -43,12 +43,11 @@ export function ContactForm() {
     try {
       // Simulate API call
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      console.log("Form submitted:", data);
       setIsSuccess(true);
       reset();
       setTimeout(() => setIsSuccess(false), 5000);
-    } catch (error) {
-      console.error("Submission error", error);
+    } catch {
+      // No-op: UX already reflects submission state.
     } finally {
       setIsSubmitting(false);
     }

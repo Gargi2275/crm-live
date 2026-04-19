@@ -39,10 +39,10 @@ export function CookieBanner() {
       });
 
       if (!response.ok) {
-        console.warn("Failed to track cookie consent:", response.statusText);
+        return;
       }
-    } catch (error) {
-      console.warn("Error tracking cookie consent:", error);
+    } catch {
+      // No-op: consent tracking failures should not block the UI flow.
     } finally {
       setIsLoading(false);
     }

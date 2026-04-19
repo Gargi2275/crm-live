@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { KanbanBoard } from "@/components/console/kanban/KanbanBoard";
-import { AlertTriangle, CheckCircle2, RotateCcw, ShieldAlert, TimerReset } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RotateCcw, ShieldAlert, TimerReset, CheckCircle, XCircle, Clock3, FileWarning } from "lucide-react";
 import { listAdminApplications, type AdminApplication } from "@/lib/admin-auth";
 import { KANBAN_COLUMNS, type KanbanStage } from "@/lib/kanban";
 import toast from "react-hot-toast";
 
 const STAGE_LABELS: Record<KanbanStage, string> = Object.fromEntries(KANBAN_COLUMNS.map((column) => [column.id, column.title])) as Record<KanbanStage, string>;
 
-const LIVE_STAGES: KanbanStage[] = ["DOCUMENTS_REQUIRED", "PAYMENT_PENDING", "REVIEW_PENDING"];
+const LIVE_STAGES: KanbanStage[] = ["PASSPORT_QUOTE_PENDING", "DOCUMENTS_REQUIRED", "PAYMENT_PENDING", "REVIEW_PENDING"];
 
 const normalizeStage = (stage?: string): KanbanStage => {
   const normalized = (stage || "").trim().toUpperCase().replace(/\s+/g, "_");
@@ -98,6 +98,47 @@ export default function OperationsKanbanPage() {
     };
   }, [applications]);
 
+  const evisaStats = useMemo(() => {
+    const evisaApps = applications.filter((application) => {
+      const serviceHint = String(application.service_type || application.service_name || "").toLowerCase();
+      return serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
+    });
+
+    const reuploadPendingReview = evisaApps.filter((application) => {
+      const appStatus = String(application.application_status || "").toLowerCase();
+      return appStatus === "reuploaded_pending_review";
+    }).length;
+
+    const actionRequired = evisaApps.filter((application) => {
+      const appStatus = String(application.application_status || "").toLowerCase();
+      const stage = String(application.current_stage || "").toLowerCase();
+      return appStatus === "correction_requested" || (stage === "correction_requested" && appStatus !== "reuploaded_pending_review");
+    }).length;
+
+    const approved = evisaApps.filter((application) => {
+      const appStatus = String(application.application_status || "").toLowerCase();
+      const stage = String(application.current_stage || "").toLowerCase();
+      return appStatus === "approved" || stage === "decision_received" || stage === "closed";
+    }).length;
+
+    const rejected = evisaApps.filter((application) => {
+      const appStatus = String(application.application_status || "").toLowerCase();
+      const auditResult = String(application.audit_result || "").toLowerCase();
+      return appStatus === "rejected" || auditResult === "red";
+    }).length;
+
+    const pending = Math.max(evisaApps.length - approved - rejected - actionRequired - reuploadPendingReview, 0);
+
+    return {
+      total: evisaApps.length,
+      pending,
+      approved,
+      rejected,
+      actionRequired,
+      reuploadPendingReview,
+    };
+  }, [applications]);
+
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 space-y-4 font-body max-w-[1500px] mx-auto">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-2 shrink-0">
@@ -110,6 +151,42 @@ export default function OperationsKanbanPage() {
           <RotateCcw className="w-4 h-4" />
           REFRESH DATA
         </button>
+      </div>
+
+      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-[18px] font-heading font-semibold text-[#102A43]">EVisa Dashboard</h2>
+            <p className="text-xs text-[#627D98]">Live EVisa application summary</p>
+          </div>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/30">Dynamic API data</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+            <p className="text-xs text-[#627D98]">Total Applications</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#009877]" />{evisaStats.total}</p>
+          </div>
+          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+            <p className="text-xs text-[#627D98]">Pending</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><Clock3 className="w-4 h-4 text-[#B87333]" />{evisaStats.pending}</p>
+          </div>
+          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+            <p className="text-xs text-[#627D98]">Approved</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><CheckCircle className="w-4 h-4 text-[#009877]" />{evisaStats.approved}</p>
+          </div>
+          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+            <p className="text-xs text-[#627D98]">Rejected</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><XCircle className="w-4 h-4 text-[#B42318]" />{evisaStats.rejected}</p>
+          </div>
+          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+            <p className="text-xs text-[#627D98]">Action Required</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><FileWarning className="w-4 h-4 text-[#B45309]" />{evisaStats.actionRequired}</p>
+          </div>
+          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+            <p className="text-xs text-[#627D98]">Reupload Pending Review</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><Clock3 className="w-4 h-4 text-[#0B69B7]" />{evisaStats.reuploadPendingReview}</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">

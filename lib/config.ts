@@ -3,7 +3,9 @@
  * Centralized configuration for API endpoints and environment variables
  */
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+// export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+
 
 export const API_ENDPOINTS = {
   // Auth endpoints
@@ -20,10 +22,14 @@ export const API_ENDPOINTS = {
   },
   ADMIN: {
     LOGIN: '/admin/login/',
+    VERIFY_LOGIN_OTP: '/admin/login/verify-otp/',
+    REQUEST_SENSITIVE_OTP: '/security/sensitive-action/request-otp/',
+    VERIFY_SENSITIVE_OTP: '/security/sensitive-action/verify-otp/',
     STAFF_CREATE: '/admin/staff/create/',
     STAFF_LIST: '/admin/staff/list/',
     STAFF_UPDATE: '/admin/staff/:staff_id/update/',
     STAFF_DEACTIVATE: '/admin/staff/:staff_id/deactivate/',
+    UNLOCK_STAFF: '/admin/staff/:staff_id/unlock/',
   },
   // Services
   SERVICES: {
@@ -60,6 +66,13 @@ export const API_ENDPOINTS = {
   },
   PAYMENTS: {
     CHECKOUT: '/payments/checkout/',
+  },
+  PASSPORT_RENEWAL: {
+    REQUEST: '/passport-renewal/request/',
+    DASHBOARD_QUOTE_DETAIL: '/passport-renewal/pay/',
+    DASHBOARD_CREATE_ORDER: '/passport-renewal/pay/create-order/',
+    DASHBOARD_VERIFY_PAYMENT: '/passport-renewal/pay/verify/',
+    CASE_QUOTE_DETAIL: '/cases/:file_number/',
   },
   // Support Tickets
   SUPPORT: {

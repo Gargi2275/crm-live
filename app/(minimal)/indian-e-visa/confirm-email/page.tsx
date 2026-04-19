@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
@@ -12,10 +12,13 @@ import { OTPInput } from "@/components/OTPInput";
 import { ProgressStepper } from "@/components/ProgressStepper";
 import { eVisaApi } from "@/lib/api-client";
 import { setTokens } from "@/lib/api";
+import { authService } from "@/lib/auth";
 import { EVISA_DEFAULTS } from "@/lib/evisa-config";
+import { isCurrentPathAllowed, isMissingCaseError, resolveCanonicalEVisaRoute, resolveMissingCaseRedirect } from "@/lib/evisa-step-guard";
 
 export default function ConfirmEmailPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { data, updateData } = useEVisa();
   const { refreshUser } = useAuth();
@@ -30,6 +33,7 @@ const [countdown, setCountdown] = useState(0);
 const [statusMessage, setStatusMessage] = useState<string>("");
 const initializedCaseRef = useRef<string>("");
 const configLoadedRef = useRef(false);
+const guardInFlightRef = useRef(false);
 
 const resolveCooldownSeconds = (payload?: {
   resend_cooldown_seconds?: number;
@@ -138,6 +142,58 @@ useEffect(() => {
     cancelled = true;
   };
 }, [cooldownParam, updateData, data.resendCooldownSeconds]);
+
+useEffect(() => {
+  const enforceStepOrder = async () => {
+    if (guardInFlightRef.current) {
+      return;
+    }
+    guardInFlightRef.current = true;
+
+    try {
+      const normalizedCase = (caseNumber || "").trim().toUpperCase();
+      if (!normalizedCase) {
+        if (!isCurrentPathAllowed(pathname, "/indian-e-visa")) {
+          router.replace("/indian-e-visa");
+        }
+        return;
+      }
+
+      let canonicalRoute = `/indian-e-visa/confirm-email?case=${encodeURIComponent(normalizedCase)}`;
+      if (data.isEmailConfirmed) {
+        canonicalRoute = `/indian-e-visa/payment?case=${encodeURIComponent(normalizedCase)}`;
+      }
+
+      if (authService.isLoggedIn()) {
+        try {
+          const resume = await eVisaApi.getResume(normalizedCase);
+          canonicalRoute = resolveCanonicalEVisaRoute(resume.data, normalizedCase);
+        } catch (error) {
+          if (isMissingCaseError(error)) {
+            canonicalRoute = resolveMissingCaseRedirect(true);
+          }
+        }
+      }
+
+      if (!isCurrentPathAllowed(pathname, canonicalRoute)) {
+        router.replace(canonicalRoute);
+      }
+    } finally {
+      guardInFlightRef.current = false;
+    }
+  };
+
+  void enforceStepOrder();
+
+  const handlePopState = () => {
+    void enforceStepOrder();
+  };
+
+  window.addEventListener("popstate", handlePopState);
+  return () => {
+    window.removeEventListener("popstate", handlePopState);
+  };
+}, [caseNumber, data.isEmailConfirmed, pathname, router]);
   
 const handleOTPComplete = async (code: string) => {
   const sanitizedCode = (code || "").replace(/\D/g, "").slice(0, 6);

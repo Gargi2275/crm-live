@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ShieldCheck } from "lucide-react";
+import { Globe2, Mail, Phone, ShieldCheck, Sparkles, User2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { authService } from "@/lib/auth";
+import { OTPInput } from "@/components/OTPInput";
 
 const LOGIN_DRAFT_KEY = "flyoci_login_draft";
 type LoginStage = "email" | "existingOtp" | "newDetails" | "newOtp";
@@ -29,6 +30,13 @@ const COUNTRY_OPTIONS = [
   { value: "UAE", label: "United Arab Emirates" },
   { value: "Other", label: "Other" },
 ];
+
+const STAGE_LABELS: Record<LoginStage, string> = {
+  email: "Email Check",
+  existingOtp: "Login OTP",
+  newDetails: "Profile Details",
+  newOtp: "Signup OTP",
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -94,12 +102,41 @@ export default function LoginPage() {
 
   const normalizedEmail = useMemo(() => email.trim(), [email]);
   const normalizedFullName = useMemo(() => fullName.trim(), [fullName]);
+  const hasError = Boolean(localError || error);
+  const stageProgress = useMemo(() => {
+    if (stage === "email") return 25;
+    if (stage === "newDetails") return 60;
+    return 100;
+  }, [stage]);
 
   const splitFullName = (value: string) => {
     const parts = value.trim().split(/\s+/).filter(Boolean);
     const firstName = parts[0] || "";
     const lastName = parts.slice(1).join(" ");
     return { firstName, lastName };
+  };
+
+  const sendExistingOtp = async () => {
+    if (!normalizedEmail) {
+      setLocalError("Enter your email.");
+      return;
+    }
+
+    setRequestingOtp(true);
+    try {
+      const response = await authService.requestLoginOtp(normalizedEmail);
+      setOtpRequested(true);
+      setStage("existingOtp");
+      setInfo(
+        response.otp
+          ? `OTP sent. DEV OTP: ${response.otp}`
+          : `OTP sent to your email. Expires in ${response.otpExpiresInMinutes} minutes.`,
+      );
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : "Failed to send OTP.");
+    } finally {
+      setRequestingOtp(false);
+    }
   };
 
   const handleEmailCheck = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -122,6 +159,7 @@ export default function LoginPage() {
       setInfo("");
       if (exists) {
         setStage("existingOtp");
+        await sendExistingOtp();
       } else {
         setStage("newDetails");
       }
@@ -132,33 +170,20 @@ export default function LoginPage() {
     }
   };
 
-  const handleSendExistingOtp = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleResendExistingOtp = async () => {
     clearError();
     setLocalError("");
     setInfo("");
-
-    if (!normalizedEmail) {
-      setLocalError("Enter your email.");
-      return;
-    }
-
-    setRequestingOtp(true);
-    try {
-      const response = await authService.requestLoginOtp(normalizedEmail);
-      setOtpRequested(true);
-      setStage("existingOtp");
-      setInfo(
-        response.otp
-          ? `OTP sent. DEV OTP: ${response.otp}`
-          : `OTP sent to your email. Expires in ${response.otpExpiresInMinutes} minutes.`,
-      );
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : "Failed to send OTP.");
-    } finally {
-      setRequestingOtp(false);
-    }
+    await sendExistingOtp();
   };
+
+  useEffect(() => {
+    if (!initialized) return;
+    if (stage !== "existingOtp") return;
+    if (!accountExists) return;
+    if (otpRequested || requestingOtp || !normalizedEmail) return;
+    void sendExistingOtp();
+  }, [initialized, stage, accountExists, otpRequested, requestingOtp, normalizedEmail]);
 
   const handleSendSignupOtp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -219,6 +244,7 @@ export default function LoginPage() {
         email: normalizedEmail,
         otp: otp.trim(),
       });
+      await refreshUser();
       localStorage.removeItem(LOGIN_DRAFT_KEY);
       router.replace(nextPath);
     } catch (err) {
@@ -261,6 +287,7 @@ export default function LoginPage() {
         phone_number: mobileNumber.trim(),
         country: countryOfResidence.trim(),
       });
+      await refreshUser();
       localStorage.removeItem(LOGIN_DRAFT_KEY);
       router.replace(nextPath);
     } catch (err) {
@@ -292,32 +319,39 @@ export default function LoginPage() {
   };
 
   return (
-    <section className="relative min-h-[78vh] overflow-hidden bg-[#f4f7fb] px-4 pb-16 pt-28 sm:px-6 lg:px-8">
+    <section className="relative min-h-[82vh] overflow-hidden bg-[linear-gradient(150deg,#f8fbff_0%,#edf5ff_55%,#f7fcff_100%)] px-4 pb-16 pt-24 sm:px-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-28 -left-16 h-72 w-72 rounded-full bg-[#33a1fd]/20 blur-3xl" />
-        <div className="absolute -bottom-24 -right-20 h-80 w-80 rounded-full bg-[#009877]/15 blur-3xl" />
+        <div className="absolute -top-24 -left-16 h-72 w-72 rounded-full bg-[#33a1fd]/22 blur-3xl" />
+        <div className="absolute top-[15%] right-[10%] h-52 w-52 rounded-full bg-[#0f7ee8]/12 blur-3xl" />
+        <div className="absolute -bottom-24 -right-16 h-72 w-72 rounded-full bg-[#00a37a]/12 blur-3xl" />
       </div>
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, ease: "easeOut" }}
-        className="relative mx-auto max-w-5xl"
+        className="relative mx-auto max-w-6xl"
       >
-        <div className="grid grid-cols-1 overflow-hidden rounded-3xl border border-[#d5e3f5] bg-white shadow-[0_28px_60px_rgba(18,52,95,0.12)] lg:grid-cols-2">
-          <div className="hidden flex-col justify-between bg-[linear-gradient(140deg,#0f3f88_0%,#1a5fbf_52%,#2f8de7_100%)] p-10 text-white lg:flex">
+        <div className="grid grid-cols-1 overflow-hidden rounded-[28px] border border-[#d5e3f5] bg-white shadow-[0_30px_70px_rgba(18,52,95,0.14)] lg:grid-cols-2">
+          <div className="hidden flex-col justify-between bg-[linear-gradient(145deg,#0f3f88_0%,#1c64c8_56%,#35a1fd_100%)] p-10 text-white lg:flex">
             <div>
-              <p className="inline-flex items-center rounded-full bg-white/15 px-3 py-1 text-xs font-semibold tracking-wide">
-                OTP Login
+              <p className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold tracking-wide">
+                <Sparkles className="h-3.5 w-3.5" /> OTP Login
               </p>
-              <h2 className="mt-4 text-3xl font-heading font-bold leading-tight">Sign in with OTP every time</h2>
-              <p className="mt-4 text-sm leading-relaxed text-white/85">
-                Keep your full name, email, mobile number, and country of residence on every login. No password step.
+              <h2 className="mt-5 text-3xl font-heading font-bold leading-tight">A faster login flow with secure OTP checks</h2>
+              <p className="mt-4 text-sm leading-relaxed text-white/90">
+                Continue with one secure flow for both existing and new users. Your details stay consistent and your session is protected.
               </p>
             </div>
-            <div className="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm">
-              <p className="text-xs text-white/80">Secure session</p>
-              <p className="mt-1 text-sm font-semibold">OTP verification unlocks your dashboard immediately.</p>
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-white/25 bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-xs text-white/80">Secure session</p>
+                <p className="mt-1 text-sm font-semibold">OTP verification unlocks your dashboard instantly.</p>
+              </div>
+              <div className="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-xs text-white/80">Current step</p>
+                <p className="mt-1 text-base font-semibold">{STAGE_LABELS[stage]}</p>
+              </div>
             </div>
           </div>
 
@@ -332,23 +366,36 @@ export default function LoginPage() {
               Enter your email first. We will check whether the account exists, then continue with OTP.
             </p>
 
+            <div className="mt-5 rounded-2xl border border-[#d9e6f5] bg-[#f8fbff] p-3.5">
+              <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-[#56718e]">
+                <span>Flow Progress</span>
+                <span>{stageProgress}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-[#dbe8f8]">
+                <div className="h-full rounded-full bg-[linear-gradient(90deg,#0f7ee8,#00a37a)]" style={{ width: `${stageProgress}%` }} />
+              </div>
+            </div>
+
             {stage === "email" && (
               <form className="mt-8 space-y-5" onSubmit={handleEmailCheck}>
                 <label className="block">
                   <span className="mb-2 block text-sm font-medium text-slate-700">Email</span>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                    placeholder="you@example.com"
-                  />
+                  <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                    <Mail className="h-4 w-4 text-[#5e7892]" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full bg-transparent text-sm outline-none"
+                      placeholder="you@example.com"
+                    />
+                  </div>
                 </label>
 
                 {(localError || error || info) && (
                   <div
                     className={`rounded-2xl px-4 py-3 text-sm ${
-                      localError || error
+                      hasError
                         ? "border border-red-200 bg-red-50 text-red-700"
                         : "border border-emerald-200 bg-emerald-50 text-emerald-700"
                     }`}
@@ -368,39 +415,33 @@ export default function LoginPage() {
             )}
 
             {stage === "existingOtp" && (
-              <form className="mt-8 space-y-5" onSubmit={otpRequested ? handleVerifyExistingOtp : handleSendExistingOtp}>
+              <form className="mt-8 space-y-5" onSubmit={handleVerifyExistingOtp}>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                   Account found for <span className="font-semibold">{normalizedEmail}</span>. Use OTP to login.
                 </div>
 
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  <span>{otpRequested ? "OTP sent. Enter it below." : "Send OTP to continue."}</span>
-                  {!otpRequested && (
-                    <button type="submit" className="font-semibold text-primary hover:underline">
-                      Send OTP
-                    </button>
-                  )}
+                  <span>{requestingOtp ? "Sending OTP..." : "OTP sent. Enter it below."}</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleResendExistingOtp()}
+                    disabled={requestingOtp || verifyingOtp}
+                    className="font-semibold text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Resend OTP
+                  </button>
                 </div>
 
-                {otpRequested && (
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">OTP</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                      placeholder="Enter 6-digit OTP"
-                    />
-                  </label>
-                )}
+                <div className="space-y-3 rounded-2xl border border-[#d9e6f5] bg-[#f8fbff] px-4 py-4">
+                  <p className="text-sm font-medium text-slate-700">Enter OTP</p>
+                  <OTPInput onComplete={(value) => setOtp(value)} error={hasError} success={false} />
+                  <p className="text-center text-xs text-[#5e7892]">Type all 6 digits to enable verification.</p>
+                </div>
 
                 {(localError || error || info) && (
                   <div
                     className={`rounded-2xl px-4 py-3 text-sm ${
-                      localError || error
+                      hasError
                         ? "border border-red-200 bg-red-50 text-red-700"
                         : "border border-emerald-200 bg-emerald-50 text-emerald-700"
                     }`}
@@ -422,7 +463,7 @@ export default function LoginPage() {
                     disabled={requestingOtp || verifyingOtp}
                     className="flex-1 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {otpRequested ? (verifyingOtp ? "Verifying..." : "Login") : requestingOtp ? "Sending OTP..." : "Send OTP"}
+                    {verifyingOtp ? "Verifying..." : "Login"}
                   </button>
                 </div>
               </form>
@@ -437,39 +478,48 @@ export default function LoginPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block sm:col-span-2">
                     <span className="mb-2 block text-sm font-medium text-slate-700">Full name</span>
-                    <input
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                      placeholder="John Doe"
-                    />
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                      <User2 className="h-4 w-4 text-[#5e7892]" />
+                      <input
+                        type="text"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        className="w-full bg-transparent text-sm outline-none"
+                        placeholder="John Doe"
+                      />
+                    </div>
                   </label>
 
                   <label className="block">
                     <span className="mb-2 block text-sm font-medium text-slate-700">Mobile</span>
-                    <input
-                      type="tel"
-                      value={mobileNumber}
-                      onChange={(e) => setMobileNumber(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                      placeholder="+44 7000 000000"
-                    />
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                      <Phone className="h-4 w-4 text-[#5e7892]" />
+                      <input
+                        type="tel"
+                        value={mobileNumber}
+                        onChange={(e) => setMobileNumber(e.target.value)}
+                        className="w-full bg-transparent text-sm outline-none"
+                        placeholder="+44 7000 000000"
+                      />
+                    </div>
                   </label>
 
                   <label className="block">
                     <span className="mb-2 block text-sm font-medium text-slate-700">Country of residence</span>
-                    <select
-                      value={countryOfResidence}
-                      onChange={(e) => setCountryOfResidence(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                    >
-                      {COUNTRY_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                      <Globe2 className="h-4 w-4 text-[#5e7892]" />
+                      <select
+                        value={countryOfResidence}
+                        onChange={(e) => setCountryOfResidence(e.target.value)}
+                        className="w-full bg-transparent text-sm outline-none"
+                      >
+                        {COUNTRY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </label>
                 </div>
 
@@ -483,7 +533,7 @@ export default function LoginPage() {
                 {(localError || error || info) && (
                   <div
                     className={`rounded-2xl px-4 py-3 text-sm ${
-                      localError || error
+                      hasError
                         ? "border border-red-200 bg-red-50 text-red-700"
                         : "border border-emerald-200 bg-emerald-50 text-emerald-700"
                     }`}
@@ -520,61 +570,63 @@ export default function LoginPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block sm:col-span-2">
                     <span className="mb-2 block text-sm font-medium text-slate-700">Full name</span>
-                    <input
-                      type="text"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                      placeholder="John Doe"
-                    />
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                      <User2 className="h-4 w-4 text-[#5e7892]" />
+                      <input
+                        type="text"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        className="w-full bg-transparent text-sm outline-none"
+                        placeholder="John Doe"
+                      />
+                    </div>
                   </label>
 
                   <label className="block">
                     <span className="mb-2 block text-sm font-medium text-slate-700">Mobile</span>
-                    <input
-                      type="tel"
-                      value={mobileNumber}
-                      onChange={(e) => setMobileNumber(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                      placeholder="+44 7000 000000"
-                    />
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                      <Phone className="h-4 w-4 text-[#5e7892]" />
+                      <input
+                        type="tel"
+                        value={mobileNumber}
+                        onChange={(e) => setMobileNumber(e.target.value)}
+                        className="w-full bg-transparent text-sm outline-none"
+                        placeholder="+44 7000 000000"
+                      />
+                    </div>
                   </label>
 
                   <label className="block">
                     <span className="mb-2 block text-sm font-medium text-slate-700">Country of residence</span>
-                    <select
-                      value={countryOfResidence}
-                      onChange={(e) => setCountryOfResidence(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                    >
-                      {COUNTRY_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
+                      <Globe2 className="h-4 w-4 text-[#5e7892]" />
+                      <select
+                        value={countryOfResidence}
+                        onChange={(e) => setCountryOfResidence(e.target.value)}
+                        className="w-full bg-transparent text-sm outline-none"
+                      >
+                        {COUNTRY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </label>
                 </div>
 
                 {otpRequested && (
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">OTP</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
-                      placeholder="Enter 6-digit OTP"
-                    />
-                  </label>
+                  <div className="space-y-3 rounded-2xl border border-[#d9e6f5] bg-[#f8fbff] px-4 py-4">
+                    <p className="text-sm font-medium text-slate-700">Enter OTP</p>
+                    <OTPInput onComplete={(value) => setOtp(value)} error={hasError} success={false} />
+                    <p className="text-center text-xs text-[#5e7892]">Type all 6 digits to finish account setup.</p>
+                  </div>
                 )}
 
                 {(localError || error || info) && (
                   <div
                     className={`rounded-2xl px-4 py-3 text-sm ${
-                      localError || error
+                      hasError
                         ? "border border-red-200 bg-red-50 text-red-700"
                         : "border border-emerald-200 bg-emerald-50 text-emerald-700"
                     }`}

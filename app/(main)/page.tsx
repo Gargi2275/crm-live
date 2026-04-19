@@ -2,13 +2,79 @@ import { HeroSection } from "@/components/HeroSection";
 import WhatWeDo from "@/components/WhatWeDo";
 import { StepTimeline } from "@/components/StepTimeline";
 import { ServiceFees } from "@/components/ServiceFees";
-import { Carousel } from "@/components/ui/Carousel";
+import { TestimonialsCarousel } from "@/components/home/TestimonialsCarousel";
 import { FadeInUp } from "@/components/FadeInUp";
 import { Button } from "@/components/ui/Button";
+import { getPublicTestimonials } from "@/lib/api";
 import Link from "next/link";
 import { CheckCircle, FileX, Globe, MessageCircle, Shield, UserCheck } from "lucide-react";
 
-export default function Home() {
+const fallbackTestimonials = [
+  {
+    title: "OCI Renewal Was Smooth and Stress-Free",
+    quote: "FlyOCI made my parents' OCI renewal very easy. All documents were checked in advance and there were no surprises at VFS.",
+    author: "Rajesh K., UK",
+    service: "OCI Renewal",
+    detail: "Document Audit Completed",
+    rating: 5,
+  },
+  {
+    title: "They Helped Me Pick the Right Option",
+    quote: "I was confused about e-Visa vs OCI. The team explained everything clearly and suggested the right option.",
+    author: "Anita P., US",
+    service: "Indian e-Visa",
+    detail: "Service Guidance",
+    rating: 5,
+  },
+  {
+    title: "Strong Support for First-Time Applicants",
+    quote: "As a first-time applicant, I had many doubts. FlyOCI made everything easy to understand and support on email and WhatsApp was quick.",
+    author: "Anita Patel",
+    service: "New OCI Card",
+    detail: "WhatsApp + Email Updates",
+    rating: 5,
+  },
+  {
+    title: "Audit Caught Missing Documents Early",
+    quote: "The pre-check report highlighted a name mismatch and missing supporting documents before submission. That saved me a rejection and a lot of delay.",
+    author: "Rishabh S., London",
+    service: "Document Audit",
+    detail: "Pass / Fix / Missing Report",
+    rating: 5,
+  },
+  {
+    title: "Clear Pricing and No Hidden Surprises",
+    quote: "Everything was explained clearly: service fee, government fee and timeline. The process felt transparent and professionally managed.",
+    author: "Parth S., Manchester",
+    service: "OCI Update",
+    detail: "Fixed Transparent Fees",
+    rating: 5,
+  },
+];
+
+async function loadTestimonials() {
+  try {
+    const testimonials = await getPublicTestimonials();
+    if (!testimonials.length) {
+      return [];
+    }
+
+    return testimonials.map((testimonial) => ({
+      title: testimonial.service_type ? `${testimonial.service_type} review` : "Customer review",
+      quote: testimonial.testimonial_text,
+      author: testimonial.author_name?.trim() || "Verified Customer",
+      service: testimonial.service_type || "FlyOCI",
+      detail: `${testimonial.rating}/5 rating`,
+      rating: testimonial.rating,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export default async function Home() {
+  const testimonials = await loadTestimonials();
+
   const steps = [
     { title: "Step 1 - Quick Online Form & Upload", description: "Tell us which service you need and upload clear photos/scans through our secure portal." },
     { title: "Step 2 - Expert Document Audit", description: "We send a written report showing what is correct, missing, or needs correction." },
@@ -21,51 +87,6 @@ export default function Home() {
     { title: "Clear Comms", description: "WhatsApp & email support directly with humans.", icon: <MessageCircle /> },
     { title: "Fixed Fees", description: "Transparent pricing without surprises.", icon: <CheckCircle /> },
     { title: "Step Guidance", description: "Especially helpful for elderly or first-timers.", icon: <UserCheck /> },
-  ];
-
-  const testimonials = [
-    {
-      title: "OCI Renewal Was Smooth and Stress-Free",
-      quote: "FlyOCI made my parents' OCI renewal very easy. All documents were checked in advance and there were no surprises at VFS.",
-      author: "Rajesh K., UK",
-      service: "OCI Renewal",
-      detail: "Document Audit Completed",
-    },
-    {
-      title: "They Helped Me Pick the Right Option",
-      quote: "I was confused about e-Visa vs OCI. The team explained everything clearly and suggested the right option.",
-      author: "Anita P., US",
-      service: "Indian e-Visa",
-      detail: "Service Guidance",
-    },
-    {
-      title: "Strong Support for First-Time Applicants",
-      quote: "As a first-time applicant, I had many doubts. FlyOCI made everything easy to understand and support on email and WhatsApp was quick.",
-      author: "Anita Patel",
-      service: "New OCI Card",
-      detail: "WhatsApp + Email Updates",
-    },
-    {
-      title: "Audit Caught Missing Documents Early",
-      quote: "The pre-check report highlighted a name mismatch and missing supporting documents before submission. That saved me a rejection and a lot of delay.",
-      author: "Rishabh S., London",
-      service: "Document Audit",
-      detail: "Pass / Fix / Missing Report",
-    },
-    {
-      title: "Clear Pricing and No Hidden Surprises",
-      quote: "Everything was explained clearly: service fee, government fee and timeline. The process felt transparent and professionally managed.",
-      author: "Parth S., Manchester",
-      service: "OCI Update",
-      detail: "Fixed Transparent Fees",
-    },
-    {
-      title: "Very Helpful for Family Applications",
-      quote: "I was applying for elderly parents and needed help with multiple documents. The checklist and step-by-step support made it manageable.",
-      author: "Navdeep V., Birmingham",
-      service: "Family Support",
-      detail: "Elderly Parent Guidance",
-    },
   ];
 
   return (
@@ -210,8 +231,8 @@ export default function Home() {
 
       {/* SECTION 4: Pricing */}
       <div className="py-14 lg:py-16 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="rounded-3xl border border-[#dbeaff] bg-[linear-gradient(180deg,#fbfdff_0%,#f3f8ff_100%)] p-4 md:p-6 shadow-[0_10px_30px_rgba(30,74,135,0.07)]">
+        <div className="mx-auto max-w-[1400px] px-3 sm:px-4 lg:px-6">
+          <div className="rounded-3xl border border-[#dbeaff] bg-[linear-gradient(180deg,#fbfdff_0%,#f3f8ff_100%)] p-2.5 sm:p-3.5 md:p-5 shadow-[0_10px_30px_rgba(30,74,135,0.07)]">
             <ServiceFees />
           </div>
         </div>
@@ -259,7 +280,7 @@ export default function Home() {
 
           <FadeInUp delay={0.2}>
             <div className="rounded-1xl border border-[#dce9ff] bg-[#f6faff] p-4 md:p-4 shadow-[0_10px_28px_rgba(30,74,135,0.08)]">
-              <Carousel items={testimonials} />
+              <TestimonialsCarousel initialItems={testimonials} staticItems={fallbackTestimonials} />
             </div>
           </FadeInUp>
         </div>

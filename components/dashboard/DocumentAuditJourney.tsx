@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, HelpCircle, MessageSquare, RefreshCcw, Upload } from "lucide-react";
+import { ArrowRight, CheckCircle2, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ApplicationTracker, ApplicationTrackerStep } from "@/components/dashboard/ApplicationTracker";
 import toast from "react-hot-toast";
@@ -11,20 +11,26 @@ import {
   createApplication,
   createAuditPaymentOrder,
   createFullPaymentOrder,
+  createPassportRenewalQuoteOrder,
   getApplicationByReference,
   getApplicationDocuments,
   getAuditStatus,
+  getPassportRenewalQuoteDetail,
+  getPublicTestimonials,
   resubmitApplicationForReview,
   skipAuditWithDisclaimer,
   startAudit,
+  submitPassportRenewalRequest,
+  submitTestimonial,
   uploadDocument,
   verifyAuditPayment,
+  verifyPassportRenewalQuotePayment,
   verifyFullPayment,
 } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
 import { useRouter } from "next/navigation";
 type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "undecided";
-type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
+type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "passport-quote-pending" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
 type QuestionId = "journeyType" | "nationality" | "ageGroup" | "maritalStatus" | "nameChanged" | "birthOutsideCore";
 type DocumentStatus = "not_uploaded" | "uploaded" | "pending_reupload";
 type AuditOutcome = "green" | "amber" | "red";
@@ -126,7 +132,14 @@ type JourneyDraftStorage = {
 type ApplicationRecord = {
   id: number;
   reference_number: string;
+  file_number?: string;
   application_status: string;
+  quoted_fee?: string | null;
+  quote_amount_pence?: number | null;
+  quote_notes?: string | null;
+  quote_set_at?: string | null;
+  quote_expires_at?: string | null;
+  quote_status?: string;
   service_type?: string;
   service_name?: string;
   audit_fee_pence?: number;
@@ -164,11 +177,20 @@ type ApplicationRecord = {
   }>;
   correction_requested_at?: string;
   correction_resubmitted_at?: string;
+  submission_date?: string;
+  notes?: string;
+  approval_date?: string;
+  completion_date?: string;
   audit_logs?: Array<{
     action?: string;
     timestamp?: string;
     actor?: string;
     metadata?: Record<string, unknown>;
+  }>;
+  admin_messages?: Array<{
+    created_at?: string;
+    subject?: string;
+    message?: string;
   }>;
 };
 
@@ -253,7 +275,7 @@ const SERVICES: Array<{
   { id: "new-oci", name: "New OCI Card", description: "First-time OCI application support", price: "£88", backendId: 4 },
   { id: "oci-renewal", name: "OCI Renewal / Transfer", description: "Passport change and renewal checks", price: "£78", backendId: 5 },
   { id: "oci-update", name: "OCI Update (Gratis)", description: "Mandatory update and portal handling", price: "£50", backendId: 6 },
-  { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal support for UK or US residents", price: "£85", backendId: 7 },
+  { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal support for UK or US residents", price: "Price on request", backendId: 7 },
 ];
 
 const ADD_ONS = [
@@ -281,6 +303,7 @@ const emptyAnswers: Answers = {
 
 const defaultDocuments = (service: ServiceId | null, answers: Answers): DocumentItem[] => {
   const base: DocumentItem[] = [];
+  const dynamicAnswers = answers as Record<string, string>;
 
   switch (service) {
     case "new-oci":
@@ -308,12 +331,69 @@ const defaultDocuments = (service: ServiceId | null, answers: Answers): Document
       );
       break;
     case "passport-renewal":
+      {
+      const applicantType = answers.ageGroup === "Child (under 18)" ? "MINOR" : String(dynamicAnswers.applicant_type || "ADULT").toUpperCase();
+      const nameChanged = answers.nameChanged === "Yes" || String(dynamicAnswers.name_change || "").toUpperCase() === "YES";
+      const category = String(dynamicAnswers.category || "").toUpperCase();
+      const country =
+        answers.nationality === "British"
+          ? "UK"
+          : answers.nationality === "American"
+            ? "US"
+            : String(dynamicAnswers.country || "OTHER").toUpperCase();
+      const firstRenewal = String(dynamicAnswers.first_renewal || "").toUpperCase();
+
       base.push(
-        { id: "old-passport", title: "Current Passport", description: "Bio page and any relevant visa pages.", required: true, mistakes: "Missing signature page or old details.", sample: "Upload the full passport copy." },
-        { id: "renewal-form", title: "Renewal Form", description: "Completed passport renewal application.", required: true, mistakes: "Unsigned or partially filled form.", sample: "Check all details carefully." },
-        { id: "residence-proof", title: "UK / US Residence Proof", description: "Address proof as requested by the renewal route.", required: true, mistakes: "Expired or unclear address document.", sample: "Use a recent bill or statement." },
-        { id: "passport-photo", title: "Passport Photo", description: "Recent compliant passport size photo.", required: true, mistakes: "Incorrect size or background.", sample: "Keep it neutral and clear." },
+        { id: "current-passport-all-pages", title: "Current Indian passport (all pages scan)", description: "Why needed: verifies existing identity and stamping history. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Missing pages or blurred scans.", sample: "Upload one clear merged PDF or ordered image set.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "old-expired-passport", title: "Old or expired passport (if any)", description: "Why needed: previous passport linkage for renewal continuity. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Skipping this when an old passport exists.", sample: "Include old booklet bio/signature pages.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "address-proof", title: "Proof of address (UK/US utility bill or bank statement)", description: "Why needed: confirms current residence for jurisdiction checks. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Outdated document or cropped address.", sample: "Use a recent statement with full name and address.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "recent-photo-35x45", title: "Recent passport photograph (white background, 35mm x 45mm)", description: "Why needed: submission photo compliance. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Wrong dimensions or dark background.", sample: "Front-facing image with proper lighting.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "completed-renewal-form", title: "Completed application form", description: "Why needed: official data capture for renewal request. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unsigned fields and incomplete sections.", sample: "Ensure all mandatory sections are completed.", sampleUrl: "/document-audit#sample-passport-renewal" },
       );
+
+      if (applicantType === "MINOR") {
+        base.push(
+          { id: "minor-birth-certificate", title: "Birth certificate", description: "Why needed: age and parent linkage for minor renewal. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unreadable names or dates.", sample: "Certified copy with full details.", sampleUrl: "/document-audit#sample-passport-renewal" },
+          { id: "minor-parents-passports", title: "Both parents' passports", description: "Why needed: parental identity verification. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Only one parent passport uploaded.", sample: "Include bio pages for both parents.", sampleUrl: "/document-audit#sample-passport-renewal" },
+          { id: "minor-parents-address-proof", title: "Parents' proof of address", description: "Why needed: residency validation for minor application. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Address mismatch with form.", sample: "Recent utility bill or statement.", sampleUrl: "/document-audit#sample-passport-renewal" },
+          { id: "minor-consent-single-parent", title: "Consent letter (if single parent)", description: "Why needed: legal consent where one guardian applies. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Unsigned consent declaration.", sample: "Signed letter with supporting proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        );
+      }
+
+      if (nameChanged) {
+        base.push(
+          { id: "name-change-proof", title: "Name change proof (marriage certificate or deed poll or court order)", description: "Why needed: links old and new names across records. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Document does not match passport name history.", sample: "Upload official name-change proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        );
+      }
+
+      if (category === "TATKAL") {
+        base.push(
+          { id: "tatkal-fee-proof", title: "Tatkaal fee proof", description: "Why needed: validates Tatkaal processing category. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Missing transaction details.", sample: "Include fee receipt or payment proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
+          { id: "tatkal-urgency-proof", title: "Proof of urgency (travel booking, medical etc.)", description: "Why needed: supports Tatkaal urgency claim. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "No date-aligned urgency document.", sample: "Upload travel/medical urgency evidence.", sampleUrl: "/document-audit#sample-passport-renewal" },
+          { id: "tatkal-self-declaration", title: "Self declaration for Tatkal", description: "Why needed: applicant declaration for priority process. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unsigned declaration.", sample: "Signed Tatkaal declaration format.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        );
+      }
+
+      if (country === "UK") {
+        base.push(
+          { id: "uk-brp-card", title: "BRP card (if applicable)", description: "Why needed: UK residence evidence when applicable. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Expired BRP without explanation.", sample: "Front and back clear copy.", sampleUrl: "/document-audit#sample-passport-renewal" },
+          { id: "uk-visa-settlement", title: "UK visa or settlement proof", description: "Why needed: immigration status verification. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "No visible visa validity details.", sample: "Upload visa vignette/settlement record.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        );
+      }
+
+      if (country === "US") {
+        base.push(
+          { id: "us-visa-green-card", title: "US visa or green card copy", description: "Why needed: lawful residence verification in US. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Document edges cropped.", sample: "Upload both sides where applicable.", sampleUrl: "/document-audit#sample-passport-renewal" },
+          { id: "us-i94-record", title: "I-94 record (if applicable)", description: "Why needed: entry/status support for US residency. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "I-94 mismatch with passport details.", sample: "Download latest I-94 and upload PDF.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        );
+      }
+
+      if (firstRenewal === "NO") {
+        base.push(
+          { id: "previous-renewal-receipt", title: "Previous passport renewal receipt", description: "Why needed: evidence of earlier renewal history. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Receipt missing identifying details.", sample: "Upload complete receipt image/PDF.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        );
+      }
+      }
       break;
     default:
       base.push(
@@ -344,11 +424,11 @@ const defaultSupportDocs = [
   { id: "old-copies", title: "Older copies / previous references", description: "Useful for complex OCI renewals", status: "optional" },
 ];
 
-const serviceFeeMap: Record<ServiceId, number> = {
+const serviceFeeMap: Record<ServiceId, number | null> = {
   "new-oci": 88,
   "oci-renewal": 78,
   "oci-update": 50,
-  "passport-renewal": 85,
+  "passport-renewal": null,
   undecided: 88,
 };
 
@@ -389,6 +469,7 @@ type DocumentAuditJourneyProps = {
   applicationId?: number;
   serviceType?: string;
   resumeReference?: string;
+  focusQuote?: boolean;
   auditResult?: string;
   amountDuePence?: number;
   auditFeePence?: number;
@@ -398,13 +479,15 @@ type DocumentAuditJourneyProps = {
 
 
 
-export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker = true, onUnreadCountChange }: DocumentAuditJourneyProps) {
+export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, focusQuote = false, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker = true, onUnreadCountChange }: DocumentAuditJourneyProps) {
   const router = useRouter();
   void userEmail;
   void applicationIdProp;
   void serviceTypeProp;
   void onUnreadCountChange;
   const stageRef = useRef<FlowStage>("service");
+  const quoteCardRef = useRef<HTMLDivElement | null>(null);
+  const quoteFocusHandledRef = useRef(false);
   const [loaded, setLoaded] = useState(false);
   const [stage, setStage] = useState<FlowStage>("service");
   const [selectedService, setSelectedService] = useState<ServiceId | null>(null);
@@ -438,6 +521,9 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
   const [paymentSummaryLoading, setPaymentSummaryLoading] = useState(false);
   const [paymentSummaryError, setPaymentSummaryError] = useState<string | null>(null);
+  const [passportMaskedEmail, setPassportMaskedEmail] = useState<string>("");
+  const [passportCaseReference, setPassportCaseReference] = useState<string>("");
+  const [passportQuoteAcknowledged, setPassportQuoteAcknowledged] = useState(false);
   const [skipAuditDisclaimerAccepted, setSkipAuditDisclaimerAccepted] = useState(false);
   const [progressCurrentStep, setProgressCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [progressSteps, setProgressSteps] = useState<ApplicationTrackerStep[]>([
@@ -451,10 +537,117 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [progressError, setProgressError] = useState<string | null>(null);
   const [messageRequestedDocIds, setMessageRequestedDocIds] = useState<string[]>([]);
   const [applicationStartError, setApplicationStartError] = useState<string | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [hasDraftProgress, setHasDraftProgress] = useState(false);
+  const [reviewAuthorName, setReviewAuthorName] = useState("");
+  const [reviewText, setReviewText] = useState("");
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [caseSummaryOpen, setCaseSummaryOpen] = useState(false);
 
   useEffect(() => {
     stageRef.current = stage;
   }, [stage]);
+
+  useEffect(() => {
+    if (stage !== "passport-quote-pending") {
+      return;
+    }
+
+    const refNum = String(applicationRecord?.reference_number || referenceNumber || "").trim();
+    if (!refNum) {
+      return;
+    }
+
+    let cancelled = false;
+    const syncQuoteDetail = async () => {
+      try {
+        const quote = await getPassportRenewalQuoteDetail(refNum);
+        if (cancelled) {
+          return;
+        }
+        setApplicationRecord((current) => {
+          if (!current) {
+            return current;
+          }
+          return {
+            ...current,
+            quote_status: quote.quote_status,
+            quote_amount_pence: quote.quote_amount_pence,
+            quoted_fee: quote.quoted_fee,
+            quote_notes: quote.quote_notes || "",
+            quote_set_at: quote.quote_set_at || null,
+            quote_expires_at: quote.quote_expires_at || null,
+          };
+        });
+        setPassportCaseReference(String(quote.case_reference || ""));
+        setPassportMaskedEmail(String(quote.masked_email || ""));
+      } catch {
+        // Keep existing record data if quote sync fails transiently.
+      }
+    };
+
+    void syncQuoteDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationRecord?.reference_number, referenceNumber, stage]);
+
+  useEffect(() => {
+    if (!focusQuote || quoteFocusHandledRef.current || stage !== "passport-quote-pending") {
+      return;
+    }
+    const status = String(applicationRecord?.quote_status || "").toUpperCase();
+    if (status !== "QUOTED") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      quoteCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      quoteFocusHandledRef.current = true;
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [applicationRecord?.quote_status, focusQuote, stage]);
+
+  useEffect(() => {
+    if (stage !== "completed") {
+      return;
+    }
+
+    const resolvedReference = String(applicationRecord?.reference_number || referenceNumber || "").trim();
+    if (!resolvedReference) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSubmittedReview = async () => {
+      try {
+        const testimonials = await getPublicTestimonials();
+        const match = testimonials.find((testimonial) => String(testimonial.application_reference || "").trim().toLowerCase() === resolvedReference.toLowerCase());
+
+        if (cancelled || !match) {
+          return;
+        }
+
+        setReviewSubmitted(true);
+        setReviewAuthorName(match.author_name || "");
+        setReviewText(match.testimonial_text || "");
+        setReviewRating(Math.max(1, Math.min(5, Math.round(Number(match.rating || 5)))));
+      } catch {
+        // Keep the local form available if the lookup fails.
+      }
+    };
+
+    void loadSubmittedReview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationRecord?.reference_number, referenceNumber, stage]);
 
   const currentQuestion = QUESTION_LIST[questionIndex];
   const checklist = generatedChecklist;
@@ -570,13 +763,16 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
           (doc) => normalize(doc.id) === normalize(item?.doc_id) || normalize(doc.title) === normalize(item?.doc_name || item?.document_name)
         );
         const resolvedDocId = String(matchedDoc?.id || item?.doc_id || item?.document_type || "");
+        const backendDocumentName = String(item?.doc_name || item?.document_name || "").trim();
+        const requiredDocumentName = String(matchedDoc?.title || backendDocumentName || "Document");
         const statusFromBackend = normalize(item?.status);
         const backendMarkedUploaded = Boolean(item?.reuploaded) || statusFromBackend === "reuploaded";
 
         return {
           key: `${resolvedDocId || item?.doc_name || item?.document_name || "flag"}-${index}`,
           documentId: resolvedDocId,
-          documentName: String(item?.doc_name || item?.document_name || matchedDoc?.title || "Document"),
+          documentName: requiredDocumentName,
+          uploadedDocumentName: backendDocumentName,
           reason: String(item?.issue || item?.issue_reason || "Issue details not provided."),
           actionRequired: (item?.action_required || item?.required_action || "re-upload") as "re-upload" | "obtain" | "apostille" | "affidavit",
           canUploadInline: Boolean(resolvedDocId),
@@ -598,12 +794,44 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     }),
     [applicationRecord?.audit_logs]
   );
+  const customerMessages = useMemo(() => {
+    const directMessages = Array.isArray(applicationRecord?.admin_messages)
+      ? applicationRecord.admin_messages
+          .map((item) => ({
+            created_at: String(item?.created_at || "").trim(),
+            subject: String(item?.subject || "FlyOCI update").trim() || "FlyOCI update",
+            message: String(item?.message || "").trim(),
+          }))
+          .filter((item) => item.message)
+      : [];
+
+    const fallbackMessages = (applicationRecord?.audit_logs || [])
+      .filter((log) => String(log?.action || "").trim().toLowerCase() === "admin_customer_message")
+      .map((log) => {
+        const metadata = log?.metadata && typeof log.metadata === "object" ? (log.metadata as Record<string, unknown>) : {};
+        const message = String(metadata.description || metadata.message || "").trim();
+        return {
+          created_at: String(log?.timestamp || "").trim(),
+          subject: String(metadata.subject || "FlyOCI update").trim() || "FlyOCI update",
+          message,
+        };
+      })
+      .filter((item) => item.message);
+
+    const source = directMessages.length > 0 ? directMessages : fallbackMessages;
+    return source.slice().sort((a, b) => {
+      const aTs = new Date(String(a.created_at || "")).getTime();
+      const bTs = new Date(String(b.created_at || "")).getTime();
+      return bTs - aTs;
+    });
+  }, [applicationRecord?.admin_messages, applicationRecord?.audit_logs]);
   const selectedServiceRecord = SERVICES.find((item) => item.id === selectedService) || null;
   const complexityScore = [answers.journeyType, answers.nameChanged, answers.birthOutsideCore].filter((item) => item === "Yes" || item === "I Already Have One / Conversion").length;
   const auditFee = selectedService === "undecided" || complexityScore >= 2 ? 20 : 15;
   const serviceFee = selectedService ? serviceFeeMap[selectedService] : 88;
+  const serviceFeeForMath = typeof serviceFee === "number" ? serviceFee : 0;
   const addOnTotal = addOns.reduce((sum, id) => sum + (ADD_ONS.find((item) => item.id === id)?.fee || 0), 0);
-  const finalAmount = Math.max(serviceFee - auditFee + addOnTotal, 0);
+  const finalAmount = Math.max(serviceFeeForMath - auditFee + addOnTotal, 0);
   const questionProgress = ((questionIndex + 1) / QUESTION_LIST.length) * 100;
   const shouldShowPersistentTracker =
     showPersistentTracker && !["service", "questions", "checklist", "upload", "summary"].includes(stage);
@@ -629,14 +857,44 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     const fullPaymentStatus = String(record.full_payment_status || "").toLowerCase();
     const applicationStatus = String(record.application_status || "").toLowerCase();
     const currentStage = String(record.current_stage || "").toLowerCase();
+    const quoteStatus = String(record.quote_status || "").toUpperCase();
     const isResumingExistingCase = Boolean(resumeReference);
+    const isPassportService = String(record.service_type || "").toLowerCase().includes("passport");
+
+    // Correction loops must take priority over quote/payment states for passport cases.
+    if (["correction_requested", "reuploaded_pending_review"].includes(applicationStatus)) {
+      return "audit-result";
+    }
+
+    if (
+      isPassportService &&
+      (
+        ["PENDING_QUOTE", "QUOTED", "EXPIRED"].includes(quoteStatus) ||
+        ["pending_quote", "quoted"].includes(applicationStatus) ||
+        currentStage === "initial_review"
+      )
+    ) {
+      return "passport-quote-pending";
+    }
+
+    if (isPassportService && ["QUOTE_ACCEPTED", "PAID"].includes(quoteStatus)) {
+      return "processing";
+    }
 
     if (applicationStatus === "rejected" || auditResult === "red") {
       return "audit-result";
     }
 
     if (["registered", "draft"].includes(currentStage) || ["draft", "registered"].includes(applicationStatus)) {
-      return isResumingExistingCase ? "checklist" : "service";
+      return isResumingExistingCase ? null : "service";
+    }
+
+    if (["decision_received", "closed"].includes(currentStage) || ["approved", "completed", "closed"].includes(applicationStatus)) {
+      return "completed";
+    }
+
+    if (currentStage === "submitted") {
+      return "processing";
     }
 
     if (fullPaymentStatus === "paid" || record.payment_confirmed || applicationStatus === "paid") {
@@ -645,10 +903,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
     if (record.audit_skipped && record.audit_skip_disclaimer_accepted) {
       return "full-payment";
-    }
-
-    if (["correction_requested", "reuploaded_pending_review"].includes(applicationStatus)) {
-      return "audit-result";
     }
 
     if (["payment_pending"].includes(applicationStatus)) {
@@ -670,7 +924,10 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     return null;
   };
 
-  const syncApplicationFromBackend = async (referenceHint?: string | null): Promise<ApplicationRecord> => {
+  const syncApplicationFromBackend = async (
+    referenceHint?: string | null,
+    options?: { skipStageSync?: boolean }
+  ): Promise<ApplicationRecord> => {
     const refNum = referenceHint && referenceHint.trim()
       ? referenceHint.trim()
       : requireReferenceNumber();
@@ -682,12 +939,15 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       throw new Error("Invalid application returned by backend.");
     }
 
+
+
     const nextRecord: ApplicationRecord = {
       id: backendApplicationId,
       reference_number: response.reference_number || refNum,
       application_status: response.application_status || "draft",
       service_type: response.service_type,
       service_name: response.service_name,
+      file_number: (response as any).file_number,
       audit_fee_pence: response.audit_fee_pence,
       audit_fee_paid: response.audit_fee_paid,
       audit_payment_status: response.audit_payment_status,
@@ -696,6 +956,11 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       audit_result: response.audit_result,
       audit_credit_pence: response.audit_credit_pence,
       amount_due_pence: response.amount_due_pence,
+      quote_amount_pence: (response as any).quote_amount_pence,
+      quote_status: (response as any).quote_status,
+      quote_notes: (response as any).quote_notes,
+      quote_set_at: (response as any).quote_set_at,
+      quote_expires_at: (response as any).quote_expires_at,
       service_total_pence: response.service_total_pence,
       full_payment_status: response.full_payment_status,
       payment_confirmed: response.payment_confirmed,
@@ -706,7 +971,12 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       latest_audit_findings: (response as any).latest_audit_findings,
       correction_requested_at: (response as any).correction_requested_at,
       correction_resubmitted_at: (response as any).correction_resubmitted_at,
+      submission_date: (response as any).submission_date,
+      notes: (response as any).notes,
+      approval_date: (response as any).approval_date,
+      completion_date: (response as any).completion_date,
       audit_logs: (response as any).audit_logs,
+      admin_messages: (response as any).admin_messages,
     };
 
     setApplicationRecord(nextRecord);
@@ -714,13 +984,15 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     setReferenceNumber(nextRecord.reference_number);
 
     const backendStage = deriveStageFromApplication(nextRecord);
-    if (backendStage) {
-      const progressiveStages = ["checklist", "upload", "summary", "audit-pending", "audit-result", "full-payment", "processing", "completed"];
-      const currentStageIsProgressive = progressiveStages.includes(stageRef.current);
-      const backendWouldRegress = backendStage === "service" || backendStage === "questions";
+    if (!options?.skipStageSync) {
+      if (backendStage) {
+        const progressiveStages = ["checklist", "upload", "summary", "audit-pending", "audit-result", "full-payment", "processing", "completed"];
+        const currentStageIsProgressive = progressiveStages.includes(stageRef.current);
+        const backendWouldRegress = backendStage === "service" || backendStage === "questions";
 
-      if (!(currentStageIsProgressive && backendWouldRegress)) {
-        setStage(backendStage);
+        if (!(currentStageIsProgressive && backendWouldRegress)) {
+          setStage(backendStage);
+        }
       }
     }
 
@@ -749,6 +1021,21 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     return null;
   };
 
+  const clearDraftStorage = (reference?: string | null) => {
+    if (typeof window === "undefined") return;
+
+    const keys = new Set<string>([
+      getAuditDraftKey(null),
+      getAuditDraftKey(reference || null),
+      OCI_AUDIT_DRAFT_KEY_LEGACY,
+    ]);
+
+    keys.forEach((key) => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+  };
+
 const startApplicationIfNeeded = async (
   serviceOverride?: ServiceId | null,
   forceCreate = false
@@ -760,6 +1047,11 @@ const startApplicationIfNeeded = async (
   const resolvedService = serviceOverride ?? selectedService;
   if (!resolvedService) {
     throw new Error("Could not start your application. Please try again.");
+  }
+
+  // Fix 1 (root cause): wipe stale drafts before creating a new application.
+  if (forceCreate) {
+    clearDraftStorage(resumeReference || referenceNumber || null);
   }
 
   const payload = await createApplication(mapApplicationServiceType(resolvedService));
@@ -843,7 +1135,7 @@ const saveState = (_next: Partial<JourneyStorage>) => {
   const draftKey = getAuditDraftKey(resumeReference || referenceNumber || null);
 
   if (!OCI_DRAFT_ALLOWED_STAGES.includes(stage)) {
-    sessionStorage.removeItem(draftKey);
+    localStorage.removeItem(draftKey);
     return;
   }
 
@@ -858,7 +1150,7 @@ const saveState = (_next: Partial<JourneyStorage>) => {
     lastChecklistAnswers,
   };
 
-  sessionStorage.setItem(draftKey, JSON.stringify(draft));
+  localStorage.setItem(draftKey, JSON.stringify(draft));
 };
 
   // useEffect(() => {
@@ -900,14 +1192,27 @@ useEffect(() => {
   try {
     const resumeKey = getAuditDraftKey(resumeReference || null);
     const activeKey = getAuditDraftKey(null);
-    const raw = sessionStorage.getItem(resumeReference ? resumeKey : activeKey) ||
+    const targetKey = resumeReference ? resumeKey : activeKey;
+    const raw = localStorage.getItem(targetKey) ||
+      (resumeReference ? localStorage.getItem(activeKey) : null) ||
+      localStorage.getItem(OCI_AUDIT_DRAFT_KEY_LEGACY) ||
+      sessionStorage.getItem(targetKey) ||
       (resumeReference ? sessionStorage.getItem(activeKey) : null) ||
       sessionStorage.getItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
-    if (!raw) return;
+    if (!raw) {
+      setHasDraftProgress(false);
+      return;
+    }
 
-    if (sessionStorage.getItem(OCI_AUDIT_DRAFT_KEY_LEGACY)) {
+    if (localStorage.getItem(OCI_AUDIT_DRAFT_KEY_LEGACY)) {
       const targetKey = resumeReference ? resumeKey : activeKey;
-      sessionStorage.setItem(targetKey, raw);
+      localStorage.setItem(targetKey, raw);
+      localStorage.removeItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
+    }
+
+    if (sessionStorage.getItem(targetKey) || sessionStorage.getItem(OCI_AUDIT_DRAFT_KEY_LEGACY)) {
+      localStorage.setItem(targetKey, raw);
+      sessionStorage.removeItem(targetKey);
       sessionStorage.removeItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
     }
 
@@ -948,9 +1253,15 @@ useEffect(() => {
     if (parsed.lastChecklistAnswers && typeof parsed.lastChecklistAnswers === "object") {
       setLastChecklistAnswers({ ...emptyAnswers, ...parsed.lastChecklistAnswers });
     }
+    setHasDraftProgress(true);
   } catch {
+    localStorage.removeItem(getAuditDraftKey(resumeReference || null));
+    localStorage.removeItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
     sessionStorage.removeItem(getAuditDraftKey(resumeReference || null));
     sessionStorage.removeItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
+    setHasDraftProgress(false);
+  } finally {
+    setDraftRestored(true);
   }
 }, [resumeReference]);
 
@@ -961,10 +1272,11 @@ useEffect(() => {
 
   const activeKey = getAuditDraftKey(null);
   const referenceKey = getAuditDraftKey(referenceNumber);
-  const activeDraft = sessionStorage.getItem(activeKey);
+  const activeDraft = localStorage.getItem(activeKey) || sessionStorage.getItem(activeKey);
   if (!activeDraft) return;
 
-  sessionStorage.setItem(referenceKey, activeDraft);
+  localStorage.setItem(referenceKey, activeDraft);
+  localStorage.removeItem(activeKey);
   sessionStorage.removeItem(activeKey);
 }, [referenceNumber, resumeReference]);
 
@@ -983,6 +1295,7 @@ useEffect(() => {
 
   useEffect(() => {
     if (!resumeReference) return;
+    if (!draftRestored) return;
 
     let active = true;
 
@@ -991,8 +1304,33 @@ useEffect(() => {
         setApiLoading(true);
         setApplicationStartError(null);
 
-        const app = await syncApplicationFromBackend(resumeReference);
+        const app = await syncApplicationFromBackend(resumeReference, { skipStageSync: true });
         if (!active) return;
+
+        let hasUploadedDocs = false;
+        try {
+          const refForDocuments: string = (app.reference_number ?? String(resumeReference ?? "")).toString().trim();
+          const docsRaw = await getApplicationDocuments(String(refForDocuments));
+          const docsPayload = normalizePayload<any>(docsRaw);
+          const docs = Array.isArray(docsPayload)
+            ? docsPayload
+            : Array.isArray(docsPayload?.documents)
+              ? docsPayload.documents
+              : [];
+
+          hasUploadedDocs = docs.some((item: any) => {
+            const status = String(item?.status || "").trim().toLowerCase();
+            return (
+              status === "uploaded" ||
+              Boolean(item?.uploaded_at) ||
+              Boolean(item?.file_path) ||
+              Boolean(item?.document_file) ||
+              Boolean(item?.url)
+            );
+          });
+        } catch {
+          // Non-fatal for resume; stage will use other signals.
+        }
 
         const resolvedService =
           mapBackendServiceType(app.service_type) ||
@@ -1004,10 +1342,70 @@ useEffect(() => {
           setBannerMessage(`Resuming your ${serviceLabelMap[resolvedService]} application.`);
         }
 
-        const backendStage = deriveStageFromApplication(app);
-        if (backendStage) {
-          setStage(backendStage);
+        // Restore audit id and checklist from backend
+        const resolvedAuditId = (app as any).audit_id ?? (app as any).latest_audit_id ?? null;
+        let restoredChecklistCount = 0;
+        if (resolvedAuditId) {
+          setAuditId(Number(resolvedAuditId));
+          try {
+            const raw = await getAuditStatus(Number(resolvedAuditId));
+            const result = normalizePayload<{ checklist_items?: AuditChecklistItem[] }>(raw);
+            if (Array.isArray(result.checklist_items) && result.checklist_items.length > 0) {
+              restoredChecklistCount = result.checklist_items.length;
+              applyChecklistFromAudit(result.checklist_items);
+            }
+          } catch {
+            // non-fatal: checklist may still load from saved draft
+          }
         }
+
+       const backendStage = deriveStageFromApplication(app);
+
+
+// const progressiveStages: FlowStage[] = ["audit-pending", "audit-result", "full-payment", "processing", "completed"];
+// const draftStage = stageRef.current;
+
+// if (backendStage && progressiveStages.includes(backendStage)) {
+//   // Backend says we're past upload — always trust this
+//   setStage(backendStage);
+// } else if (draftStage && draftStage !== "service") {
+//   // Draft has a real position — keep it (questions q2, checklist, summary, etc.)
+//   setStage(draftStage);
+// } else {
+//   // No useful draft, backend says fresh app — safe minimum for resume
+//   setStage("checklist");
+// }
+
+// Stage priority:
+// 1. If backend knows we're past checklist (paid, audit-pending, etc.) → use backend
+// 2. If draft restored a meaningful stage AND checklist exists → keep it
+// 3. If draft is mid-questionnaire → restore questions stage
+// 4. Otherwise fall back to questions (not checklist) as safe minimum
+const progressiveStages: FlowStage[] = ["passport-quote-pending", "audit-pending", "audit-result", "full-payment", "processing", "completed"];
+const draftStage = stageRef.current;
+const hasGeneratedChecklist = generatedChecklist.length > 0;
+const hasChecklistArtifacts = hasGeneratedChecklist || restoredChecklistCount > 0 || Boolean(resolvedAuditId);
+
+if (backendStage && backendStage !== "service" && backendStage !== "questions") {
+  // Backend stage is authoritative for all post-questionnaire states.
+  setStage(backendStage);
+} else if (draftStage === "checklist" || draftStage === "upload" || draftStage === "summary") {
+  // Only restore checklist-family stages when checklist or uploads exist
+  if (hasChecklistArtifacts || hasUploadedDocs) {
+    setStage(draftStage);
+  } else {
+    setStage("questions");
+  }
+} else if (hasChecklistArtifacts || hasUploadedDocs) {
+  // Resume users with existing checklist/uploads directly into checklist flow.
+  setStage("checklist");
+} else if (draftStage && draftStage !== "service") {
+  // Mid-questionnaire draft — restore it
+  setStage(draftStage);
+} else {
+  // No useful draft — send to questions, not checklist
+  setStage("questions");
+}
       } catch (error) {
         if (!active) return;
         setApplicationStartError(error instanceof Error ? error.message : "Unable to resume this application.");
@@ -1024,14 +1422,15 @@ useEffect(() => {
     return () => {
       active = false;
     };
-  }, [resumeReference, serviceTypeProp]);
+  }, [resumeReference, serviceTypeProp, draftRestored, hasDraftProgress]);
 
 
   useEffect(() => {
     if (!loaded) return;
+    if (resumeReference && !draftRestored) return;
     saveState({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, stage, selectedService, questionIndex, answers, documents, supportNotes, addOns, auditOutcome, auditSubmitted, reviewRound, processingStep, auditId, applicationId]);
+  }, [loaded, resumeReference, draftRestored, stage, selectedService, questionIndex, answers, documents, supportNotes, addOns, auditOutcome, auditSubmitted, reviewRound, processingStep, auditId, applicationId]);
 
   useEffect(() => {
     if (stage !== "audit-pending" || !auditId) return;
@@ -1345,6 +1744,28 @@ useEffect(() => {
     };
   }, [referenceNumber, shouldShowPersistentTracker]);
 
+  useEffect(() => {
+    if (stage !== "processing" && stage !== "completed") return;
+
+    let active = true;
+
+    const loadDeliveryStage = async () => {
+      try {
+        const latestRecord = await syncApplicationFromBackend(referenceNumber);
+        if (!active) return;
+        setApplicationRecord(latestRecord);
+      } catch {
+        // silent refresh for delivery stages
+      }
+    };
+
+    void loadDeliveryStage();
+
+    return () => {
+      active = false;
+    };
+  }, [stage, referenceNumber]);
+
   const updateDocument = (id: string, file?: File | null) => {
     setDocuments((current) => ({
       ...current,
@@ -1361,7 +1782,7 @@ useEffect(() => {
       return;
     }
 
-    const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
+    const app = await syncApplicationFromBackend(referenceNumber, { skipStageSync: true }).catch(() => null);
 
     const correctionLoopStatus = String(app?.application_status || applicationRecord?.application_status || "").toLowerCase();
     const isCorrectionLoop = ["correction_requested", "reuploaded_pending_review"].includes(correctionLoopStatus) || stage === "audit-result";
@@ -1388,7 +1809,16 @@ useEffect(() => {
         return;
       }
 
-      const effectiveAuditId = Number(auditId || app?.id || applicationRecord?.id || 0);
+      // const effectiveAuditId = Number(auditId || app?.id || applicationRecord?.id || 0);
+
+      const effectiveAuditId = Number(
+  auditId ||
+  (app as any)?.audit_id ||
+  (applicationRecord as any)?.audit_id ||
+  app?.id ||
+  applicationRecord?.id ||
+  0
+);
 
       await uploadDocument(
         effectiveAuditId,
@@ -1398,7 +1828,7 @@ useEffect(() => {
         inferredDocumentType
       );
       // FLYOCI-FIX: BUG-REUPLOAD-5
-      await syncApplicationFromBackend(referenceNumber);
+      await syncApplicationFromBackend(referenceNumber, { skipStageSync: true });
       updateDocument(id, file);
       setFlaggedReuploads((current) => ({ ...current, [id]: true }));
     } catch (error) {
@@ -1440,6 +1870,10 @@ useEffect(() => {
 
  const handleServiceSelection = async (service: ServiceId) => {
   setApplicationStartError(null);
+
+  // Fix 2 (safety net): clear drafts in this entry path too.
+  clearDraftStorage(resumeReference || referenceNumber || null);
+
   resetFromService(service); // clears localStorage first
 
   try {
@@ -1617,7 +2051,7 @@ useEffect(() => {
 
     try {
       setApiLoading(true);
-      const raw = await createAuditPaymentOrder(refNum);
+      const raw = await createAuditPaymentOrder(refNum, supportNotes);
       const order = normalizePayload<{
         order: { id: string; amount: number; currency: string };
         key_id: string;
@@ -1653,6 +2087,80 @@ useEffect(() => {
     }
   };
 
+  const submitPassportRequestForQuote = async () => {
+    const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
+    const refNum = app?.reference_number;
+    if (!refNum) {
+      toast.error("Application reference not found.");
+      return;
+    }
+
+    try {
+      setApiLoading(true);
+      const response = await submitPassportRenewalRequest(refNum);
+      setPassportMaskedEmail(String(response.masked_email || ""));
+      setPassportCaseReference(String(response.case_reference || response.file_number || refNum));
+      setPassportQuoteAcknowledged(false);
+      setStage("passport-quote-pending");
+      setBannerMessage("Passport renewal request submitted. We will notify you when the quote is ready in your dashboard.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not submit passport renewal request.");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  const payPassportQuotedFee = async () => {
+    const app = await syncApplicationFromBackend(referenceNumber).catch(() => applicationRecord);
+    const refNum = String(app?.reference_number || referenceNumber || "").trim();
+    if (!refNum) {
+      toast.error("Application reference not found.");
+      return;
+    }
+
+    if (!passportQuoteAcknowledged) {
+      toast.error("Please acknowledge the quote before payment.");
+      return;
+    }
+
+    try {
+      setApiLoading(true);
+      const raw = await createPassportRenewalQuoteOrder(refNum);
+      const order = normalizePayload<{
+        order: { id: string; amount: number; currency: string };
+        key_id: string;
+        amount_pence: number;
+      }>(raw);
+
+      await openRazorpayCheckout(
+        {
+          key: order.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+          amount: Number(order.amount_pence || order.order?.amount || 0),
+          currency: order.order?.currency || "GBP",
+          order_id: order.order?.id || "",
+          name: "FlyOCI",
+          description: "Passport Renewal Quote Payment",
+        },
+        async (payment) => {
+          await verifyPassportRenewalQuotePayment(
+            refNum,
+            payment.razorpay_order_id,
+            payment.razorpay_payment_id,
+            payment.razorpay_signature
+          );
+        }
+      );
+
+      await syncApplicationFromBackend(refNum);
+      router.push(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&resume=1`);
+      toast.success("Payment successful. Your case is now in progress.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Passport quote payment failed.");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
   const resubmitForReview = async () => {
     const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
     const refNum = app?.reference_number;
@@ -1676,6 +2184,245 @@ useEffect(() => {
     }
   };
 
+  const submitReview = async () => {
+    const app = await syncApplicationFromBackend(referenceNumber).catch(() => applicationRecord);
+    const refNum = app?.reference_number || applicationRecord?.reference_number || referenceNumber || "";
+    const testimonialText = reviewText.trim();
+
+    if (!testimonialText) {
+      toast.error("Please write your review before submitting.");
+      return;
+    }
+
+    try {
+      setReviewSubmitting(true);
+      await submitTestimonial({
+        author_name: reviewAuthorName.trim() || undefined,
+        testimonial_text: testimonialText,
+        service_type: String(app?.service_name || app?.service_type || selectedService || "").trim() || undefined,
+        rating: reviewRating,
+        application_reference: refNum || undefined,
+      });
+      setReviewText("");
+      setReviewAuthorName("");
+      setReviewRating(5);
+      setReviewSubmitted(true);
+      setReviewModalOpen(false);
+      toast.success("Thanks. Your review is now live on the homepage.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to submit review.");
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const openPrintableSummary = async () => {
+    const app = applicationRecord;
+    const referenceLine = app?.reference_number || referenceNumber || "N/A";
+    const serviceLine = app?.service_name || app?.service_type || selectedService || "N/A";
+    const statusLine = app?.current_stage || app?.application_status || "Completed";
+    const submissionLine = app?.submission_date || app?.approval_date || app?.completion_date || "N/A";
+    const decisionLine = app?.approval_date || app?.completion_date || "N/A";
+    const notesLine = app?.notes || "No decision reference recorded.";
+    const safeReference = String(referenceLine)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "case-summary";
+
+    const fallbackToPrintDialog = () => {
+      const printFrame = document.createElement("iframe");
+      printFrame.setAttribute("aria-hidden", "true");
+      printFrame.style.position = "fixed";
+      printFrame.style.right = "0";
+      printFrame.style.bottom = "0";
+      printFrame.style.width = "0";
+      printFrame.style.height = "0";
+      printFrame.style.border = "0";
+      document.body.appendChild(printFrame);
+
+      const printHtml = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>FlyOCI Case Summary</title>
+          <style>
+            body {
+              font-family: Arial, Helvetica, sans-serif;
+              margin: 0;
+              padding: 32px;
+              color: #123;
+              background: #f5f8fc;
+            }
+            .sheet {
+              max-width: 860px;
+              margin: 0 auto;
+              background: #fff;
+              border: 1px solid #dbe8f7;
+              border-radius: 20px;
+              padding: 28px;
+              box-shadow: 0 20px 50px rgba(18, 47, 89, 0.08);
+            }
+            h1 {
+              margin: 0 0 8px;
+              font-size: 30px;
+              color: #0f4aa6;
+            }
+            p {
+              margin: 0 0 10px;
+              line-height: 1.5;
+            }
+            .meta {
+              margin-top: 18px;
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 14px;
+            }
+            .box {
+              border: 1px solid #dbe8f7;
+              border-radius: 14px;
+              padding: 14px;
+              background: #f9fbff;
+            }
+            .label {
+              display: block;
+              font-size: 12px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              color: #5d7089;
+              margin-bottom: 6px;
+            }
+            .value {
+              font-size: 15px;
+              font-weight: 600;
+              color: #1f3558;
+            }
+            .footer {
+              margin-top: 22px;
+              font-size: 12px;
+              color: #6b7f99;
+            }
+            @media print {
+              body {
+                background: #fff;
+                padding: 0;
+              }
+              .sheet {
+                border: 0;
+                box-shadow: none;
+                border-radius: 0;
+                max-width: none;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="sheet">
+            <h1>FlyOCI Case Summary</h1>
+            <p>Your completed case record is shown below. Use your browser print dialog to save this as a PDF.</p>
+            <div class="meta">
+              <div class="box"><span class="label">Reference</span><span class="value">${referenceLine}</span></div>
+              <div class="box"><span class="label">Service</span><span class="value">${serviceLine}</span></div>
+              <div class="box"><span class="label">Status</span><span class="value">${statusLine}</span></div>
+              <div class="box"><span class="label">Submission / Finalized Date</span><span class="value">${submissionLine}</span></div>
+              <div class="box"><span class="label">Decision Date</span><span class="value">${decisionLine}</span></div>
+              <div class="box"><span class="label">Decision Reference</span><span class="value">${notesLine}</span></div>
+            </div>
+            <p class="footer">FlyOCI is an independent private service provider.</p>
+          </div>
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+      const frameDocument = printFrame.contentDocument || printFrame.contentWindow?.document;
+      if (!frameDocument) {
+        document.body.removeChild(printFrame);
+        toast.error("Unable to prepare the printable summary.");
+        return;
+      }
+
+      frameDocument.open();
+      frameDocument.write(printHtml);
+      frameDocument.close();
+
+      setTimeout(() => {
+        printFrame.contentWindow?.focus();
+        printFrame.contentWindow?.print();
+      }, 250);
+
+      const cleanup = () => {
+        if (printFrame.parentNode) {
+          printFrame.parentNode.removeChild(printFrame);
+        }
+        window.removeEventListener("afterprint", cleanup);
+      };
+
+      window.addEventListener("afterprint", cleanup);
+      setTimeout(cleanup, 5000);
+    };
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+      let y = 56;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.text("FlyOCI Case Summary", 48, y);
+      y += 26;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(93, 112, 137);
+      doc.text(`Generated on ${new Date().toLocaleString()}`, 48, y);
+      y += 26;
+
+      const rows: Array<[string, string]> = [
+        ["Reference", String(referenceLine)],
+        ["Service", String(serviceLine)],
+        ["Status", String(statusLine)],
+        ["Submission / Finalized Date", String(submissionLine)],
+        ["Decision Date", String(decisionLine)],
+        ["Decision Reference", String(notesLine)],
+      ];
+
+      doc.setTextColor(31, 53, 88);
+      doc.setFontSize(12);
+
+      rows.forEach(([label, value]) => {
+        if (y > 760) {
+          doc.addPage();
+          y = 56;
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.text(`${label}:`, 48, y);
+        doc.setFont("helvetica", "normal");
+        const wrapped = doc.splitTextToSize(value || "N/A", 380);
+        doc.text(wrapped, 220, y);
+        y += Math.max(22, wrapped.length * 14);
+      });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(107, 127, 153);
+      doc.text("FlyOCI is an independent private service provider.", 48, 800);
+
+      doc.save(`flyoci-case-summary-${safeReference}.pdf`);
+      toast.success("Case summary PDF is downloading.");
+    } catch {
+      toast.error("Direct PDF download failed. Opening print dialog instead.");
+      fallbackToPrintDialog();
+    }
+  };
+
   const proceedToFullPayment = () => {
     setPaymentSummary(null);
     setPaymentSummaryError(null);
@@ -1694,7 +2441,7 @@ useEffect(() => {
 
     try {
       setApiLoading(true);
-      await skipAuditWithDisclaimer(refNum);
+      await skipAuditWithDisclaimer(refNum, supportNotes);
       await syncApplicationFromBackend(refNum);
       setStage("full-payment");
       setBannerMessage("Audit skipped with risk acknowledgement. Full payment is now available.");
@@ -1760,14 +2507,36 @@ useEffect(() => {
     }
   };
 
-  const advanceProcessing = () => {
-    setProcessingStep((current) => Math.min(current + 1, PROCESS_ITEMS.length - 1));
-  };
+  const resetJourneyForNewApplication = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(getAuditDraftKey(resumeReference || referenceNumber || null));
+      localStorage.removeItem(getAuditDraftKey(null));
+      localStorage.removeItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
+      sessionStorage.removeItem(getAuditDraftKey(resumeReference || referenceNumber || null));
+      sessionStorage.removeItem(getAuditDraftKey(null));
+      sessionStorage.removeItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
+    }
 
-  const completeJourney = () => {
-    setProcessingStep(PROCESS_ITEMS.length - 1);
-    setStage("completed");
-    setBannerMessage("Your application is complete.");
+    setStage("service");
+    setSelectedService(null);
+    setQuestionIndex(0);
+    setAnswers(emptyAnswers);
+    setDocuments(emptyDocStatus());
+    setSupportUploads({});
+    setSupportNotes("");
+    setAddOns([]);
+    setAuditOutcome(null);
+    setAuditSubmitted(false);
+    setReviewRound(0);
+    setProcessingStep(0);
+    setApplicationId(null);
+    setReferenceNumber(null);
+    setMessageRequestedDocIds([]);
+    setGeneratedChecklist([]);
+    setChecklistGenerationError(null);
+    setLastChecklistAnswers(null);
+    setAuditId(null);
+    setBannerMessage("Start a new document audit and follow the full checklist flow.");
   };
 
   if (!loaded) {
@@ -1779,34 +2548,15 @@ useEffect(() => {
       <div className="rounded-3xl border border-[#d7e5fb] bg-white p-5 sm:p-6 shadow-[0_14px_36px_rgba(30,74,135,0.08)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary/70">Document Audit Journey</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary/70">
+              {selectedService === "passport-renewal" ? "Passport Renewal Journey" : "Document Audit Journey"}
+            </p>
             <h2 className="mt-1 text-2xl sm:text-3xl font-heading font-bold text-primary">Your Required Documents</h2>
             <p className="mt-2 max-w-3xl text-sm sm:text-base text-slate-600">{bannerMessage}</p>
           </div>
           <button
             type="button"
-           onClick={() => {
-  setStage("service");
-  setSelectedService(null);
-  setQuestionIndex(0);
-  setAnswers(emptyAnswers);
-  setDocuments(emptyDocStatus());
-  setSupportUploads({});
-  setSupportNotes("");
-  setAddOns([]);
-  setAuditOutcome(null);
-  setAuditSubmitted(false);
-  setReviewRound(0);
-  setProcessingStep(0);
-  setApplicationId(null);
-  setReferenceNumber(null);
-  setMessageRequestedDocIds([]);
-  setGeneratedChecklist([]);
-  setChecklistGenerationError(null);
-  setLastChecklistAnswers(null);
-  setAuditId(null);
-  setBannerMessage("Start a new document audit and follow the full checklist flow.");
-}}
+            onClick={resetJourneyForNewApplication}
             className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
           >
             <RefreshCcw className="mr-2 h-4 w-4" /> Reset Journey
@@ -1826,7 +2576,26 @@ useEffect(() => {
         </div>
       ) : null}
 
-    
+      {customerMessages.length > 0 ? (
+        <div className="rounded-3xl border border-[#dce7f8] bg-[#f5f9ff] p-6 shadow-sm">
+          <h3 className="text-xl font-heading font-bold text-primary mb-4">Messages from FlyOCI Team</h3>
+          <div className="space-y-3">
+            {customerMessages.map((msg, idx) => (
+              <div key={`${msg.created_at || "message"}-${idx}`} className="rounded-2xl border border-[#d9e8ff] bg-white p-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-primary">{msg.subject || "Message from FlyOCI Team"}</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {msg.created_at ? new Date(msg.created_at).toLocaleString() : "Recently"}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-slate-700 leading-relaxed">{msg.message}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
 
 {stage === "service" && (
@@ -2151,8 +2920,12 @@ useEffect(() => {
 
       {stage === "summary" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Upload Summary and Audit Fee Payment</h3>
-          <p className="mt-2 text-textMuted">We will review your documents and confirm if they are acceptable for submission. Audit fee is fully adjusted in final service fee.</p>
+          <h3 className="text-2xl font-heading font-bold text-primary">{selectedService === "passport-renewal" ? "Upload Summary and Request Submission" : "Upload Summary and Audit Fee Payment"}</h3>
+          <p className="mt-2 text-textMuted">
+            {selectedService === "passport-renewal"
+              ? "Submit your passport renewal request now. Our team will review your documents and share a Price on request quote in your dashboard within 24-48 working hours."
+              : "We will review your documents and confirm if they are acceptable for submission. Audit fee is fully adjusted in final service fee."}
+          </p>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
@@ -2166,49 +2939,61 @@ useEffect(() => {
                 ))}
               </div>
             </div>
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
-              <h4 className="font-semibold">Audit fee breakdown</h4>
-              <p className="mt-2 text-sm">This is a one-time expert pre-check. If you proceed with FlyOCI, this amount is deducted from your final fee (e.g., New OCI £88 - £15 = £73 to pay later).</p>
-              <div className="mt-4 space-y-2 text-sm">
-                <p className="flex justify-between"><span>Audit fee</span><strong>£{auditFee}</strong></p>
-                <p className="flex justify-between"><span>Credit if you proceed</span><strong>-£{auditFee}</strong></p>
-                <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>£{serviceFee}</strong></p>
-              </div>
-              <label className="mt-5 flex items-start gap-2 text-sm">
-                <input type="checkbox" className="mt-1" />
-                <span>I acknowledge the audit fee and understand it is credited against my final service fee if I proceed.</span>
-              </label>
-
-              <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-                <p className="font-semibold">Skip audit? You can, but it is not recommended.</p>
-                <p className="mt-1">
-                  More than 50% of applications have document issues we catch at audit stage. The £15 audit fee is fully deducted from your
-                  service fee if you proceed with us. Are you sure you want to skip?
-                </p>
-                <label className="mt-3 flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={skipAuditDisclaimerAccepted}
-                    onChange={(event) => setSkipAuditDisclaimerAccepted(event.target.checked)}
-                  />
-                  <span>I understand that skipping audit can cause delays and extra correction rounds after payment.</span>
-                </label>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button variant="outline" isLoading={apiLoading} onClick={() => void submitAuditPayment()}>
-                    Take the Audit (Recommended)
-                  </Button>
-                  <Button
-                    variant="outline"
-                    isLoading={apiLoading}
-                    disabled={!skipAuditDisclaimerAccepted || apiLoading}
-                    onClick={() => void skipAuditAndProceedToPayment()}
-                  >
-                    Skip & Pay Full Fee
-                  </Button>
+            {selectedService === "passport-renewal" ? (
+              <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5 text-slate-700">
+                <h4 className="font-semibold text-primary">Price on request flow</h4>
+                <p className="mt-2 text-sm">Your documents are submitted for review. Once our team validates your case details, your quoted fee will appear in your dashboard for secure payment.</p>
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                  <p className="flex justify-between"><span>Service</span><strong>Indian Passport Renewal</strong></p>
+                  <p className="mt-2 flex justify-between"><span>Pricing</span><strong>Price on request</strong></p>
+                  <p className="mt-2 flex justify-between"><span>Quote turnaround</span><strong>24-48 working hours</strong></p>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
+                <h4 className="font-semibold">Audit fee breakdown</h4>
+                <p className="mt-2 text-sm">This is a one-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update), this amount is deducted from your final fee (e.g., New OCI £88 - £15 = £73 to pay later). Audit credit does not apply to e-Visa or Passport Renewal.</p>
+                <div className="mt-4 space-y-2 text-sm">
+                  <p className="flex justify-between"><span>Audit fee</span><strong>£{auditFee}</strong></p>
+                  <p className="flex justify-between"><span>Credit if you proceed</span><strong>-£{auditFee}</strong></p>
+                  <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>{serviceFee === null ? "Price on request" : `£${serviceFee}`}</strong></p>
+                </div>
+                <label className="mt-5 flex items-start gap-2 text-sm">
+                  <input type="checkbox" className="mt-1" />
+                  <span>I acknowledge the audit fee and understand it is credited against my final service fee if I proceed.</span>
+                </label>
+
+                <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+                  <p className="font-semibold">Skip audit? You can, but it is not recommended.</p>
+                  <p className="mt-1">
+                    More than 50% of applications have document issues we catch at audit stage. The £15 audit fee is fully deducted from your
+                    OCI service fee (New OCI, OCI Renewal, or OCI Update) if you proceed with us. Audit credit does not apply to e-Visa or Passport Renewal. Are you sure you want to skip?
+                  </p>
+                  <label className="mt-3 flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={skipAuditDisclaimerAccepted}
+                      onChange={(event) => setSkipAuditDisclaimerAccepted(event.target.checked)}
+                    />
+                    <span>I understand that skipping audit can cause delays and extra correction rounds after payment.</span>
+                  </label>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button variant="outline" isLoading={apiLoading} onClick={() => void submitAuditPayment()}>
+                      Take the Audit (Recommended)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      isLoading={apiLoading}
+                      disabled={!skipAuditDisclaimerAccepted || apiLoading}
+                      onClick={() => void skipAuditAndProceedToPayment()}
+                    >
+                      Skip & Pay Full Fee
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -2217,7 +3002,80 @@ useEffect(() => {
               setMessageRequestedDocIds([]);
               setStage("checklist");
             }}>Back to uploads</Button>
-            <Button isLoading={apiLoading} onClick={() => void submitAuditPayment()}>Pay £{auditFee} & Submit for Audit</Button>
+            {selectedService === "passport-renewal" ? (
+              <Button isLoading={apiLoading} onClick={() => void submitPassportRequestForQuote()}>Submit Passport Renewal Request</Button>
+            ) : (
+              <Button isLoading={apiLoading} onClick={() => void submitAuditPayment()}>Pay £{auditFee} & Submit for Audit</Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {stage === "passport-quote-pending" && (
+        <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
+          <h3 className="text-2xl font-heading font-bold text-primary">Passport Renewal Request Submitted</h3>
+          <p className="mt-2 text-textMuted">Our team will review your uploaded documents and update your dashboard quote status within 24-48 working hours.</p>
+          <div className="mt-5 rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5 text-sm text-slate-700">
+            <p className="flex justify-between"><span>Case number</span><strong>{passportCaseReference || applicationRecord?.file_number || applicationRecord?.reference_number || referenceNumber || "N/A"}</strong></p>
+            <p className="mt-2 flex justify-between"><span>Updates sent to</span><strong>{passportMaskedEmail || "your registered email"}</strong></p>
+            <p className="mt-2 flex justify-between"><span>Quote status</span><strong>{String(applicationRecord?.quote_status || "PENDING_QUOTE").replaceAll("_", " ")}</strong></p>
+          </div>
+
+          {String(applicationRecord?.quote_status || "").toUpperCase() === "PENDING_QUOTE" ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              Your quote is being prepared by our team. We'll notify you by email when it's ready. Expected: within 24 hours.
+            </div>
+          ) : null}
+
+          {String(applicationRecord?.quote_status || "").toUpperCase() === "QUOTED" ? (
+            <div id="passport-quote-box" ref={quoteCardRef} className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
+              {(() => {
+                const quotedFeeRaw = String(applicationRecord?.quoted_fee || "").trim();
+                const quotedFeeNumber = Number.parseFloat(quotedFeeRaw);
+                const quoteAmountPence = Number(applicationRecord?.quote_amount_pence || 0);
+                const displayAmount = Number.isFinite(quotedFeeNumber) && quotedFeeNumber > 0
+                  ? quotedFeeNumber.toFixed(2)
+                  : quoteAmountPence > 0
+                    ? (quoteAmountPence / 100).toFixed(2)
+                    : "0.00";
+
+                return (
+                  <>
+              <p className="text-lg font-semibold">Your Quote is Ready!</p>
+              <p className="mt-2 text-base font-semibold">Passport Renewal: £{displayAmount}</p>
+              <p className="mt-1">Valid until: {applicationRecord?.quote_expires_at ? new Date(applicationRecord.quote_expires_at).toLocaleString() : "Not set"}</p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Button onClick={() => router.push(`/passport-renewal/pay?reference=${encodeURIComponent(String(applicationRecord?.reference_number || referenceNumber || ""))}`)}>
+                  Pay Now
+                </Button>
+                <Button variant="outline" onClick={() => router.push(`/passport-renewal/pay?reference=${encodeURIComponent(String(applicationRecord?.reference_number || referenceNumber || ""))}`)}>
+                  View Details
+                </Button>
+              </div>
+                  </>
+                );
+              })()}
+            </div>
+          ) : null}
+
+          {String(applicationRecord?.quote_status || "").toUpperCase() === "EXPIRED" ? (
+            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+              <p>Your quote has expired. Please contact us for a new quote.</p>
+              <div className="mt-3">
+                <Button variant="outline" onClick={() => router.push("/contact")}>Contact Support</Button>
+              </div>
+            </div>
+          ) : null}
+
+          {["QUOTE_ACCEPTED", "PAID"].includes(String(applicationRecord?.quote_status || "").toUpperCase()) ? (
+            <div className="mt-5 rounded-2xl border border-[#dce7f8] bg-[#f5f9ff] p-4 text-sm text-slate-700">
+              Payment is in progress or confirmed. Your application is moving to processing.
+            </div>
+          ) : null}
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button variant="outline" onClick={() => router.push("/dashboard")}>Back to Dashboard</Button>
+            <Button variant="outline" onClick={() => router.push("/services/passport-renewal")}>View Passport Service Details</Button>
           </div>
         </div>
       )}
@@ -2239,8 +3097,17 @@ useEffect(() => {
 
       {stage === "audit-result" && (auditResultData?.status || auditOutcome) && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Audit Result</h3>
-          <p className="mt-2 text-textMuted">Email + WhatsApp message sent with a link to view your audit result.</p>
+          {selectedService === "passport-renewal" ? (
+            <>
+              <h3 className="text-2xl font-heading font-bold text-primary">Correction Requested</h3>
+              <p className="mt-2 text-textMuted">Please review the documents that need to be re-uploaded and submit them again.</p>
+            </>
+          ) : (
+            <>
+              <h3 className="text-2xl font-heading font-bold text-primary">Audit Result</h3>
+              <p className="mt-2 text-textMuted">Email + WhatsApp message sent with a link to view your audit result.</p>
+            </>
+          )}
 
           {auditResultLoading ? (
             <div className="mt-5 space-y-4 animate-pulse">
@@ -2271,18 +3138,20 @@ useEffect(() => {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <h4 className="font-semibold text-primary">Auditor Notes</h4>
-                <p className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">
-                  {auditNotes || "No auditor notes provided yet."}
-                </p>
-                {auditResultData?.reviewed_at ? (
-                  <p className="mt-3 text-xs text-slate-500">Reviewed at: {new Date(auditResultData.reviewed_at).toLocaleString()}</p>
-                ) : null}
-              </div>
+              {selectedService !== "passport-renewal" && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <h4 className="font-semibold text-primary">Auditor Notes</h4>
+                  <p className="mt-3 text-sm text-slate-700 whitespace-pre-wrap">
+                    {auditNotes || "No auditor notes provided yet."}
+                  </p>
+                  {auditResultData?.reviewed_at ? (
+                    <p className="mt-3 text-xs text-slate-500">Reviewed at: {new Date(auditResultData.reviewed_at).toLocaleString()}</p>
+                  ) : null}
+                </div>
+              )}
 
               <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <h4 className="font-semibold text-primary">Flagged Documents</h4>
+                <h4 className="font-semibold text-primary">{selectedService === "passport-renewal" ? "Documents to Re-upload" : "Flagged Documents"}</h4>
                 {flaggedItems.length ? (
                   <div className="mt-4 space-y-3 text-sm text-slate-700">
                     {flaggedItems.map((item) => (
@@ -2293,6 +3162,9 @@ useEffect(() => {
                             {item.actionRequired}
                           </span>
                         </div>
+                        {item.uploadedDocumentName && item.uploadedDocumentName !== item.documentName ? (
+                          <p className="mt-1 text-xs text-slate-500">Flagged file: {item.uploadedDocumentName}</p>
+                        ) : null}
                         <p className="mt-2 text-slate-700">Auditor Note: {item.reason}</p>
                         {(() => {
                           const applicationStatus = String(applicationRecord?.application_status || "").trim().toLowerCase();
@@ -2482,7 +3354,7 @@ useEffect(() => {
               </p>
               <div className="mt-4 flex flex-wrap gap-3">
                 <Button variant="outline" onClick={() => router.push("/dashboard")}>Back to Dashboard</Button>
-                <Button onClick={() => router.push("/dashboard/document-audit")}>Start New Application</Button>
+                <Button onClick={resetJourneyForNewApplication}>Start New Application</Button>
               </div>
             </div>
           )}
@@ -2552,51 +3424,322 @@ useEffect(() => {
 
       {stage === "processing" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Application Processing</h3>
-          <p className="mt-2 text-textMuted">Your tracker moves through each processing step, and major updates are shared by email and WhatsApp.</p>
+          {(() => {
+            const rawServiceType = String(applicationRecord?.service_type || "").toLowerCase().replace(/[\s-]+/g, "_");
+            const processingEstimate =
+              rawServiceType === "new_oci" || rawServiceType === "first_time_oci"
+                ? "8-10 weeks"
+                : rawServiceType === "oci_renewal"
+                  ? "6-8 weeks"
+                  : rawServiceType === "oci_update" || rawServiceType === "passport_renewal"
+                    ? "4-6 weeks"
+                    : "8-10 weeks";
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <h4 className="font-semibold text-primary">Message centre</h4>
-              <div className="mt-3 space-y-3 text-sm text-slate-600">
-                <div className="rounded-xl border border-slate-200 bg-bg-page px-4 py-3">FlyOCI: We are reviewing your application and will notify you of the next step.</div>
-                <div className="rounded-xl border border-slate-200 bg-bg-page px-4 py-3">You can upload any extra requested documents directly in the portal, not via WhatsApp.</div>
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <h4 className="font-semibold text-primary">Current stage actions</h4>
-              <p className="mt-3 text-sm text-slate-600">If FlyOCI needs anything extra, a request appears here and in your notification channels.</p>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <Button variant="outline" onClick={advanceProcessing}>Advance tracker</Button>
-                <Button onClick={completeJourney}>Mark Completed</Button>
-              </div>
-            </div>
-          </div>
+            const notesValue = String(applicationRecord?.notes || "").trim();
+            const extractedGovRef = (() => {
+              const submittedMatch = notesValue.match(/Govt\s*ref\s*:\s*([^\n]+)/i);
+              if (submittedMatch?.[1]) return submittedMatch[1].trim();
+              const decisionMatch = notesValue.match(/Decision\s*ref\s*:\s*([^\n]+)/i);
+              if (decisionMatch?.[1]) return decisionMatch[1].trim();
+              return "";
+            })();
+            const displaySubmissionDate =
+              applicationRecord?.submission_date || applicationRecord?.approval_date || applicationRecord?.completion_date || "";
+
+            return (
+              <>
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 space-y-2">
+                  <h3 className="text-xl font-heading font-bold text-emerald-800">Your application has been submitted to the embassy / VFS.</h3>
+                  {applicationRecord?.reference_number ? <p className="text-sm text-emerald-900"><span className="font-semibold">Reference:</span> {applicationRecord.reference_number}</p> : null}
+                  {applicationRecord?.service_name || applicationRecord?.service_type ? (
+                    <p className="text-sm text-emerald-900"><span className="font-semibold">Service:</span> {applicationRecord?.service_name || applicationRecord?.service_type}</p>
+                  ) : null}
+                  {displaySubmissionDate ? (
+                    <p className="text-sm text-emerald-900"><span className="font-semibold">Submitted on:</span> {new Date(displaySubmissionDate).toLocaleDateString()}</p>
+                  ) : (
+                    <p className="text-sm text-emerald-900">Submission date will be confirmed shortly.</p>
+                  )}
+                  {extractedGovRef ? <p className="text-sm text-emerald-900"><span className="font-semibold">Government reference:</span> {extractedGovRef}</p> : null}
+                </div>
+
+                <p className="mt-3 text-sm text-textMuted">Current status: {applicationRecord?.current_stage?.replaceAll("_", " ") || "Submitted"}</p>
+
+                {selectedService === "passport-renewal" && (
+                  <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                    <p className="text-sm text-blue-900"><span className="font-semibold">Your documents will be received on email</span> once the government completes your application.</p>
+                  </div>
+                )}
+
+                <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+                  <h4 className="font-semibold text-primary">Estimated processing time</h4>
+                  <p className="mt-3 text-sm text-slate-600">Estimated processing time: {processingEstimate}</p>
+                  <p className="mt-2 text-sm text-slate-600">Processing times are set by the embassy and may vary. FlyOCI will notify you of any updates by email and WhatsApp.</p>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
+                  <h4 className="font-semibold text-primary">What to expect next</h4>
+                  <div className="mt-3 space-y-2 text-sm text-slate-600">
+                    <p>The embassy is reviewing your application. No action is needed from you at this stage.</p>
+                    <p>If the embassy requires anything additional, FlyOCI will contact you directly and update your portal.</p>
+                    <p>Once a decision is received, you will be notified immediately by email and WhatsApp.</p>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
       {stage === "completed" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Completed</h3>
-          <p className="mt-2 text-textMuted">OCI approval date, visa details, or passport details can be logged here once the case finishes.</p>
+          {(() => {
+            const detailsRecord = (applicationRecord || {}) as Record<string, unknown>;
+            const decisionDate = String(applicationRecord?.approval_date || applicationRecord?.completion_date || "").trim();
+            const hasReference = Boolean(String(applicationRecord?.reference_number || "").trim());
+            const hasService = Boolean(String(applicationRecord?.service_name || applicationRecord?.service_type || "").trim());
+            const hasDecisionDate = Boolean(decisionDate);
+            const hasDecisionRef = Boolean(String(applicationRecord?.notes || "").trim());
+            const hasOptionalDetails = hasReference || hasService || hasDecisionDate || hasDecisionRef;
+
+            const approvalUrl = [
+              String(detailsRecord["approval_document_url"] || "").trim(),
+              String(detailsRecord["final_output_url"] || "").trim(),
+              String(detailsRecord["document_url"] || "").trim(),
+            ].find((value) => value.length > 0) || "";
+
+            return (
+              <>
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                  <h3 className="text-2xl font-heading font-bold text-emerald-800">Your application is complete</h3>
+                  {hasOptionalDetails ? (
+                    <div className="mt-3 space-y-1 text-sm text-emerald-900">
+                      {hasReference ? <p><span className="font-semibold">Reference:</span> {applicationRecord?.reference_number}</p> : null}
+                      {hasService ? <p><span className="font-semibold">Service:</span> {applicationRecord?.service_name || applicationRecord?.service_type}</p> : null}
+                      {hasDecisionDate ? <p><span className="font-semibold">Decision received:</span> {new Date(decisionDate).toLocaleDateString()}</p> : null}
+                      {hasDecisionRef ? <p><span className="font-semibold">Decision reference:</span> {applicationRecord?.notes}</p> : null}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-emerald-900">Congratulations - your case has been successfully completed.</p>
+                  )}
+                </div>
+
+                {selectedService === "passport-renewal" && (
+                  <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                    <p className="text-sm text-blue-900"><span className="font-semibold">Your renewed passport or passport receipt</span> will be sent to you by email and may also be dispatched to your registered address.</p>
+                  </div>
+                )}
+
+                <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+                  {approvalUrl ? (
+                    <a
+                      href={approvalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center font-heading font-semibold tracking-[0.01em] transition-all duration-300 ease-out rounded-btn bg-btn-primary text-white shadow-btn hover:shadow-btn-hover hover:-translate-y-0.5 px-6 py-3"
+                    >
+                      Download Approval Letter / OCI Card Details
+                    </a>
+                  ) : (
+                    <div className="rounded-xl border border-[#dce7f8] bg-[#fcfdff] p-4 text-sm text-slate-700">
+                      Your OCI card / passport / approval letter will be sent to your registered address or emailed to you directly by FlyOCI. If you have not received anything within 5 working days of this notification, please contact support.
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+
           <div className="mt-5 grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl border border-slate-200 bg-bg-page p-4">
-              <p className="text-sm font-semibold text-primary">Downloadable summary PDF</p>
-              <p className="mt-1 text-xs text-textMuted">Keep a copy of your completed case summary.</p>
+              <p className="text-sm font-semibold text-primary">Download case summary</p>
+              <p className="mt-1 text-xs text-textMuted">Open a compact summary and save it as a PDF.</p>
+              <button
+                type="button"
+                onClick={() => setCaseSummaryOpen(true)}
+                className="mt-3 inline-flex items-center rounded-lg bg-btn-primary px-3 py-1.5 text-xs font-semibold text-white shadow-btn transition hover:shadow-btn-hover hover:-translate-y-0.5"
+              >
+                View case summary
+              </button>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-bg-page p-4">
-              <p className="text-sm font-semibold text-primary">Book next service</p>
-              <p className="mt-1 text-xs text-textMuted">Start a future visa, OCI, or passport service.</p>
+              <p className="text-sm font-semibold text-primary">Book your next service</p>
+              <p className="mt-1 text-xs text-textMuted">Start a new OCI, passport or visa application.</p>
+              <Link href="/services" className="mt-3 inline-flex items-center rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90">Book next service</Link>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-bg-page p-4">
-              <p className="text-sm font-semibold text-primary">Request review</p>
-              <p className="mt-1 text-xs text-textMuted">Leave a Google or Trustpilot review.</p>
+              <p className="text-sm font-semibold text-primary">Leave a review</p>
+              <p className="mt-1 text-xs text-textMuted">A short note and star rating help others decide faster.</p>
+              {reviewSubmitted ? (
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                  Thanks for the review. It has been saved and approved for the homepage.
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setReviewModalOpen(true)}
+                  className="mt-3 inline-flex items-center rounded-lg bg-btn-primary px-3 py-1.5 text-xs font-semibold text-white shadow-btn transition hover:shadow-btn-hover hover:-translate-y-0.5"
+                >
+                  Leave a review
+                </button>
+              )}
             </div>
           </div>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Link href="/services" className="inline-flex items-center rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90">Book next service</Link>
-            <Button variant="outline" onClick={() => setStage("service")}><ArrowRight className="mr-2 h-4 w-4" /> Start another audit</Button>
+            <Button variant="outline" onClick={() => setStage("service")}><ArrowRight className="mr-2 h-4 w-4" /> Start another application</Button>
           </div>
+          {reviewModalOpen ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+              onClick={() => setReviewModalOpen(false)}
+              role="presentation"
+            >
+              <div
+                className="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.22)]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-primary">Leave a review</p>
+                    <p className="mt-1 text-xs text-textMuted">This stays compact in a modal so the case summary remains the focus.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReviewModalOpen(false)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                    aria-label="Close review form"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <form
+                  className="mt-5 space-y-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitReview();
+                  }}
+                >
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">Your name</label>
+                    <input
+                      value={reviewAuthorName}
+                      onChange={(event) => setReviewAuthorName(event.target.value)}
+                      placeholder="Optional"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">Rating</label>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: 5 }, (_, index) => {
+                        const value = index + 1;
+                        const active = value <= reviewRating;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setReviewRating(value)}
+                            className={`inline-flex h-10 w-10 items-center justify-center rounded-full border transition ${active ? "border-amber-300 bg-amber-50 text-amber-500" : "border-slate-200 bg-white text-slate-300 hover:text-amber-400"}`}
+                            aria-label={`${value} star${value > 1 ? "s" : ""}`}
+                          >
+                            <Star className="h-4 w-4 fill-current" />
+                          </button>
+                        );
+                      })}
+                      <span className="ml-2 text-xs font-semibold text-slate-500">{reviewRating}/5</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-700">Review</label>
+                    <textarea
+                      value={reviewText}
+                      onChange={(event) => setReviewText(event.target.value)}
+                      rows={4}
+                      placeholder="Tell others about your experience"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-primary"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <Button isLoading={reviewSubmitting} type="submit" className="flex-1">
+                      Submit review
+                    </Button>
+                    <Button variant="outline" type="button" onClick={() => setReviewModalOpen(false)} className="flex-1">
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          ) : null}
+
+          {caseSummaryOpen ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+              onClick={() => setCaseSummaryOpen(false)}
+              role="presentation"
+            >
+              <div
+                className="w-full max-w-2xl rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.22)]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-primary">Case summary</p>
+                    <p className="mt-1 text-xs text-textMuted">Review the final details, then print or save to PDF.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCaseSummaryOpen(false)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                    aria-label="Close case summary"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Reference</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{applicationRecord?.reference_number || referenceNumber || "N/A"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Service</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{applicationRecord?.service_name || applicationRecord?.service_type || selectedService || "N/A"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Status</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{applicationRecord?.current_stage || applicationRecord?.application_status || "Completed"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Finalized date</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{applicationRecord?.submission_date || applicationRecord?.approval_date || applicationRecord?.completion_date || "N/A"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Decision date</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{applicationRecord?.approval_date || applicationRecord?.completion_date || "N/A"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Decision reference</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{applicationRecord?.notes || "No decision reference recorded."}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <Button type="button" onClick={() => void openPrintableSummary()} className="flex-1">
+                    Download PDF
+                  </Button>
+                  <Button variant="outline" type="button" onClick={() => setCaseSummaryOpen(false)} className="flex-1">
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </div>

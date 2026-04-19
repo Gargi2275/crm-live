@@ -34,7 +34,9 @@ export default function PricingPage() {
         </FadeInUp>
       </section>
 
-      <ServiceFees />
+      <div className="mx-auto max-w-[1400px] px-3 sm:px-4 lg:px-6 pb-16">
+        <ServiceFees />
+      </div>
 
       <CTABanner />
     </>

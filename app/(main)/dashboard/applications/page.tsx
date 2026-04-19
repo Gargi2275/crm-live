@@ -27,6 +27,23 @@ type DashboardApplication = {
   consent_captured?: boolean;
 };
 
+function extractGovernmentReference(notes: string | null | undefined): string {
+  const raw = String(notes || "").trim();
+  if (!raw) return "";
+
+  const submittedMatch = raw.match(/Govt\s*ref\s*:\s*([^\n]+)/i);
+  if (submittedMatch?.[1]) {
+    return submittedMatch[1].trim();
+  }
+
+  const decisionMatch = raw.match(/Decision\s*ref\s*:\s*([^\n]+)/i);
+  if (decisionMatch?.[1]) {
+    return decisionMatch[1].trim();
+  }
+
+  return "";
+}
+
 const APPS_CACHE_KEY_PREFIX = "dashboard_apps_cache:";
 
 export default function DashboardApplicationsPage() {
@@ -232,6 +249,8 @@ export default function DashboardApplicationsPage() {
                 const emailStatus = app.email_confirmed ? "Confirmed" : "Pending";
                 const paymentColor = app.payment_confirmed ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200";
                 const emailColor = app.email_confirmed ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200";
+                const governmentReference = extractGovernmentReference(app.notes);
+                const decisionDate = app.approval_date || app.completion_date;
 
                 return (
                   <div
@@ -268,6 +287,12 @@ export default function DashboardApplicationsPage() {
                       )}
                       {app.approval_date && (
                         <p className="text-emerald-700">Approved: <span className="font-medium">{formatDate(app.approval_date)}</span></p>
+                      )}
+                      {decisionDate && !app.approval_date && (
+                        <p className="text-emerald-700">Decision: <span className="font-medium">{formatDate(decisionDate)}</span></p>
+                      )}
+                      {governmentReference && (
+                        <p>Government ref: <span className="font-medium text-slate-700">{governmentReference}</span></p>
                       )}
                     </div>
 

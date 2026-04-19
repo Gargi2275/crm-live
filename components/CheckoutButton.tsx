@@ -19,11 +19,9 @@ export function CheckoutButton() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        console.error("Checkout URL not found:", data);
         alert("Failed to create checkout session. Please try again.");
       }
-    } catch (error) {
-      console.error("Checkout Error:", error);
+    } catch {
       alert("An unexpected error occurred. Please try again.");
     } finally {
       setIsCheckoutLoading(false);

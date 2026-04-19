@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
@@ -10,6 +10,8 @@ import { Reveal } from "@/components/Reveal";
 import { ProgressStepper } from "@/components/ProgressStepper";
 import { AnimatedCheckmark } from "@/components/AnimatedCheckmark";
 import { eVisaApi } from "@/lib/api-client";
+import { authService } from "@/lib/auth";
+import { isCurrentPathAllowed, isMissingCaseError, resolveCanonicalEVisaRoute, resolveMissingCaseRedirect } from "@/lib/evisa-step-guard";
 
 type RazorpayCheckoutResponse = {
   razorpay_payment_id: string;
@@ -105,6 +107,7 @@ const framerConfetti = Array.from({ length: 50 }).map((_, i) => ({
 
 export default function PaymentPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { data, updateData } = useEVisa();
   const caseNumber = searchParams.get("case") || data.fileNumber || "";
@@ -117,6 +120,56 @@ export default function PaymentPage() {
 
   const price = data.visaDuration === "5-Year" ? 150 : 88;
   const fileNumber = caseNumber || "FO-EV-...";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const enforceStepOrder = async () => {
+      const normalizedCase = (caseNumber || "").trim().toUpperCase();
+      const localCase = String(data.fileNumber || "").trim().toUpperCase();
+      const hasMatchingLocalCase = Boolean(localCase) && localCase === normalizedCase;
+      if (!normalizedCase) {
+        if (!isCurrentPathAllowed(pathname, "/indian-e-visa")) {
+          router.replace("/indian-e-visa");
+        }
+        return;
+      }
+
+      let canonicalRoute = `/indian-e-visa/payment?case=${encodeURIComponent(normalizedCase)}`;
+      if ((isSuccess || data.hasPaid) && hasMatchingLocalCase) {
+        canonicalRoute = `/indian-e-visa/upload?case=${encodeURIComponent(normalizedCase)}`;
+      } else if (hasMatchingLocalCase && !data.isEmailConfirmed) {
+        canonicalRoute = `/indian-e-visa/confirm-email?case=${encodeURIComponent(normalizedCase)}`;
+      }
+
+      if (authService.isLoggedIn()) {
+        try {
+          const resume = await eVisaApi.getResume(normalizedCase);
+          canonicalRoute = resolveCanonicalEVisaRoute(resume.data, normalizedCase);
+        } catch (error) {
+          if (isMissingCaseError(error)) {
+            canonicalRoute = resolveMissingCaseRedirect(true);
+          }
+        }
+      }
+
+      if (!cancelled && !isCurrentPathAllowed(pathname, canonicalRoute)) {
+        router.replace(canonicalRoute);
+      }
+    };
+
+    void enforceStepOrder();
+
+    const handlePopState = () => {
+      void enforceStepOrder();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [caseNumber, data.hasPaid, data.isEmailConfirmed, isSuccess, pathname, router]);
 
   useEffect(() => {
     let cancelled = false;

@@ -2,26 +2,74 @@
 
 import { Bell, Search, LogOut, User } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import { useConsole } from "./ConsoleContext";
 import { motion } from "framer-motion";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useRouter } from "next/navigation";
+import { getAdminAlerts } from "@/lib/admin-auth";
 
 export function TopHeader() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const { role, setRole, roles } = useConsole();
-  const { logout } = useAdminAuth();
+  const [showNotificationMenu, setShowNotificationMenu] = useState(false);
+  const [openAlertCount, setOpenAlertCount] = useState(0);
+  const [notifications, setNotifications] = useState<Array<{ id: string | number; type: string; message: string; timestamp: string }>>([]);
+  const { logout, adminUser } = useAdminAuth();
+  const router = useRouter();
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const notificationMenuRef = useRef<HTMLDivElement | null>(null);
+  const roleLabelMap: Record<string, string> = {
+    admin: "Admin",
+    ops_manager: "Operations Manager",
+    case_processor: "Case Processor",
+    reviewer: "Reviewer",
+    support_agent: "Support Agent",
+  };
+  const roleLabel = roleLabelMap[String(adminUser?.role || "")] || "Staff";
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
-      if (!profileMenuRef.current) return;
-      if (!profileMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (profileMenuRef.current && !profileMenuRef.current.contains(target)) {
         setShowProfileMenu(false);
+      }
+      if (notificationMenuRef.current && !notificationMenuRef.current.contains(target)) {
+        setShowNotificationMenu(false);
       }
     };
 
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAlertSummary = async () => {
+      try {
+        const payload = await getAdminAlerts();
+        if (!isMounted) {
+          return;
+        }
+        const unresolvedCount = Number(payload?.summary?.open || 0);
+        setOpenAlertCount(unresolvedCount);
+        setNotifications(payload?.notifications ?? []);
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+        setOpenAlertCount(0);
+        setNotifications([]);
+      }
+    };
+
+    void loadAlertSummary();
+    const intervalId = window.setInterval(() => {
+      void loadAlertSummary();
+    }, 60000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   return (
@@ -42,22 +90,67 @@ export function TopHeader() {
       <div className="flex items-center gap-3">
 
         <select
-          value={role}
-          onChange={(e) => setRole(e.target.value as typeof role)}
-          className="hidden md:block bg-white border border-[0.5px] border-[#D9E1EA] text-sm rounded-[12px] px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#009877]/25 font-body"
+          value={roleLabel}
+          disabled
+          className="hidden md:block bg-white border border-[0.5px] border-[#D9E1EA] text-sm rounded-[12px] px-3 py-2 text-slate-900 font-body"
         >
-          {roles.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
+          <option value={roleLabel}>{roleLabel}</option>
         </select>
 
         {/* Notifications */}
-        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="relative p-2 text-slate-600 hover:bg-[#F5F7FA] rounded-full transition-colors">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full animate-pulse"></span>
-        </motion.button>
+        <div ref={notificationMenuRef} className="relative">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="relative p-2 text-slate-600 hover:bg-[#F5F7FA] rounded-full transition-colors"
+            onClick={() => {
+              setShowNotificationMenu((prev) => !prev);
+              setShowProfileMenu(false);
+            }}
+            aria-label="Open notifications"
+            aria-expanded={showNotificationMenu}
+          >
+            <Bell className="w-5 h-5" />
+            {openAlertCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1.5 bg-red-500 border-2 border-white rounded-full text-[10px] leading-none font-semibold text-white inline-flex items-center justify-center">
+                {openAlertCount > 99 ? "99+" : openAlertCount}
+              </span>
+            )}
+          </motion.button>
+
+          {showNotificationMenu && (
+            <div className="absolute right-0 mt-2 w-[340px] max-w-[90vw] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] z-20 overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
+                <p className="text-sm font-semibold text-[#102A43] font-heading">Notifications</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNotificationMenu(false);
+                    router.push("/admin/alerts");
+                  }}
+                  className="text-xs text-[#009877] hover:underline"
+                >
+                  View all
+                </button>
+              </div>
+
+              <div className="max-h-80 overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <p className="px-4 py-6 text-sm text-[#627D98]">No notifications yet.</p>
+                ) : (
+                  notifications.slice(0, 8).map((notification) => (
+                    <div key={String(notification.id)} className="px-4 py-3 border-b border-[#F1F5F9] last:border-b-0">
+                      <p className="text-sm text-[#102A43] leading-snug">{notification.message}</p>
+                      <p className="mt-1 text-[11px] text-[#829AB1]">
+                        {new Date(notification.timestamp).toLocaleString([], { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div
           ref={profileMenuRef}

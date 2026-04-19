@@ -5,7 +5,7 @@ import { CheckCircle, AlertTriangle, FileSearch } from "lucide-react";
 
 export const metadata = {
   title: "Document Audit for OCI, e-Visa & Passport Applications | FlyOCI",
-  description: "Avoid OCI and visa rejections with FlyOCI's expert document audit. We review your documents, highlight issues and guide you on fixes. £15 audit fully credited when you proceed.",
+  description: "Avoid OCI and visa rejections with FlyOCI's expert document audit. We review your documents, highlight issues and guide you on fixes. £15 audit credit applies to OCI services only.",
 };
 
 export default function DocumentAuditPage() {
@@ -15,7 +15,7 @@ export default function DocumentAuditPage() {
     "Pay £15 audit fee online",
     "Expert review within 24-48 hours",
     "Get your report by email and WhatsApp",
-    "Optionally proceed - £15 credited to full fee",
+    "Optionally proceed - £15 credited to OCI service fee",
   ];
 
   const receiveItems = [
@@ -138,7 +138,7 @@ export default function DocumentAuditPage() {
                   <h3 className="text-xl font-heading font-bold text-primary">Document Audit Fee per applicant</h3>
                 </div>
                 <p className="text-textMuted font-body text-lg leading-relaxed">
-                  The £15 fee covers our expert advisory and written report. It is <strong className="text-primary">fully deducted from your full service fee</strong> when you proceed with any FlyOCI service within 30 days.
+                  The £15 fee covers our expert advisory and written report. It is <strong className="text-primary">fully deducted from your full service fee</strong> when you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within 30 days. Audit credit does not apply to e-Visa or Passport Renewal.
                 </p>
                 <p className="text-sm text-textMuted mt-6 italic">
                   *If you decide not to proceed after the audit, the £15 simply covers our expert advisory and written report.

@@ -2,7 +2,28 @@
 
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
+import { useEffect, useState } from "react";
+import { authenticatedFetch } from "@/lib/api";
+import { API_BASE_URL } from "@/lib/config";
 import { ArrowRight, Globe2, HelpCircle, Search, Sparkles, TimerReset } from "lucide-react";
+type DashboardApplication = {
+  id: number;
+  reference_number: string;
+  service: number;
+  service_name: string;
+  service_type?: string;
+  application_status: string;
+  application_date: string;
+  submission_date: string | null;
+  approval_date: string | null;
+  completion_date: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  email_confirmed?: boolean;
+  payment_confirmed?: boolean;
+  consent_captured?: boolean;
+};
 
 type ActionCardProps = {
   eyebrow: string;
@@ -37,6 +58,23 @@ const toneStyles: Record<ActionCardProps["tone"], { chip: string; icon: string; 
   },
 };
 
+function extractGovernmentReference(notes: string | null | undefined): string {
+  const raw = String(notes || "").trim();
+  if (!raw) return "";
+
+  const submittedMatch = raw.match(/Govt\s*ref\s*:\s*([^\n]+)/i);
+  if (submittedMatch?.[1]) {
+    return submittedMatch[1].trim();
+  }
+
+  const decisionMatch = raw.match(/Decision\s*ref\s*:\s*([^\n]+)/i);
+  if (decisionMatch?.[1]) {
+    return decisionMatch[1].trim();
+  }
+
+  return "";
+}
+
 function ActionCard({ eyebrow, title, description, href, cta, tone, icon }: ActionCardProps) {
   const styles = toneStyles[tone];
 
@@ -65,6 +103,26 @@ function ActionCard({ eyebrow, title, description, href, cta, tone, icon }: Acti
 
 export default function DashboardPage() {
   const { user, loading, isAuthenticated } = useAuth();
+  const [applications, setApplications] = useState<DashboardApplication[]>([]);
+  const [appsLoading, setAppsLoading] = useState(false);
+  const [appsError, setAppsError] = useState<string>("");
+  const hasExistingApplications = applications.length > 0;
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.email) return;
+    setAppsLoading(true);
+    setAppsError("");
+    authenticatedFetch(`${API_BASE_URL}/applications/`, { method: "GET" })
+      .then(async (response) => {
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error((json as { message?: string }).message || "Failed to load applications.");
+        }
+        setApplications(((json as { data?: DashboardApplication[] }).data || []) as DashboardApplication[]);
+      })
+      .catch((error) => setAppsError(error instanceof Error ? error.message : "Failed to load applications."))
+      .finally(() => setAppsLoading(false));
+  }, [isAuthenticated, user?.email]);
 
   if (loading) {
     return (
@@ -91,6 +149,7 @@ export default function DashboardPage() {
   return (
     <section className="min-h-[70vh] bg-bg-page px-4 pb-20 pt-24 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
+        {/* 1st div: Welcome + 3 steps */}
         <div className="relative overflow-hidden rounded-[30px] border border-[#d7e5fb] bg-white px-6 py-7 shadow-[0_18px_48px_rgba(30,74,135,0.08)] sm:px-8 sm:py-8">
           <div className="pointer-events-none absolute inset-y-0 right-0 w-72 bg-gradient-to-l from-[#EAF5FF] to-transparent opacity-90" />
           <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -106,20 +165,7 @@ export default function DashboardPage() {
                 Pick the path you need. The dashboard is now a simple starting point that helps you begin quickly and continue without confusion.
               </p>
             </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[620px]">
-              <Link href="/dashboard/document-audit" className="inline-flex items-center justify-center rounded-full bg-[#0B69B7] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#095A9D]">
-                Start application
-              </Link>
-              <Link href="/dashboard/applications" className="inline-flex items-center justify-center rounded-full border border-[#D9E1EA] bg-white px-4 py-3 text-sm font-semibold text-[#102A43] transition-colors hover:bg-[#F8FAFC]">
-                View existing cases
-              </Link>
-              <Link href="/track" className="inline-flex items-center justify-center rounded-full border border-[#CFE4F8] bg-[#EAF5FF] px-4 py-3 text-sm font-semibold text-[#0B69B7] transition-colors hover:bg-[#DDEEFF]">
-                Track application
-              </Link>
-            </div>
           </div>
-
           <div className="relative mt-6 grid gap-3 sm:grid-cols-3">
             <div className="rounded-[18px] border border-[#DCE7F8] bg-[#FCFDFF] p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2B5E93]">1. Choose service</p>
@@ -136,71 +182,82 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <ActionCard
-            eyebrow="Indian eVisa"
-            title="Apply for or resume your eVisa"
-            description="Open the dedicated eVisa journey to continue a draft or begin a new application."
-            href="/indian-e-visa"
-            cta="Open eVisa"
-            tone="amber"
-            icon={<Globe2 className="h-5 w-5" />}
-          />
-
-          {/* <ActionCard
-            eyebrow="Track OCI / Passport"
-            title="Check your saved applications"
-            description="View your OCI and passport cases, pick up where you left off, and continue the journey."
-            href="/dashboard/applications"
-            cta="Open cases"
-            tone="green"
-            icon={<Search className="h-5 w-5" />}
-          /> */}
-
-          {/* <ActionCard
-            eyebrow="Track eVisa"
-            title="Track an eVisa application"
-            description="Use the tracking page for case number, OTP, or magic-link access."
-            href="/track"
-            cta="Track now"
-            tone="slate"
-            icon={<TimerReset className="h-5 w-5" />}
-          /> */}
+        {/* 2nd div: Applications List */}
+        <div className="text-left rounded-2xl border border-slate-200 bg-white p-6 shadow-md">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xl font-heading font-semibold">Your Applications</h2>
+            {!appsLoading ? (
+              <Link
+                href="/dashboard/start"
+                className="inline-flex items-center justify-center rounded-full bg-[#0B69B7] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#095A9D]"
+              >
+                {hasExistingApplications ? "+ Add application" : "Start application"}
+              </Link>
+            ) : null}
+          </div>
+          {appsLoading && <p className="text-sm text-textMuted">Loading applications...</p>}
+          {appsError && <p className="text-sm text-red-600 mb-3">{appsError}</p>}
+          {!appsLoading && applications.length === 0 && !appsError && (
+            <p className="text-sm text-textMuted">No saved applications yet.</p>
+          )}
+          {applications.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {applications.map((app) => (
+                <div
+                  key={app.reference_number}
+                  className="text-left rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm hover:shadow-lg transition"
+                >
+                  {(() => {
+                    const governmentReference = extractGovernmentReference(app.notes);
+                    const decisionDate = app.approval_date || app.completion_date;
+                    return (
+                      <>
+                  <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
+                    <div className="flex-1">
+                      <p className="font-semibold text-primary text-base mb-1">{app.reference_number}</p>
+                      <p className="text-sm text-slate-600">{app.service_name || "e-Visa Service"}</p>
+                    </div>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border whitespace-nowrap bg-slate-100 text-slate-700 border-slate-200">
+                      {app.application_status.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase())}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 mb-5 text-sm text-slate-600">
+                    {app.application_date && (
+                      <p>Applied: <span className="font-medium text-slate-700">{new Date(app.application_date).toLocaleString()}</span></p>
+                    )}
+                    {app.submission_date && (
+                      <p>Submitted: <span className="font-medium text-slate-700">{new Date(app.submission_date).toLocaleString()}</span></p>
+                    )}
+                    {app.approval_date && (
+                      <p className="text-emerald-700">Approved: <span className="font-medium">{new Date(app.approval_date).toLocaleString()}</span></p>
+                    )}
+                    {decisionDate && !app.approval_date && (
+                      <p className="text-emerald-700">Decision: <span className="font-medium">{new Date(decisionDate).toLocaleString()}</span></p>
+                    )}
+                    {governmentReference && (
+                      <p>Government ref: <span className="font-medium text-slate-700">{governmentReference}</span></p>
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={app.service_type && app.service_type.toLowerCase().startsWith("evisa")
+                        ? `/indian-e-visa?case=${encodeURIComponent(app.reference_number)}&view=details`
+                        : `/dashboard/document-audit?reference=${encodeURIComponent(app.reference_number)}&resume=1`}
+                      className="inline-flex items-center rounded-lg border border-slate-300 text-slate-700 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+                    >
+                      View Application
+                    </Link>
+                  </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-[24px] border border-[#DCE7F8] bg-white p-6 shadow-[0_12px_32px_rgba(30,74,135,0.06)]">
-            <div className="flex items-center gap-2 text-[#2B5E93]">
-              <HelpCircle className="h-4 w-4" />
-              <p className="text-xs font-semibold uppercase tracking-[0.18em]">Not sure where to begin?</p>
-            </div>
-            <h2 className="mt-3 text-xl font-heading font-semibold text-[#102A43]">Use the guided form start</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#486581]">
-              The quickest path is the application flow. It asks only what is needed, keeps the process focused, and moves you toward the right service faster.
-            </p>
-            <div className="mt-5 flex flex-wrap gap-3">
-              <Link href="/dashboard/document-audit" className="inline-flex items-center rounded-full bg-[#102A43] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90">
-                Start guided form
-              </Link>
-              <Link href="/auth/login" className="inline-flex items-center rounded-full border border-[#D9E1EA] bg-white px-4 py-2.5 text-sm font-semibold text-[#102A43] transition-colors hover:bg-[#F8FAFC]">
-                My account
-              </Link>
-            </div>
-          </div>
-
-          <div className="rounded-[24px] border border-[#DCE7F8] bg-[#FCFDFF] p-6 shadow-[0_12px_32px_rgba(30,74,135,0.04)]">
-            <div className="flex items-center gap-2 text-[#2B5E93]">
-              <Sparkles className="h-4 w-4" />
-              <p className="text-xs font-semibold uppercase tracking-[0.18em]">Built for clarity</p>
-            </div>
-            <div className="mt-4 space-y-3 text-sm leading-6 text-[#486581]">
-              <p>• One page to choose the next action.</p>
-              <p>• Four clear paths instead of many mixed buttons.</p>
-              <p>• Start forms faster and track them later.</p>
-            </div>
-          </div>
-        </div> */}
-
+        
       </div>
     </section>
   );

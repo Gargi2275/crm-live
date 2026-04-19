@@ -1,16 +1,118 @@
 "use client";
 
-import { useState } from "react";
-import { useConsole } from "@/components/console/ConsoleContext";
-import { DAILY_REVENUE, STAFF_MEMBERS, SERVICE_REVENUE_BREAKDOWN } from "@/lib/data/mockConsoleData";
+import { useEffect, useMemo, useState } from "react";
+import {
+  getAdminDashboardOverview,
+  getStaffAccuracyAll,
+  type AdminDashboardOverview,
+  type StaffAccuracyRow,
+} from "@/lib/admin-auth";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from "recharts";
 import { motion } from "framer-motion";
 import { Lock } from "lucide-react";
+import toast from "react-hot-toast";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 
 export default function ReportsPage() {
-  const { role } = useConsole();
+  const { adminUser } = useAdminAuth();
   const [tab, setTab] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
-  const canViewReports = role === "Admin / CEO" || role === "Operations Manager";
+  const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+  const [accuracyRows, setAccuracyRows] = useState<StaffAccuracyRow[]>([]);
+  const canViewReports = ["admin", "ops_manager", "reviewer"].includes(adminUser?.role || "");
+
+  const getDateWindow = () => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 29);
+    const to = end.toISOString().slice(0, 10);
+    const from = start.toISOString().slice(0, 10);
+    return { from, to };
+  };
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        const payload = await getAdminDashboardOverview();
+        setDashboardData(payload);
+
+        if (adminUser?.role === "admin" || adminUser?.role === "ops_manager") {
+          const { from, to } = getDateWindow();
+          const accuracyPayload = await getStaffAccuracyAll(from, to);
+          setAccuracyRows(accuracyPayload.results || []);
+        } else {
+          setAccuracyRows([]);
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load reports data.");
+      }
+    };
+
+    void loadDashboard();
+  }, [adminUser?.role]);
+
+  const formatInr = (amount: number) => `₹${amount.toLocaleString("en-IN")}`;
+  const kpiSnapshot = dashboardData?.kpi_snapshot;
+  const healthMetrics = dashboardData?.health_metrics;
+  const dailyRevenue = dashboardData?.daily_revenue ?? [];
+  const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
+  const serviceRevenueBreakdown = dashboardData?.service_revenue_breakdown ?? [];
+  const staffMembers = dashboardData?.staff_members ?? [];
+
+  const topStaff = useMemo(() => {
+    if (accuracyRows.length > 0) {
+      return [...accuracyRows]
+        .sort((left, right) => right.overall_accuracy - left.overall_accuracy)
+        .slice(0, 5)
+        .map((item) => ({
+          id: item.staff_id,
+          name: item.staff_name,
+          accuracy: item.overall_accuracy,
+          badge: item.badge,
+        }));
+    }
+
+    return [...staffMembers]
+      .sort((left, right) => right.accuracy - left.accuracy)
+      .slice(0, 5)
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        accuracy: item.accuracy,
+        badge: "-",
+      }));
+  }, [accuracyRows, staffMembers]);
+
+  const weeklyRevenue = useMemo(
+    () => dailyRevenue.reduce((sum, item) => sum + Number(item.actual || 0), 0),
+    [dailyRevenue],
+  );
+
+  const currentMonthRevenue = monthlyRevenue.length > 0 ? Number(monthlyRevenue[monthlyRevenue.length - 1]?.revenue || 0) : 0;
+  const breachCount = dashboardData?.pipeline_overview.reduce((sum, item) => sum + Number(item.breached || 0), 0) ?? 0;
+
+  const snapshotRows = [
+    {
+      period: "Daily",
+      leads: kpiSnapshot?.todays_leads ?? 0,
+      conversion: kpiSnapshot?.conversion ?? "0%",
+      revenue: Number(kpiSnapshot?.revenue_today || 0),
+      breaches: breachCount,
+    },
+    {
+      period: "Weekly",
+      leads: kpiSnapshot?.total_leads ?? 0,
+      conversion: kpiSnapshot?.conversion ?? "0%",
+      revenue: weeklyRevenue,
+      breaches: breachCount,
+    },
+    {
+      period: "Monthly",
+      leads: kpiSnapshot?.total_leads ?? 0,
+      conversion: healthMetrics?.conversion ?? "0%",
+      revenue: currentMonthRevenue,
+      breaches: breachCount,
+    },
+  ];
 
   if (!canViewReports) {
     return (
@@ -46,7 +148,14 @@ export default function ReportsPage() {
 
       {tab === "Daily" && (
         <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-          {["Leads Today: 12", "Converted: 8", "Revenue: ₹28,500", "Tasks: 24", "SLA Breaches: 2", "Refunds: ₹1,200"].map((item) => (
+          {[
+            `Leads Today: ${kpiSnapshot?.todays_leads ?? 0}`,
+            `Converted: ${kpiSnapshot?.converted ?? 0}`,
+            `Revenue: ${formatInr(Number(kpiSnapshot?.revenue_today || 0))}`,
+            `Pending Payments: ${formatInr(Number(kpiSnapshot?.pending_payments || 0))}`,
+            `SLA Breaches: ${breachCount}`,
+            `Avg Ticket: ${formatInr(Number(kpiSnapshot?.avg_ticket_size || 0))}`,
+          ].map((item) => (
             <motion.div key={item} whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 text-[#334E68] text-sm shadow-sm">
               {item}
             </motion.div>
@@ -60,7 +169,7 @@ export default function ReportsPage() {
             <p className="text-[#102A43] font-heading font-semibold mb-2">Conversion rate trend</p>
             <div className="h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={DAILY_REVENUE}>
+                <LineChart data={dailyRevenue}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
                   <XAxis dataKey="day" tick={{ fill: "#486581" }} />
                   <YAxis tick={{ fill: "#486581" }} />
@@ -72,8 +181,10 @@ export default function ReportsPage() {
           </motion.div>
           <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
             <p className="text-[#102A43] font-heading font-semibold mb-2">Top performing staff</p>
-            {STAFF_MEMBERS.map((s, i) => (
-              <p key={s.id} className="text-sm text-[#486581]">{i + 1}. {s.name} ({s.accuracy}%)</p>
+            {topStaff.map((s, i) => (
+              <p key={s.id} className="text-sm text-[#486581]">
+                {i + 1}. {s.name} ({Number(s.accuracy).toFixed(2)}%) {s.badge !== "-" ? `- ${s.badge}` : ""}
+              </p>
             ))}
           </div>
         </div>
@@ -82,19 +193,19 @@ export default function ReportsPage() {
       {tab === "Monthly" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-2 text-[#334E68] text-sm shadow-sm">
-            <p>Total revenue: ₹6,58,000</p>
-            <p>Growth %: 12.4%</p>
-            <p>Marketing spend vs ROI: 1:4.3</p>
-            <p>Customer satisfaction score: 4.7 / 5</p>
-            <p>Profit margin: 33%</p>
+            <p>Total revenue (this month): {formatInr(currentMonthRevenue)}</p>
+            <p>Growth %: {kpiSnapshot?.conversion ?? "0%"}</p>
+            <p>Pending payments: {formatInr(Number(healthMetrics?.pending_payments || 0))}</p>
+            <p>Customer satisfaction score: {healthMetrics?.customer_satisfaction ?? "0 / 5"}</p>
+            <p>Audit success ratio: {healthMetrics?.audit_success_ratio ?? "0%"}</p>
           </div>
           <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
             <p className="text-[#102A43] font-heading font-semibold mb-2">Audit fail reasons</p>
             <div className="h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={SERVICE_REVENUE_BREAKDOWN} dataKey="value" nameKey="name" outerRadius={90}>
-                    {SERVICE_REVENUE_BREAKDOWN.map((_, i) => <Cell key={i} fill={["#33A1FD", "#B87333", "#009877", "#D9E1EA"][i]} />)}
+                  <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={90}>
+                    {serviceRevenueBreakdown.map((_, i) => <Cell key={i} fill={["#33A1FD", "#B87333", "#009877", "#D9E1EA"][i]} />)}
                   </Pie>
                   <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
                 </PieChart>
@@ -107,7 +218,7 @@ export default function ReportsPage() {
       <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden">
         <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
           <h2 className="text-sm font-heading font-semibold text-[#102A43]">Report snapshot table</h2>
-          <span className="text-xs text-[#627D98]">Dummy data</span>
+          <span className="text-xs text-[#627D98]">Live data</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -121,9 +232,15 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              <tr><td className="px-4 py-2.5">Daily</td><td className="px-4 py-2.5">47</td><td className="px-4 py-2.5">66%</td><td className="px-4 py-2.5">₹28,500</td><td className="px-4 py-2.5">2</td></tr>
-              <tr><td className="px-4 py-2.5">Weekly</td><td className="px-4 py-2.5">302</td><td className="px-4 py-2.5">63%</td><td className="px-4 py-2.5">₹2,18,000</td><td className="px-4 py-2.5">9</td></tr>
-              <tr><td className="px-4 py-2.5">Monthly</td><td className="px-4 py-2.5">1,248</td><td className="px-4 py-2.5">61%</td><td className="px-4 py-2.5">₹6,58,000</td><td className="px-4 py-2.5">38</td></tr>
+              {snapshotRows.map((row) => (
+                <tr key={row.period}>
+                  <td className="px-4 py-2.5">{row.period}</td>
+                  <td className="px-4 py-2.5">{row.leads}</td>
+                  <td className="px-4 py-2.5">{row.conversion}</td>
+                  <td className="px-4 py-2.5">{formatInr(row.revenue)}</td>
+                  <td className="px-4 py-2.5">{row.breaches}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

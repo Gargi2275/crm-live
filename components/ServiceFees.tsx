@@ -2,11 +2,11 @@ import Link from "next/link";
 
 export function ServiceFees() {
   return (
-    <section className="py-14 sm:py-16 lg:py-20 bg-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section className="bg-white">
+      <div className="w-full px-3 sm:px-4 lg:px-3">
         <div className="text-center mb-10">
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-heading font-bold text-primary mb-3">Our Services & Fees</h2>
-          <p className="text-textMuted text-sm sm:text-base md:text-lg max-w-3xl mx-auto">
+          <p className="text-textMuted text-sm sm:text-base md:text-lg   ">
             We keep our pricing transparent and simple. Government fees (where applicable) are clearly shown.
           </p>
         </div>
@@ -104,7 +104,7 @@ export function ServiceFees() {
             <div className="border-t border-gray-300 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-2xl sm:text-3xl font-mono font-bold text-gray-500 mt-1">On request</p>
+            <p className="text-2xl sm:text-3xl font-mono font-bold text-gray-500 mt-1">Price on request</p>
             <span className="bg-gray-100 text-gray-400 text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">No credit</span>
             <p className="text-xs text-gray-400 mt-2">Share your case for an exact quote</p>
 

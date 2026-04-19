@@ -13,6 +13,7 @@ interface Testimonial {
   author: string;
   detail?: string;
   service?: string;
+  rating?: number;
 }
 
 interface CarouselProps {
@@ -32,6 +33,11 @@ export function Carousel({ items }: CarouselProps) {
       .join("")
       .slice(0, 2)
       .toUpperCase();
+  };
+
+  const resolveRating = (rating?: number) => {
+    const normalized = Number.isFinite(rating ?? NaN) ? Number(rating) : 5;
+    return Math.max(1, Math.min(5, Math.round(normalized)));
   };
 
   return (
@@ -106,15 +112,18 @@ export function Carousel({ items }: CarouselProps) {
               <div className="mt-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <span className="h-9 w-9 rounded-full bg-[#1d4f9a] text-white font-semibold text-xs inline-flex items-center justify-center shadow-[0_6px_14px_rgba(29,79,154,0.35)]">
-                    {initials(item.author)}
+                    {initials(item.author || "Customer")}
                   </span>
-                  <span className="font-body text-[#1d3760] font-semibold text-[13px] md:text-[14px]">{item.author}</span>
+                  <span className="font-body text-[#1d3760] font-semibold text-[13px] md:text-[14px]">{item.author || "Verified Customer"}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-3.5 h-3.5 fill-[#f2b01e] text-[#f2b01e]" />
+                    <Star
+                      key={i}
+                      className={`w-3.5 h-3.5 ${i < resolveRating(item.rating) ? "fill-[#f2b01e] text-[#f2b01e]" : "text-[#d8dee8]"}`}
+                    />
                   ))}
-                  <span className="ml-1 text-[#1d3760] text-sm font-semibold">5.0</span>
+                  <span className="ml-1 text-[#1d3760] text-sm font-semibold">{resolveRating(item.rating)}.0</span>
                 </div>
               </div>
             </motion.article>

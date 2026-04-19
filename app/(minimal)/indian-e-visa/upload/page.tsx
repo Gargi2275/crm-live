@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2,Check } from "lucide-react";
 
@@ -11,6 +11,10 @@ import { ProgressStepper } from "@/components/ProgressStepper";
 import { FileDropZone } from "@/components/FileDropZone";
 import { AnimatedCheckmark } from "@/components/AnimatedCheckmark";
 import { eVisaApi } from "@/lib/api-client";
+import { authenticatedFetch } from "@/lib/api";
+import { authService } from "@/lib/auth";
+import { API_BASE_URL } from "@/lib/config";
+import { isCurrentPathAllowed, isMissingCaseError, resolveCanonicalEVisaRoute, resolveMissingCaseRedirect } from "@/lib/evisa-step-guard";
 
 const PASSPORT_MAX_BYTES = 5 * 1024 * 1024;
 const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
@@ -23,8 +27,17 @@ function formatMb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+type CorrectionDocument = {
+  document_type: string;
+  document_name: string;
+  issue_reason: string;
+  required_action: string;
+  status: string;
+};
+
 export default function UploadPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { data, updateData } = useEVisa();
   const caseNumber = searchParams.get("case") || data.fileNumber || "";
@@ -48,8 +61,163 @@ export default function UploadPage() {
   const [passportError, setPassportError] = useState("");
   const [photoError, setPhotoError] = useState("");
   const [supportingError, setSupportingError] = useState("");
+  const [isCorrectionMode, setIsCorrectionMode] = useState(false);
+  const [flaggedDocuments, setFlaggedDocuments] = useState<CorrectionDocument[]>([]);
+  const [correctionFiles, setCorrectionFiles] = useState<Record<string, File | null>>({});
+  const [correctionErrors, setCorrectionErrors] = useState<Record<string, string>>({});
 
   const fileNumber = caseNumber || "FO-EV-...";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const enforceStepOrder = async () => {
+      const normalizedCase = (caseNumber || "").trim().toUpperCase();
+      if (!normalizedCase) {
+        if (!isCurrentPathAllowed(pathname, "/indian-e-visa")) {
+          router.replace("/indian-e-visa");
+        }
+        return;
+      }
+
+      let canonicalRoute = `/indian-e-visa/upload?case=${encodeURIComponent(normalizedCase)}`;
+      if (isSuccess || data.hasUploaded) {
+        canonicalRoute = `/indian-e-visa/review?case=${encodeURIComponent(normalizedCase)}`;
+      } else if (!data.hasPaid) {
+        canonicalRoute = `/indian-e-visa/payment?case=${encodeURIComponent(normalizedCase)}`;
+      }
+
+      if (authService.isLoggedIn()) {
+        try {
+          const resume = await eVisaApi.getResume(normalizedCase);
+          canonicalRoute = resolveCanonicalEVisaRoute(resume.data, normalizedCase);
+        } catch (error) {
+          if (isMissingCaseError(error)) {
+            canonicalRoute = resolveMissingCaseRedirect(true);
+          }
+        }
+      }
+
+      if (!cancelled && !isCurrentPathAllowed(pathname, canonicalRoute)) {
+        router.replace(canonicalRoute);
+      }
+    };
+
+    void enforceStepOrder();
+
+    const handlePopState = () => {
+      void enforceStepOrder();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [caseNumber, data.hasPaid, data.hasUploaded, isSuccess, pathname, router]);
+
+  useEffect(() => {
+    if (!caseNumber) {
+      return;
+    }
+
+    const loadCorrectionRequirements = async () => {
+      try {
+        const response = await eVisaApi.getResume(caseNumber);
+        const appData = response.data.application_data;
+        const normalize = (value: string) => value.trim().toLowerCase();
+        const correctionRequested =
+          String(appData.application_status || "").toLowerCase() === "correction_requested" ||
+          String(appData.current_stage || "").toLowerCase() === "correction_requested" ||
+          Boolean(appData.correction_requested);
+        const unifiedStatus = String((appData as { unified_status?: string }).unified_status || "").toLowerCase();
+
+        const normalizeRequested = (
+          source: Array<{
+            document_type?: string;
+            document_name?: string;
+            issue_reason?: string;
+            required_action?: string;
+            status?: string;
+          }>
+        ) => {
+          const normalizedItems = source
+            .map((item) => ({
+              document_type: String(item?.document_type || "").trim(),
+              document_name: String(item?.document_name || "").trim(),
+              issue_reason: String(item?.issue_reason || "").trim(),
+              required_action: String(item?.required_action || "").trim(),
+              status: String(item?.status || "needs_fix").trim().toLowerCase(),
+            }))
+            .filter((item) => Boolean(item.document_name || item.document_type))
+            .filter((item) => !["reuploaded", "resolved", "done"].includes(item.status));
+
+          return Array.from(
+            normalizedItems.reduce((acc, item) => {
+              const key = normalize(item.document_type || item.document_name);
+              if (!key) return acc;
+              acc.set(key, item);
+              return acc;
+            }, new Map<string, CorrectionDocument>()).values()
+          );
+        };
+
+        const normalizedFlagged = normalizeRequested(Array.isArray(appData.flagged_documents) ? appData.flagged_documents : []);
+
+        let latestRequestFlagged: CorrectionDocument[] = [];
+        try {
+          const detailsResponse = await authenticatedFetch(`${API_BASE_URL}/applications/${encodeURIComponent(caseNumber)}/`, {
+            method: "GET",
+          });
+          if (detailsResponse.ok) {
+            const detailsJson = await detailsResponse.json().catch(() => ({}));
+            const detailsData = (detailsJson as {
+              data?: {
+                reupload_requests?: Array<{
+                  created_at?: string;
+                  flagged_documents?: Array<{
+                    document_type?: string;
+                    document_name?: string;
+                    issue_reason?: string;
+                    required_action?: string;
+                    status?: string;
+                  }>;
+                }>;
+              };
+            }).data;
+            const requests = Array.isArray(detailsData?.reupload_requests) ? detailsData.reupload_requests : [];
+            if (requests.length > 0) {
+              const latestRequest = [...requests].sort((left, right) => {
+                const leftTs = new Date(left.created_at || "").getTime();
+                const rightTs = new Date(right.created_at || "").getTime();
+                return rightTs - leftTs;
+              })[0];
+              latestRequestFlagged = normalizeRequested(Array.isArray(latestRequest?.flagged_documents) ? latestRequest.flagged_documents : []);
+            }
+          }
+        } catch {
+          // Fall back to resume payload if details fetch fails.
+        }
+
+        const activeFlagged = latestRequestFlagged.length > 0 ? latestRequestFlagged : normalizedFlagged;
+
+        const shouldShowCorrection = correctionRequested || unifiedStatus === "pending_docs";
+
+        if (shouldShowCorrection && activeFlagged.length > 0) {
+          setIsCorrectionMode(true);
+          setFlaggedDocuments(activeFlagged);
+          return;
+        }
+
+        setIsCorrectionMode(false);
+        setFlaggedDocuments([]);
+      } catch {
+        // Keep regular upload mode when resume fetch fails.
+      }
+    };
+
+    void loadCorrectionRequirements();
+  }, [caseNumber]);
 
   useEffect(() => {
     // Rehydrate draft fields after refresh. Keep user-typed values if already present.
@@ -112,7 +280,7 @@ export default function UploadPage() {
   ]);
 
   // Validate Required Fields
-  const isFormValid =
+  const isRegularFormValid =
     passportRef &&
     photoRef &&
     arrivalDate &&
@@ -123,6 +291,15 @@ export default function UploadPage() {
     !passportError &&
     !photoError &&
     !supportingError;
+
+  const isCorrectionFormValid =
+    isCorrectionMode &&
+    Boolean(caseNumber) &&
+    Boolean(applicantEmail.trim()) &&
+    flaggedDocuments.length > 0 &&
+    flaggedDocuments.every((_, index) => Boolean(correctionFiles[`flagged-${index}`]));
+
+  const isFormValid = isCorrectionMode ? isCorrectionFormValid : isRegularFormValid;
 
   const handlePassportUpload = (file: File | null) => {
     setUploadError("");
@@ -188,8 +365,134 @@ export default function UploadPage() {
     setSupportingFiles(files);
   };
 
+  const validateCorrectionFile = (docTypeOrName: string, file: File): string => {
+    const hint = (docTypeOrName || "").trim().toLowerCase();
+    const isPhotoDoc = hint.includes("photo") || hint.includes("photograph");
+    const isPassportDoc = hint.includes("passport");
+
+    if (isPhotoDoc) {
+      if (!PHOTO_TYPES.has(file.type)) {
+        return "Photograph must be JPG or PNG only.";
+      }
+      if (file.size > PHOTO_MAX_BYTES) {
+        return `Photograph is too large (${formatMb(file.size)}). Maximum allowed is 2 MB.`;
+      }
+      return "";
+    }
+
+    if (isPassportDoc) {
+      if (!PASSPORT_TYPES.has(file.type)) {
+        return "Passport file must be JPG, PNG, or PDF.";
+      }
+      if (file.size > PASSPORT_MAX_BYTES) {
+        return `Passport file is too large (${formatMb(file.size)}). Maximum allowed is 5 MB.`;
+      }
+      return "";
+    }
+
+    if (!SUPPORTING_TYPES.has(file.type)) {
+      return "Document must be JPG, PNG, or PDF.";
+    }
+    if (file.size > SUPPORTING_MAX_BYTES) {
+      return `Document is too large (${formatMb(file.size)}). Maximum allowed is 5 MB.`;
+    }
+    return "";
+  };
+
+  const handleCorrectionUpload = (index: number, file: File | null, docTypeOrName: string) => {
+    const key = `flagged-${index}`;
+    setUploadError("");
+
+    if (!file) {
+      setCorrectionFiles((prev) => ({ ...prev, [key]: null }));
+      setCorrectionErrors((prev) => ({ ...prev, [key]: "" }));
+      return;
+    }
+
+    const validationError = validateCorrectionFile(docTypeOrName, file);
+    if (validationError) {
+      setCorrectionFiles((prev) => ({ ...prev, [key]: null }));
+      setCorrectionErrors((prev) => ({ ...prev, [key]: validationError }));
+      return;
+    }
+
+    setCorrectionFiles((prev) => ({ ...prev, [key]: file }));
+    setCorrectionErrors((prev) => ({ ...prev, [key]: "" }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isCorrectionMode) {
+      if (!applicantEmail.trim()) {
+        setUploadError("Email is required.");
+        return;
+      }
+
+      const missingKeys = flaggedDocuments
+        .map((_, index) => `flagged-${index}`)
+        .filter((key) => !correctionFiles[key]);
+
+      if (missingKeys.length > 0) {
+        const nextErrors = { ...correctionErrors };
+        missingKeys.forEach((key) => {
+          nextErrors[key] = "Please upload this corrected document.";
+        });
+        setCorrectionErrors(nextErrors);
+        setUploadError("Please upload all requested corrected documents.");
+        return;
+      }
+
+      setUploadError("");
+      setIsUploading(true);
+      setUploadProgress(10);
+
+      try {
+        for (let index = 0; index < flaggedDocuments.length; index += 1) {
+          const item = flaggedDocuments[index];
+          const key = `flagged-${index}`;
+          const file = correctionFiles[key];
+          if (!file) {
+            continue;
+          }
+
+          const formData = new FormData();
+          formData.append("case_number", caseNumber);
+          formData.append("email", applicantEmail.trim());
+          formData.append("flagged_document_name", item.document_name || item.document_type || `Document ${index + 1}`);
+          formData.append("document", file);
+
+          const response = await fetch(`${API_BASE_URL}/evisa/correction-resubmit/`, {
+            method: "POST",
+            body: formData,
+          });
+
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message = (json as { message?: string }).message || "Failed to submit correction document.";
+            throw new Error(message);
+          }
+
+          const progress = 10 + Math.round(((index + 1) / flaggedDocuments.length) * 90);
+          setUploadProgress(Math.min(progress, 100));
+        }
+
+        setUploadProgress(100);
+        setIsSuccess(true);
+        updateData({
+          hasUploaded: true,
+          fileNumber: caseNumber,
+          email: applicantEmail,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Upload failed";
+        setUploadError(message);
+      } finally {
+        setIsUploading(false);
+      }
+
+      return;
+    }
 
     if (!passportRef) {
       setPassportError("Passport bio page is required.");
@@ -283,11 +586,11 @@ export default function UploadPage() {
               >
                 Track Application
               </motion.button>
-              <button
+                  <button
                 onClick={() => setIsSuccess(false)}
                 className="w-full bg-transparent border-2 border-primary text-primary font-bold text-[16px] px-7 py-[16px] rounded-btn hover:bg-primary hover:text-white transition-colors"
               >
-                Upload more documents
+                    {isCorrectionMode ? "Upload more corrected documents" : "Upload more documents"}
               </button>
             </div>
           </Reveal>
@@ -324,10 +627,12 @@ export default function UploadPage() {
         <Reveal direction="up" delay={0.1}>
           <div className="mb-8">
             <h2 className="font-heading font-extrabold text-primary text-[32px] sm:text-[42px] mb-2 text-center tracking-tight">
-              Upload Required Documents
+              {isCorrectionMode ? "Re-upload Requested Documents" : "Upload Required Documents"}
             </h2>
             <p className="font-body text-muted text-[16px] text-center max-w-[440px] mx-auto">
-              Application cannot be submitted until uploads are complete.
+              {isCorrectionMode
+                ? "Upload only the documents requested by admin. No other documents are needed now."
+                : "Application cannot be submitted until uploads are complete."}
             </p>
             <p className="font-body text-[13px] text-center text-primary/80 mt-3">
               All uploaded files are encrypted using AES-256 before secure storage.
@@ -335,6 +640,42 @@ export default function UploadPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {isCorrectionMode ? (
+              <div className="bg-card rounded-card shadow-card p-6 sm:p-8 space-y-4">
+                <h3 className="font-body font-bold text-primary text-xl">Reupload Required Documents</h3>
+                {flaggedDocuments.map((item, index) => {
+                  const key = `flagged-${index}`;
+                  const label = item.document_name || item.document_type || `Document ${index + 1}`;
+                  const hintText = item.required_action || item.issue_reason || "Upload corrected document.";
+                  const docHint = (item.document_type || item.document_name || "").toLowerCase();
+                  const isPhotoDoc = docHint.includes("photo") || docHint.includes("photograph");
+                  const accept = isPhotoDoc ? "image/jpeg,image/png" : ".pdf,image/jpeg,image/png";
+
+                  return (
+                    <div key={key} className="rounded-xl border border-border bg-[#FAF9F5] p-4">
+                      <p className="font-body font-bold text-primary text-[15px]">{label}</p>
+                      {item.issue_reason ? (
+                        <p className="font-body text-[12px] text-[#8A4B08] mt-1">Reason: {item.issue_reason}</p>
+                      ) : null}
+                      <p className="font-body text-[12px] text-muted mt-1">Required action: {hintText}</p>
+                      <div className="mt-3">
+                        <FileDropZone
+                          label={`Upload corrected ${label}`}
+                          accept={accept}
+                          maxSizeMsg={hintText}
+                          file={correctionFiles[key] || null}
+                          onUpload={(file) => handleCorrectionUpload(index, file, item.document_type || item.document_name)}
+                          error={correctionErrors[key] || ""}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {!isCorrectionMode ? (
+              <>
             
             {/* Passport Card */}
             <div className="bg-card rounded-card shadow-card p-6 sm:p-8">
@@ -481,6 +822,8 @@ export default function UploadPage() {
                  className={`${inputClasses} resize-none`}
                />
             </div>
+            </>
+            ) : null}
 
             <motion.button
               type="submit"
@@ -493,7 +836,7 @@ export default function UploadPage() {
                   : "bg-slate-300 text-white-500 shadow-none cursor-not-allowed transform-none"
               }`}
             >
-              Submit Documents
+              {isCorrectionMode ? "Submit Corrected Documents" : "Submit Documents"}
             </motion.button>
 
             {uploadError && (

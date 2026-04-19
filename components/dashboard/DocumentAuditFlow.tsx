@@ -436,8 +436,8 @@ const SERVICES = [
   { id: "new-oci", name: "New OCI Card", description: "First-time OCI application", price: "£88" },
   { id: "oci-renewal", name: "OCI Renewal / Transfer", description: "Passport change and renewal", price: "£78" },
   { id: "oci-update", name: "OCI Update (Gratis)", description: "Mandatory update handling", price: "£50" },
-  { id: "indian-evisa", name: "Indian e-Visa", description: "Travel visa pre-check", price: "From £88" },
-  { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal for UK or US residents", price: "Quote on request" },
+  { id: "indian-evisa", name: "Indian e-Visa", description: "Travel visa pre-check", price: "£88 (1-Year) · £150 (5-Year)" },
+  { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal for UK or US residents", price: "Price on request" },
   { id: "undecided", name: "Not Sure — Help Me Decide", description: "We recommend the right route", price: "" },
 ];
 
@@ -737,7 +737,7 @@ const renderService = () => (
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Step 4 of 6</p>
           <h3 className="mt-1 text-2xl font-heading font-bold text-primary">Audit Fee Payment</h3>
           <p className="mt-2 text-sm text-slate-600">
-            Our expert team will review your documents within 12–24 working hours. The £15 audit fee is fully deducted from your final service fee when you proceed.
+            Our expert team will review your documents within 12–24 working hours. The £15 audit fee is fully deducted from your final fee when you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update). Audit credit does not apply to e-Visa or Passport Renewal.
           </p>
         </div>
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">

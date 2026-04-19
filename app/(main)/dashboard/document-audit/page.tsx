@@ -10,6 +10,7 @@ export default function DashboardDocumentAuditPage() {
   const searchParams = useSearchParams();
   const { user, loading, isAuthenticated } = useAuth();
   const resumeReference = (searchParams.get("reference") || "").trim().toUpperCase() || undefined;
+  const focusQuote = ["1", "true", "yes"].includes((searchParams.get("focusQuote") || "").trim().toLowerCase());
   const isResuming = Boolean(resumeReference);
   const progressPercent = isResuming ? 62 : 18;
   const auditSteps = [
@@ -17,7 +18,7 @@ export default function DashboardDocumentAuditPage() {
     { label: "Questionnaire", status: isResuming ? ("done" as const) : ("active" as const) },
     { label: "Checklist review", status: isResuming ? ("active" as const) : ("pending" as const) },
     { label: "Document uploads", status: "pending" as const },
-    { label: "Audit submission", status: "pending" as const },
+    { label: "Application submission", status: "pending" as const },
   ];
 
   if (loading) {
@@ -53,7 +54,7 @@ export default function DashboardDocumentAuditPage() {
               <p className="inline-flex items-center rounded-full border border-[#cfe2ff] bg-[#eef6ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2b5e93]">
                 Dashboard / Document Audit
               </p>
-              <h1 className="mt-3 text-3xl sm:text-4xl font-heading font-bold text-primary">Smart Questionnaire and Audit</h1>
+              <h1 className="mt-3 text-3xl sm:text-4xl font-heading font-bold text-primary">Smart Questionnaire and Application</h1>
               <p className="mt-2 text-sm sm:text-base text-slate-600">
                 Complete your audit journey with guided steps. Progress is saved for {user?.email || "your account"}.
               </p>
@@ -110,6 +111,7 @@ export default function DashboardDocumentAuditPage() {
         <DocumentAuditJourney
           userEmail={user?.email}
           resumeReference={resumeReference}
+          focusQuote={focusQuote}
         />
       </div>
     </section>

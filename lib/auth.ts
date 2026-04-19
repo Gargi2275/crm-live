@@ -198,7 +198,6 @@ export const authService = {
 
       return { data: { ...data.data, tokens } };
     } catch (error) {
-      console.error('Registration error:', error);
       throw error;
     }
   },
@@ -243,7 +242,6 @@ export const authService = {
           : undefined,
       };
     } catch (error) {
-      console.error('Request signup OTP error:', error);
       throw error;
     }
   },
@@ -271,7 +269,6 @@ export const authService = {
         otp: data.data?.otp,
       };
     } catch (error) {
-      console.error('Request login OTP error:', error);
       throw error;
     }
   },
@@ -298,38 +295,17 @@ export const authService = {
         throw new Error(data.message || 'Login failed');
       }
 
-      console.log('[Auth Debug] OTP Response received:', {
-        status: response.status,
-        hasData: !!data.data,
-        hasTokens: !!data.data?.tokens,
-      });
-
       const tokens = extractTokens(data);
       if (!tokens) {
-        console.error('[Auth Debug] Token extraction failed. Response was:', JSON.stringify(data).substring(0, 200));
         throw new Error('Login failed. Missing auth token payload.');
       }
 
-      console.log('[Auth Debug] Tokens extracted:', {
-        accessLength: tokens.access?.length || 0,
-        refreshLength: tokens.refresh?.length || 0,
-        accessPrefix: tokens.access?.substring(0, 20) + '...' || 'MISSING',
-      });
-
       setTokens(tokens.access, tokens.refresh);
-      
-      // Verify tokens were actually stored
-      const stored = localStorage.getItem('access_token');
-      console.log('[Auth Debug] Verification - Access token in localStorage:', {
-        length: stored?.length || 0,
-        prefix: stored?.substring(0, 20) + '...' || 'MISSING',
-      });
 
       setStoredUserProfile(data.data.user);
 
       return { data: { ...data.data, tokens } };
     } catch (error) {
-      console.error('Verify login OTP error:', error);
       throw error;
     }
   },
@@ -364,7 +340,6 @@ export const authService = {
 
       return { data: { ...data.data, tokens } };
     } catch (error) {
-      console.error('Login error:', error);
       throw error;
     }
   },
@@ -389,7 +364,6 @@ export const authService = {
 
       return Boolean(data.data?.exists);
     } catch (error) {
-      console.error('Check user exists error:', error);
       throw error;
     }
   },
@@ -411,7 +385,6 @@ export const authService = {
         });
       }
     } catch (error) {
-      console.error('Logout error:', error);
     } finally {
       // Always clear tokens locally
       clearTokens();
@@ -455,7 +428,6 @@ export const authService = {
       setStoredUserProfile(data.data.user);
       return data.data.user;
     } catch (error) {
-      console.error('Get profile error:', error);
       throw error;
     }
   },
@@ -503,7 +475,6 @@ export const authService = {
         throw new Error(data.message || 'Failed to request magic link');
       }
     } catch (error) {
-      console.error('Magic link request error:', error);
       throw error;
     }
   },
@@ -537,7 +508,6 @@ export const authService = {
     };
   }> {
     try {
-      console.info('[magic-link] verify request started', { tokenPreview: token?.slice(0, 8) });
       const response = await fetch(`${API_BASE_URL}/auth/magic-link/verify/`, {
         method: 'POST',
         headers: {
@@ -545,20 +515,11 @@ export const authService = {
         },
         body: JSON.stringify({ magic_link: token }),
       });
-
-      console.info('[magic-link] verify response received', {
-        status: response.status,
-        ok: response.ok,
-        contentType: response.headers.get('content-type'),
-      });
-
       const raw = await response.text();
-      console.info('[magic-link] verify raw payload preview', raw?.slice(0, 200));
       let data: AuthResponse | null = null;
       try {
         data = raw ? JSON.parse(raw) as AuthResponse : null;
       } catch {
-        console.error('[magic-link] verify JSON parse failed');
         if (!response.ok) {
           throw new Error(`Magic link verification failed (HTTP ${response.status}).`);
         }
@@ -566,7 +527,6 @@ export const authService = {
       }
 
       if (!response.ok) {
-        console.error('[magic-link] verify non-OK payload', data);
         throw new Error(data?.message || 'Magic link verification failed');
       }
 
@@ -576,18 +536,15 @@ export const authService = {
 
       const tokens = extractTokens(data);
       if (!tokens) {
-        console.error('[magic-link] verify missing token payload', data);
         throw new Error('Magic link verification failed. Missing token payload.');
       }
 
       // Store tokens
       setTokens(tokens.access, tokens.refresh);
       setStoredUserProfile(data.data.user);
-      console.info('[magic-link] verify success, tokens stored');
 
       return { data: { ...data.data, tokens } };
     } catch (error) {
-      console.error('Magic link verification error:', error);
       throw error;
     }
   },
@@ -615,7 +572,6 @@ export const authService = {
         otp: data.data?.otp,
       };
     } catch (error) {
-      console.error('Request forgot password OTP error:', error);
       throw error;
     }
   },
@@ -638,7 +594,6 @@ export const authService = {
         throw new Error(data.message || 'OTP verification failed');
       }
     } catch (error) {
-      console.error('Verify forgot password OTP error:', error);
       throw error;
     }
   },
@@ -661,7 +616,6 @@ export const authService = {
         throw new Error(data.message || 'Password reset failed');
       }
     } catch (error) {
-      console.error('Password reset error:', error);
       throw error;
     }
   },
@@ -686,7 +640,6 @@ export const authService = {
         email: data.data?.email ?? '',
       };
     } catch (error) {
-      console.error('Request change password OTP error:', error);
       throw error;
     }
   },
@@ -705,7 +658,6 @@ export const authService = {
         throw new Error('Failed to change password');
       }
     } catch (error) {
-      console.error('Change password error:', error);
       throw error;
     }
   },

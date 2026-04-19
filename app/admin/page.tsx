@@ -29,19 +29,25 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import { useConsole } from "@/components/console/ConsoleContext";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   getAdminDashboardOverview,
+  getStaffPerformanceBadge,
+  listAdminApplications,
+  patchAdminApplication,
+  type AdminApplication,
   type AdminDashboardOverview,
 } from "@/lib/admin-auth";
 import toast from "react-hot-toast";
+import { useRouter } from "next/navigation";
 
 export default function ConsoleDashboard() {
-  const { autoAssignTasks } = useConsole();
+  const router = useRouter();
   const { adminUser } = useAdminAuth();
   const [period, setPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+  const [applications, setApplications] = useState<AdminApplication[]>([]);
+  const [staffBadge, setStaffBadge] = useState<string | null>(null);
   const userRole = adminUser?.role;
   const roleLabelMap: Record<string, string> = {
     admin: "Admin",
@@ -56,16 +62,29 @@ export default function ConsoleDashboard() {
   const isStaffView = userRole === "case_processor" || userRole === "reviewer" || userRole === "support_agent";
   const chartColors = ["#009877", "#33A1FD", "#B87333", "#DCE7F3"];
 
-  useEffect(() => {
-    const loadDashboard = async () => {
-      try {
-        const payload = await getAdminDashboardOverview();
-        setDashboardData(payload);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load dashboard overview.");
-      }
-    };
+  const loadDashboard = async () => {
+    try {
+      const [payload, appPayload] = await Promise.all([
+        getAdminDashboardOverview(),
+        listAdminApplications(),
+      ]);
+      setDashboardData(payload);
+      setApplications(appPayload);
 
+      if (isStaffView) {
+        try {
+          const badgePayload = await getStaffPerformanceBadge();
+          setStaffBadge(badgePayload.badge);
+        } catch {
+          setStaffBadge(null);
+        }
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load dashboard overview.");
+    }
+  };
+
+  useEffect(() => {
     void loadDashboard();
   }, []);
 
@@ -75,6 +94,9 @@ export default function ConsoleDashboard() {
     converted: 0,
     conversion: "0%",
     revenue_today: 0,
+    order_revenue_today: 0,
+    audit_revenue_today: 0,
+    full_payment_revenue_today: 0,
     pending_payments: 0,
     avg_ticket_size: 0,
   };
@@ -113,6 +135,80 @@ export default function ConsoleDashboard() {
     [dashboardData, insightIconMap],
   );
 
+  const staffWorklist = useMemo(() => {
+    const openApplications = applications.filter((app) => {
+      const stage = String(app.current_stage || "").toLowerCase();
+      return stage !== "closed";
+    });
+
+    return openApplications.slice(0, 3).map((app) => {
+      const stage = String(app.current_stage || "").replace(/_/g, " ").toLowerCase();
+      const serviceLabel = app.service_name || app.service_type || "Application";
+      const customer = app.customer_name || "Customer";
+      return {
+        id: app.id,
+        reference: app.reference_number,
+        notes: app.notes || "",
+        title: `${serviceLabel} - ${customer}`,
+        subtitle: `Stage: ${stage.charAt(0).toUpperCase()}${stage.slice(1)} • ${app.reference_number}`,
+      };
+    });
+  }, [applications]);
+
+  const appendTimestampedNote = (base: string, note: string) => {
+    const now = new Date().toLocaleString();
+    const current = (base || "").trim();
+    return current ? `${current}\n[${now}] ${note}` : `[${now}] ${note}`;
+  };
+
+  const handleOpenCase = (taskId: number) => {
+    router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(taskId))}`);
+  };
+
+  const handleMarkProgress = async (task: { id: number; reference: string; notes: string }) => {
+    try {
+      await patchAdminApplication(task.id, {
+        notes: appendTimestampedNote(task.notes, `Progress updated by staff for ${task.reference}`),
+      });
+      await loadDashboard();
+      toast.success(`Progress updated for ${task.reference}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update progress.");
+    }
+  };
+
+  const handleEscalate = async (task: { id: number; reference: string; notes: string }) => {
+    try {
+      await patchAdminApplication(task.id, {
+        stage: "DOCUMENTS_REQUIRED",
+        correction_cause: "staff_error",
+        notes: appendTimestampedNote(task.notes, `Escalated by staff for review: ${task.reference}`),
+      });
+      await loadDashboard();
+      toast.success(`Escalation recorded for ${task.reference}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to escalate case.");
+    }
+  };
+
+  const accountabilityFeed = useMemo(() => {
+    return [...applications]
+      .sort((left, right) => {
+        const leftTs = new Date(left.updated_at || left.created_at).getTime();
+        const rightTs = new Date(right.updated_at || right.created_at).getTime();
+        return rightTs - leftTs;
+      })
+      .slice(0, 3)
+      .map((app) => {
+        const status = String(app.application_status || "").replace(/_/g, " ");
+        const updatedTime = new Date(app.updated_at || app.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return {
+          id: app.id,
+          text: `${status.charAt(0).toUpperCase()}${status.slice(1)} | ${app.reference_number} | ${updatedTime}`,
+        };
+      });
+  }, [applications]);
+
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 max-w-[1500px] mx-auto space-y-6 font-body">
       <div className="flex justify-between items-center mb-2">
@@ -122,7 +218,7 @@ export default function ConsoleDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4 mb-6">
         <StatCard 
           title="Total Leads" 
           value={kpiSnapshot.total_leads}
@@ -160,6 +256,15 @@ export default function ConsoleDashboard() {
           bgClass="bg-[#B87333]/10"
         />
         <StatCard 
+          title="Audit Revenue ₹"
+          value={`₹${(kpiSnapshot.audit_revenue_today ?? 0).toLocaleString("en-IN")}`}
+          trend="Today"
+          isPositive={true}
+          icon={ShieldCheck}
+          colorClass="text-[#0F766E]"
+          bgClass="bg-[#0F766E]/10"
+        />
+        <StatCard 
           title="Avg. Ticket Size" 
           value={`₹${kpiSnapshot.avg_ticket_size.toLocaleString("en-IN")}`}
           trend="Rolling"
@@ -184,10 +289,10 @@ export default function ConsoleDashboard() {
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-lg font-heading font-semibold text-[#102A43]">Workload Distribution</h2>
             <button
-              onClick={autoAssignTasks}
+              onClick={() => void loadDashboard()}
               className="bg-[#009877] text-white px-4 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#007B61]"
             >
-              AUTO-ASSIGN
+              REFRESH
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -414,30 +519,32 @@ export default function ConsoleDashboard() {
       ) : isStaffView ? (
         <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
           <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">My Daily Worklist</h2>
+          <div className="mb-4 rounded-[12px] border border-[#D9E1EA] bg-[#F8FCFF] px-4 py-3">
+            <p className="text-xs text-[#627D98]">My Performance Badge</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffBadge || "Needs Improvement"}</p>
+          </div>
           <div className="space-y-3">
-            {[
-              "Audit Customer - Devkishan Suthar",
-              "Request docs for Priya Sharma",
-              "Fill form for Arjun Mehta",
-            ].map((task) => (
-              <div key={task} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
+            {staffWorklist.map((task) => (
+              <div key={task.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[#102A43] text-sm font-medium">{task}</p>
-                  <p className="text-xs text-[#627D98]">Due in 2 hours • LEAD-1001</p>
+                  <p className="text-[#102A43] text-sm font-medium">{task.title}</p>
+                  <p className="text-xs text-[#627D98]">{task.subtitle}</p>
                 </div>
                 <div className="flex gap-2 flex-wrap justify-end">
-                  <button className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full" onClick={() => toast.success("Documents requested")}>Request Documents</button>
-                  <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full">Mark Audit Complete</button>
-                  <button className="text-xs bg-[#B87333]/12 text-[#9C4F17] border-[0.5px] border-[#B87333]/35 px-2 py-1 rounded-full">Move to Next Stage</button>
+                  <button className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full" onClick={() => handleOpenCase(task.id)}>Open Case</button>
+                  <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full" onClick={() => void handleMarkProgress(task)}>Mark Progress</button>
+                  <button className="text-xs bg-[#B87333]/12 text-[#9C4F17] border-[0.5px] border-[#B87333]/35 px-2 py-1 rounded-full" onClick={() => void handleEscalate(task)}>Escalate</button>
                 </div>
               </div>
             ))}
+            {staffWorklist.length === 0 && <p className="text-sm text-[#627D98]">No active work items found.</p>}
           </div>
           <h3 className="text-[#102A43] font-heading font-semibold mt-6 mb-2">Accountability Panel</h3>
           <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 space-y-1">
-            <p className="text-xs text-[#627D98]">Audit completed | Devkishan Suthar | 10:22 AM</p>
-            <p className="text-xs text-[#627D98]">Requested documents | Priya Sharma | 10:05 AM</p>
-            <p className="text-xs text-[#627D98]">Moved to Review Pending | Sunita Patel | 09:42 AM</p>
+            {accountabilityFeed.map((item) => (
+              <p key={item.id} className="text-xs text-[#627D98]">{item.text}</p>
+            ))}
+            {accountabilityFeed.length === 0 && <p className="text-xs text-[#627D98]">No recent activity.</p>}
           </div>
         </div>
       ) : null}

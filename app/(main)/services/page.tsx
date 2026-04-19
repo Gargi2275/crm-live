@@ -1,7 +1,7 @@
 import { FadeInUp } from "@/components/FadeInUp";
 import { ServiceCard } from "@/components/ServiceCard";
 import { CTABanner } from "@/components/CTABanner";
-import { UserCheck, Shield, CheckCircle, Globe, FileX } from "lucide-react";
+import { UserCheck, Shield, CheckCircle, Globe, FileX, FileText } from "lucide-react";
 
 export const metadata = {
   title: "OCI, Indian e-Visa & Passport Services | FlyOCI",
@@ -36,7 +36,7 @@ export default function ServicesPage() {
       description: "1-Year & 5-Year tourist and business e-Visas.", 
       icon: <Globe />, 
       href: "/services/indian-evisa",
-      price: "From £88"
+      price: "£88 (1-Year) · £150 (5-Year)"
     },
     { 
       title: "Indian Passport Renewal", 
@@ -44,6 +44,13 @@ export default function ServicesPage() {
       icon: <FileX />, 
       href: "/services/passport-renewal",
       price: "Price on request"
+    },
+    {
+      title: "Apostille & Attestation",
+      description: "Document legalisation guidance and support. Full workflow is being added next.",
+      icon: <FileText />,
+      href: "/apostille-services",
+      price: "Free pre-check"
     },
   ];
 

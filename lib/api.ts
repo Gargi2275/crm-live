@@ -40,18 +40,11 @@ export const clearTokens = () => {
 // Refresh access token using refresh token
 export const refreshAccessToken = async (): Promise<string | null> => {
   if (refreshInFlight) {
-    console.log('[API Debug] Reusing in-flight refresh request');
     return refreshInFlight;
   }
 
   refreshInFlight = (async () => {
     const { refresh } = getTokens();
-
-    console.log('[API Debug] Starting token refresh', {
-      hasRefresh: !!refresh,
-      refreshPrefix: refresh?.substring(0, 20) + '...',
-      API_BASE_URL,
-    });
 
     if (!refresh) return null;
 
@@ -63,12 +56,6 @@ export const refreshAccessToken = async (): Promise<string | null> => {
         },
         body: JSON.stringify({ refresh }),
       });
-
-      console.log('[API Debug] Refresh response status:', response.status);
-
-      const text = await response.clone().text();
-      console.log('[API Debug] Refresh response body:', text);
-
       if (!response.ok) {
         return null;
       }
@@ -88,13 +75,6 @@ export const refreshAccessToken = async (): Promise<string | null> => {
         data.tokens?.refresh ||
         data.refresh ||
         null;
-
-      console.log('[API Debug] Parsed tokens:', {
-        hasAccess: !!newAccessToken,
-        accessPrefix: newAccessToken?.substring(0, 20) + '...',
-        hasRefresh: !!newRefreshToken,
-      });
-
       if (newAccessToken) {
         localStorage.setItem(ACCESS_TOKEN_KEY, newAccessToken);
         if (newRefreshToken) {
@@ -105,7 +85,6 @@ export const refreshAccessToken = async (): Promise<string | null> => {
 
       return null;
     } catch (error) {
-      console.error('[API Debug] Token refresh failed:', error);
       return null;
     } finally {
       refreshInFlight = null;
@@ -133,7 +112,6 @@ export const authenticatedFetch = async (
   const requestKey = `${url}|${method}|${requestBody}`;
 
   if (authenticatedFetchInFlight.has(requestKey)) {
-    console.log('[API Debug] Reusing in-flight request:', { requestKey });
     const inFlightResponse = await authenticatedFetchInFlight.get(requestKey)!;
     return inFlightResponse.clone();
   }
@@ -141,21 +119,10 @@ export const authenticatedFetch = async (
   const fetchPromise = (async () => {
     let { access } = getTokens();
 
-    console.log('[API Debug] Preparing request', {
-      url,
-      method,
-      requestKey,
-      hasAccess: !!access,
-      accessPrefix: access?.substring(0, 20) + '...',
-      API_BASE_URL,
-    });
-
     if (!access) {
-      console.log('[API Debug] No access token, attempting refresh...');
       const refreshedToken = await refreshAccessToken();
 
       if (!refreshedToken) {
-        console.error('[API Debug] No token after refresh');
         throw new Error("Session expired. Please log in.");
       }
 
@@ -169,46 +136,20 @@ export const authenticatedFetch = async (
       headers.set("Content-Type", "application/json");
     }
 
-    console.log('[API Debug] Sending request', {
-      url,
-      method,
-      headers: Object.fromEntries(headers.entries()),
-      body: requestBody,
-    });
-
     let response = await fetch(url, { ...options, headers });
 
-    console.log('[API Debug] Response status:', response.status);
-
-    const responseText = await response.clone().text();
-    console.log('[API Debug] Response body:', responseText);
-
     if (response.status === 401) {
-      console.warn('[API Debug] 401 received, attempting refresh...', {
-        url,
-        method,
-      });
-
       const newAccessToken = await refreshAccessToken();
 
       if (!newAccessToken) {
-        console.error('[API Debug] Refresh failed after 401');
         throw new Error("Session expired. Please log in.");
       }
 
       headers.set("Authorization", `Bearer ${newAccessToken}`);
 
-      console.log('[API Debug] Retrying request with new token');
-
       response = await fetch(url, { ...options, headers });
 
-      console.log('[API Debug] Retry response status:', response.status);
-
-      const retryText = await response.clone().text();
-      console.log('[API Debug] Retry response body:', retryText);
-
       if (response.status === 401) {
-        console.error('[API Debug] Still 401 after retry');
         throw new Error("Session expired. Please log in.");
       }
     }
@@ -313,6 +254,56 @@ export type VerifyFullPaymentResponse = {
   next_step: string;
 };
 
+export type PassportRenewalRequestSubmitResponse = {
+  reference_number: string;
+  file_number?: string | null;
+  case_reference: string;
+  masked_email: string;
+  quote_status: string;
+};
+
+export type PassportRenewalQuoteDetailResponse = {
+  reference_number: string;
+  file_number?: string | null;
+  case_reference: string;
+  quote_amount_pence: number | null;
+  quoted_fee: string | null;
+  quote_status: string;
+  quote_notes?: string;
+  quote_set_at?: string | null;
+  quote_expires_at?: string | null;
+  masked_email: string;
+  validity_days: number;
+};
+
+export type PassportCaseQuoteDetailResponse = {
+  reference_number: string;
+  file_number?: string | null;
+  quoted_fee: string | null;
+  quote_status: string;
+};
+
+export type PassportRenewalQuoteOrderResponse = {
+  order: {
+    id: string;
+    amount: number;
+    currency: string;
+  };
+  key_id: string;
+  currency: string;
+  amount_pence: number;
+  amount_major: string;
+  reference_number: string;
+  case_reference: string;
+};
+
+export type PassportRenewalQuoteVerifyResponse = {
+  reference_number: string;
+  quote_status: string;
+  application_status: string;
+  current_stage: string;
+};
+
 export type ResubmitForReviewResponse = {
   id: number;
   reference_number: string;
@@ -330,6 +321,7 @@ export type CreateApplicationResponse = {
 export type ApplicationDetailResponse = {
   id: number;
   reference_number: string;
+  file_number?: string;
   service_type?: string;
   service_name?: string;
   application_status: string;
@@ -342,6 +334,8 @@ export type ApplicationDetailResponse = {
   audit_credit_pence?: number;
   amount_due_pence?: number;
   service_total_pence?: number;
+  quote_status?: string;
+  quoted_fee?: string;
   full_payment_status?: string;
   payment_confirmed?: boolean;
   current_stage?: string;
@@ -386,6 +380,11 @@ export type ApplicationDetailResponse = {
     actor?: string;
     metadata?: Record<string, unknown>;
   }>;
+  admin_messages?: Array<{
+    created_at?: string;
+    subject?: string;
+    message?: string;
+  }>;
 };
 
 export type ApplicationDocumentResponse = {
@@ -397,6 +396,36 @@ export type ApplicationDocumentResponse = {
   finding_type?: string;
   required_action?: string;
   priority?: string;
+};
+
+export type PublicTestimonial = {
+  id: number;
+  application_reference?: string;
+  author_name?: string;
+  testimonial_text: string;
+  service_type?: string;
+  rating: number;
+  created_at?: string;
+};
+
+export type PublicTestimonialsResponse = {
+  success?: boolean;
+  data?: PublicTestimonial[];
+  message?: string;
+};
+
+export type SubmitTestimonialPayload = {
+  author_name?: string;
+  testimonial_text: string;
+  service_type?: string;
+  rating: number;
+  application_reference?: string;
+};
+
+export type SubmitTestimonialResponse = {
+  success?: boolean;
+  data?: PublicTestimonial;
+  message?: string;
 };
 
 
@@ -478,6 +507,42 @@ export const getApplicationDocuments = async (referenceNumber: string): Promise<
     return (raw?.data || raw) as ApplicationDocumentResponse[];
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Failed to load application documents');
+  }
+}
+
+export const getPublicTestimonials = async (): Promise<PublicTestimonial[]> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/public/testimonials/`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw: PublicTestimonialsResponse = await response.json();
+    return raw?.data || [];
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to load testimonials');
+  }
+}
+
+export const submitTestimonial = async (payload: SubmitTestimonialPayload): Promise<PublicTestimonial> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/public/testimonials/`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw: SubmitTestimonialResponse = await response.json();
+    return raw?.data as PublicTestimonial;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to submit review');
   }
 }
 
@@ -595,13 +660,15 @@ export const getAuditStatus = async (auditId: number): Promise<AuditStatusRespon
  * Creates a Razorpay order for audit fee payment.
  */
 export const createAuditPaymentOrder = async (
-  referenceNumber: string
+  referenceNumber: string,
+  notes?: string
 ): Promise<CreateAuditPaymentOrderResponse> => {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/audit/payment/create-order/`, {
       method: 'POST',
       body: JSON.stringify({
         reference_number: referenceNumber,
+        notes: notes?.trim() || undefined,
       }),
     });
 
@@ -651,7 +718,8 @@ export const verifyAuditPayment = async (
  * Skip audit after acknowledging risk disclaimer.
  */
 export const skipAuditWithDisclaimer = async (
-  referenceNumber: string
+  referenceNumber: string,
+  notes?: string
 ): Promise<SkipAuditResponse> => {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/audit/skip/`, {
@@ -659,6 +727,7 @@ export const skipAuditWithDisclaimer = async (
       body: JSON.stringify({
         reference_number: referenceNumber,
         disclaimer_accepted: true,
+        notes: notes?.trim() || undefined,
       }),
     });
 
@@ -726,5 +795,116 @@ export const verifyFullPayment = async (
     return (raw?.data || raw) as VerifyFullPaymentResponse;
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Failed to verify full payment');
+  }
+};
+
+export const submitPassportRenewalRequest = async (
+  referenceNumber: string
+): Promise<PassportRenewalRequestSubmitResponse> => {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/passport-renewal/request/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reference_number: referenceNumber,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as PassportRenewalRequestSubmitResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to submit passport renewal request');
+  }
+};
+
+export const getPassportRenewalQuoteDetail = async (
+  referenceNumber: string
+): Promise<PassportRenewalQuoteDetailResponse> => {
+  const params = new URLSearchParams({ reference_number: referenceNumber });
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/passport-renewal/pay/?${params.toString()}`, {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as PassportRenewalQuoteDetailResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to load passport renewal quote details');
+  }
+};
+
+export const createPassportRenewalQuoteOrder = async (
+  referenceNumber: string
+): Promise<PassportRenewalQuoteOrderResponse> => {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/passport-renewal/pay/create-order/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reference_number: referenceNumber,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as PassportRenewalQuoteOrderResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to create passport renewal payment order');
+  }
+};
+
+export const verifyPassportRenewalQuotePayment = async (
+  referenceNumber: string,
+  orderId: string,
+  paymentId: string,
+  signature: string
+): Promise<PassportRenewalQuoteVerifyResponse> => {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/passport-renewal/pay/verify/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reference_number: referenceNumber,
+        razorpay_order_id: orderId,
+        razorpay_payment_id: paymentId,
+        razorpay_signature: signature,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as PassportRenewalQuoteVerifyResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to verify passport renewal payment');
+  }
+};
+
+export const getPassportCaseQuoteDetail = async (
+  fileNumber: string
+): Promise<PassportCaseQuoteDetailResponse> => {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/cases/${encodeURIComponent(fileNumber)}/`, {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as PassportCaseQuoteDetailResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to load case quote details');
   }
 };

@@ -117,6 +117,8 @@ export default function TrackPage() {
 
   const canUploadMissingDocuments = Boolean(summary?.actions?.can_upload_missing_documents || hasMissingDocuments);
   const canDownloadAcknowledgement = Boolean(summary?.actions?.download_acknowledgement_available && summary?.actions?.acknowledgement_url);
+  const canPayNow = Boolean(summary?.actions?.can_pay_now && summary?.actions?.payment_url);
+  const isAuditSkipped = Boolean(summary?.audit_skipped && summary?.audit_skip_disclaimer_accepted);
 
   const resolvedKanbanStage = useMemo(() => {
     const fromApi = (summary?.kanban_stage || "").trim().toUpperCase();
@@ -637,7 +639,7 @@ export default function TrackPage() {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-3 p-3">
               <div className="rounded-[12px] border border-[#d8e4f3] bg-white p-3">
                 <div className="mb-3 rounded-[10px] border border-[#d8e4f3] bg-[#f8fbff] p-3">
-                  {resolvedKanbanStage === "AUDIT_PENDING" && (
+                  {resolvedKanbanStage === "AUDIT_PENDING" && !canPayNow && (
                     <div className="space-y-1.5">
                       <p className="font-body text-[13px] font-semibold text-[#17345d] inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Your documents are being reviewed</p>
                       <p className="font-body text-[12px] text-[#486581]">We will update you within 4 hours.</p>
@@ -665,7 +667,7 @@ export default function TrackPage() {
                         <p className="font-body text-[11px] font-semibold text-[#B42318]">Warning: correction request is older than 48 hours.</p>
                       )}
                       <button
-                        onClick={handleUploadMissingDocuments}
+                        onClick={() => handleUploadMissingDocuments()}
                         className="rounded-[8px] border border-[#d5e3f5] bg-white px-3 py-2 text-[11px] font-semibold text-[#1f4f8f] inline-flex items-center gap-2"
                       >
                         <Upload className="h-4 w-4" /> Re-upload documents
@@ -684,18 +686,16 @@ export default function TrackPage() {
                     </div>
                   )}
 
-                  {resolvedKanbanStage === "AUDIT_COMPLETED" && (
+                  {(resolvedKanbanStage === "AUDIT_COMPLETED" || resolvedKanbanStage === "PAYMENT_PENDING" || (resolvedKanbanStage === "AUDIT_PENDING" && canPayNow)) && (
                     <div className="space-y-2">
-                      <p className="font-body text-[13px] font-semibold text-[#0F766E]">Documents Approved!</p>
-                      <p className="font-body text-[12px] text-[#486581]">Your documents have been verified. Please complete your payment to proceed.</p>
-                      <button onClick={handlePayNow} className="rounded-[8px] border border-[#d5e3f5] bg-white px-3 py-2 text-[11px] font-semibold text-[#1f4f8f]">Pay {summary?.amount_due_major ? `GBP ${summary.amount_due_major}` : "Now"}</button>
-                    </div>
-                  )}
-
-                  {resolvedKanbanStage === "PAYMENT_PENDING" && (
-                    <div className="space-y-2">
-                      <p className="font-body text-[13px] font-semibold text-[#17345d]">Complete Your Payment</p>
-                      <p className="font-body text-[12px] text-[#486581]">Pay GBP {summary?.amount_due_major || "0.00"} to proceed with your application.</p>
+                      <p className="font-body text-[13px] font-semibold text-[#17345d]">
+                        {isAuditSkipped ? "Audit skipped. Complete Your Payment" : "Complete Your Payment"}
+                      </p>
+                      <p className="font-body text-[12px] text-[#486581]">
+                        {isAuditSkipped
+                          ? `You chose to skip audit. Pay GBP ${summary?.amount_due_major || "0.00"} to proceed.`
+                          : `Pay GBP ${summary?.amount_due_major || "0.00"} to proceed with your application.`}
+                      </p>
                       <button onClick={handlePayNow} className="rounded-[8px] border border-[#d5e3f5] bg-white px-3 py-2 text-[11px] font-semibold text-[#1f4f8f]">Pay GBP {summary?.amount_due_major || "0.00"}</button>
                     </div>
                   )}
@@ -704,7 +704,7 @@ export default function TrackPage() {
                     <div className="space-y-2">
                       <p className="font-body text-[13px] font-semibold text-[#17345d]">Upload Your Documents</p>
                       <p className="font-body text-[12px] text-[#486581]">Payment confirmed! Please upload your required documents.</p>
-                      <button onClick={handleUploadMissingDocuments} className="rounded-[8px] border border-[#d5e3f5] bg-white px-3 py-2 text-[11px] font-semibold text-[#1f4f8f] inline-flex items-center gap-2"><Upload className="h-4 w-4" /> Upload Documents</button>
+                      <button onClick={() => handleUploadMissingDocuments()} className="rounded-[8px] border border-[#d5e3f5] bg-white px-3 py-2 text-[11px] font-semibold text-[#1f4f8f] inline-flex items-center gap-2"><Upload className="h-4 w-4" /> Upload Documents</button>
                     </div>
                   )}
 
@@ -805,7 +805,7 @@ export default function TrackPage() {
 
                     {canUploadMissingDocuments && (
                       <button
-                        onClick={handleUploadMissingDocuments}
+                        onClick={() => handleUploadMissingDocuments()}
                         className="w-full rounded-[8px] border border-[#d5e3f5] bg-[#f8fbff] px-3 py-2 text-left font-body text-[11px] font-semibold text-[#1f4f8f] hover:bg-[#eef5ff] transition-colors inline-flex items-center gap-2"
                       >
                         <Upload className="h-4 w-4" /> Upload missing documents

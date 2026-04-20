@@ -41,15 +41,6 @@ type RazorpayCheckoutOptions = {
   };
 };
 
-declare global {
-  interface Window {
-    Razorpay?: new (options: RazorpayCheckoutOptions) => {
-      open: () => void;
-      on: (eventName: string, callback: (event: { error?: { description?: string } }) => void) => void;
-    };
-  }
-}
-
 async function loadRazorpayScript(): Promise<boolean> {
   if (typeof window === "undefined") return false;
   if (window.Razorpay) return true;
@@ -254,9 +245,11 @@ export default function PaymentPage() {
         },
       });
 
-      razorpay.on("payment.failed", (event) => {
-        setErrorMessage(event.error?.description || "Payment failed. Please try again.");
-      });
+      if (razorpay.on) {
+        razorpay.on("payment.failed", (event) => {
+          setErrorMessage(event.error?.description || "Payment failed. Please try again.");
+        });
+      }
 
       razorpay.open();
     } catch (error) {

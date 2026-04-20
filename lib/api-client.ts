@@ -220,6 +220,8 @@ export type TrackApplicationResponse = ApiEnvelope<{
   unified_status?: string;
   internal_status: string;
   kanban_stage?: string;
+  audit_skipped?: boolean;
+  audit_skip_disclaimer_accepted?: boolean;
   audit_result?: "pending" | "green" | "amber" | "red";
   auditor_notes?: string;
   findings?: Array<{

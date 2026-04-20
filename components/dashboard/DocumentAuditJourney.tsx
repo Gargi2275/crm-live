@@ -226,12 +226,6 @@ type RazorpayOpenOptions = {
   modal?: { ondismiss?: () => void };
 };
 
-declare global {
-  interface Window {
-    Razorpay?: new (options: RazorpayOpenOptions) => { open: () => void };
-  }
-}
-
 const QUESTION_LIST: Array<{ id: QuestionId; label: string; options: string[] }> = [
   {
     id: "journeyType",

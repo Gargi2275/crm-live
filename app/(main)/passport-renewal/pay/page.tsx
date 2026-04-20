@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
@@ -26,12 +28,6 @@ type RazorpayOpenOptions = {
   handler: (payload: RazorpaySuccessPayload) => void;
   modal?: { ondismiss?: () => void };
 };
-
-declare global {
-  interface Window {
-    Razorpay?: new (options: RazorpayOpenOptions) => { open: () => void };
-  }
-}
 
 export default function PassportRenewalPayPage() {
   const router = useRouter();

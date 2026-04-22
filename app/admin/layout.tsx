@@ -65,13 +65,23 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
     }
   }, [adminUser, isPublicAdminAuthRoute, pathname, router]);
 
-  if (!isBootstrapped) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F7FA] text-slate-700">
-        Checking admin session...
+ // In AdminLayoutContent, replace the isBootstrapped check block:
+
+if (!isBootstrapped) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#F5F7FA]">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#D9E1EA] border-t-[#009877]" />
+        <p className="text-sm text-[#627D98] font-medium">Loading...</p>
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+// ADD THIS — prevents the dashboard flash while redirect is in-flight
+if (!isAuthenticated && !isPublicAdminAuthRoute) {
+  return null; // redirect is about to happen, render nothing
+}
 
   if (isPublicAdminAuthRoute) {
     return (

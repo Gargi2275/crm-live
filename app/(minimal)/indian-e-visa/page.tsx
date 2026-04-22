@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { useForm, Controller, FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { AlertTriangle, Shield, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, Loader2, Shield, Sparkles, Star } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { useEVisa } from "@/context/EVisaContext";
@@ -15,7 +15,7 @@ import { ProgressStepper } from "@/components/ProgressStepper";
 import { eVisaApi } from "@/lib/api-client";
 import { EVISA_DEFAULTS } from "@/lib/evisa-config";
 import { authService } from "@/lib/auth";
-import { authenticatedFetch } from "@/lib/api";
+import { authenticatedFetch, getPublicTestimonials, submitTestimonial } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
 
 const registrationSchema = z.object({
@@ -181,6 +181,12 @@ export default function RegistrationPage() {
   }>>([]);
   const [reuploadingDocumentKey, setReuploadingDocumentKey] = useState("");
   const [reuploadConfirmationMessage, setReuploadConfirmationMessage] = useState("");
+  const [reviewAuthorName, setReviewAuthorName] = useState("");
+  const [reviewText, setReviewText] = useState("");
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const loadedResumeCaseRef = useRef("");
   const processedResumeMagicRef = useRef("");
   const initializedCleanStateRef = useRef(false);
@@ -219,12 +225,12 @@ export default function RegistrationPage() {
     }
   });
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hasDraft = sessionStorage.getItem(REGISTER_DRAFT_SESSION_KEY) === "1";
-    setHasActiveDraftSession(hasDraft);
-    setDraftSessionChecked(true);
-  }, []);
+ useEffect(() => {
+  if (typeof window === "undefined") return;
+  const hasDraft = sessionStorage.getItem(REGISTER_DRAFT_SESSION_KEY) === "1";
+  setHasActiveDraftSession(hasDraft);
+  setDraftSessionChecked(true);
+}, []);
 
   useEffect(() => {
     if (!draftSessionChecked) {
@@ -264,59 +270,72 @@ export default function RegistrationPage() {
     // so it never gets wiped
     if (!authService.isLoggedIn()) return;
 
-    const prefillFromProfile = async () => {
-      try {
-        const res = await authenticatedFetch(
-          `${API_BASE_URL}/auth/me/`,
-          { method: "GET" }
-        );
-        if (!res.ok) return;
+    // const prefillFromProfile = async () => {
+    //   try {
+    //     const res = await authenticatedFetch(
+    //       `${API_BASE_URL}/auth/me/`,
+    //       { method: "GET" }
+    //     );
+    //     if (!res.ok) return;
 
-        const json = await res.json().catch(() => ({}));
-        const coreUser = (json as any)?.data?.core_user;
-        if (!coreUser) return;
+    //     const json = await res.json().catch(() => ({}));
+    //     const coreUser = (json as any)?.data?.core_user;
+    //     if (!coreUser) return;
 
-        console.log("[prefillFromProfile] coreUser data:", coreUser);
+    //     console.log("[prefillFromProfile] coreUser data:", coreUser);
 
-        // Phone
-        const rawPhone = coreUser.phone_number || "";
-        console.log("[prefillFromProfile] rawPhone:", rawPhone);
-        if (rawPhone) {
-          const { countryCode, phone } =
-            splitPhoneNumber(rawPhone);
-          console.log("[prefillFromProfile] split phone:", { countryCode, phone });
-          setValue("countryCode", countryCode);
-          setValue("phone", phone);
-          updateData({ phone, countryCode });
-        }
+    //     // Phone
+    //     const rawPhone = coreUser.phone_number || "";
+    //     console.log("[prefillFromProfile] rawPhone:", rawPhone);
+    //     if (rawPhone) {
+    //       const { countryCode, phone } =
+    //         splitPhoneNumber(rawPhone);
+    //       console.log("[prefillFromProfile] split phone:", { countryCode, phone });
+    //       setValue("countryCode", countryCode);
+    //       setValue("phone", phone);
+    //       updateData({ phone, countryCode });
+    //     }
 
-        // Nationality and Country of Residence
-        const nationality = coreUser.nationality || "";
-        const country = coreUser.country || "";
-        console.log("[prefillFromProfile] nationality:", nationality, "country:", country);
+    //     // Nationality and Country of Residence
+    //     const nationality = coreUser.nationality || "";
+    //     const country = coreUser.country || "";
+    //     console.log("[prefillFromProfile] nationality:", nationality, "country:", country);
 
-        // Email
-        if (coreUser.email) {
-          setValue("email", coreUser.email);
-          updateData({ email: coreUser.email });
-        }
+    //     if (coreUser.nationality) {
+    //       const nationalityMap: Record<string, string> = {
+    //         "British": "British",
+    //         "American": "American",
+    //         "Canadian": "Canadian",
+    //         "Indian": "Indian",
+    //         "Australian": "Other",
+    //       };
+    //       const mapped = nationalityMap[coreUser.nationality] ?? "Other";
+    //       setValue("nationality", mapped as RegistrationData["nationality"], { shouldDirty: true, shouldTouch: true });
+    //       updateData({ nationality: mapped });
+    //     }
 
-        // Full name
-        const fullName = [
-          coreUser.first_name || "",
-          coreUser.last_name || "",
-        ].filter(Boolean).join(" ").trim();
-        if (fullName) {
-          setValue("fullName", fullName);
-          updateData({ fullName });
-        }
+    //     // Email
+    //     if (coreUser.email) {
+    //       setValue("email", coreUser.email);
+    //       updateData({ email: coreUser.email });
+    //     }
 
-      } catch {
-        // Silent fail
-      }
-    };
+    //     // Full name
+    //     const fullName = [
+    //       coreUser.first_name || "",
+    //       coreUser.last_name || "",
+    //     ].filter(Boolean).join(" ").trim();
+    //     if (fullName) {
+    //       setValue("fullName", fullName);
+    //       updateData({ fullName });
+    //     }
 
-    void prefillFromProfile();
+    //   } catch {
+    //     // Silent fail
+    //   }
+    // };
+
+    // void prefillFromProfile();
   }, [draftSessionChecked, shouldHydrateFromPersistedState, resetData, reset]);
 
   useEffect(() => {
@@ -538,6 +557,7 @@ export default function RegistrationPage() {
   }, [caseFromQuery, detailsMode, magicToken, resumeMode, router]);
 
   useEffect(() => {
+    if (!draftSessionChecked) return; // ← Add this guard
     const subscription = watch((values) => {
       if (!caseFromQuery && !magicToken && !resumeMode && typeof window !== "undefined") {
         const hasDraftInput = Boolean(
@@ -788,6 +808,243 @@ export default function RegistrationPage() {
     return cleanedApplicationNote || "Your application is being processed. We will update you as soon as there is progress.";
   })();
 
+  const stageNormalized = String(pipelineStageRaw || "").toLowerCase();
+  const statusNormalized = String(applicationRecord?.unified_status || applicationRecord?.application_status || resumeApplication?.application_status || "").toLowerCase();
+  const isCompletedDashboard = ["delivered", "completed"].includes(stageNormalized) || ["delivered", "completed"].includes(statusNormalized);
+  const resolvedApplicationReference = String(applicationRecord?.reference_number || caseFromQuery || "").trim();
+  const normalizedDecisionReference = (() => {
+    const raw = String(applicationRecord?.notes || "").trim();
+    if (!raw) return "N/A";
+
+    const submittedMatch = raw.match(/Govt\s*ref\s*:\s*([^\n]+)/i);
+    if (submittedMatch?.[1]) {
+      return submittedMatch[1].trim();
+    }
+
+    const decisionMatch = raw.match(/Decision\s*ref\s*:\s*([^\n]+)/i);
+    if (decisionMatch?.[1]) {
+      return decisionMatch[1].trim();
+    }
+
+    return cleanedApplicationNote || "N/A";
+  })();
+
+  useEffect(() => {
+    if (!detailsMode || !isCompletedDashboard || !resolvedApplicationReference) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSubmittedReview = async () => {
+      try {
+        const testimonials = await getPublicTestimonials();
+        const match = testimonials.find((testimonial) => String(testimonial.application_reference || "").trim().toLowerCase() === resolvedApplicationReference.toLowerCase());
+
+        if (cancelled || !match) {
+          return;
+        }
+
+        setReviewSubmitted(true);
+        setReviewAuthorName(match.author_name || "");
+        setReviewText(match.testimonial_text || "");
+        setReviewRating(Math.max(1, Math.min(5, Math.round(Number(match.rating || 5)))));
+      } catch {
+        // Keep local review form available if lookup fails.
+      }
+    };
+
+    void loadSubmittedReview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detailsMode, isCompletedDashboard, resolvedApplicationReference]);
+
+  const submitCompletionReview = async () => {
+    const testimonialText = reviewText.trim();
+
+    if (!testimonialText) {
+      toast.error("Please write your review before submitting.");
+      return;
+    }
+
+    try {
+      setReviewSubmitting(true);
+      await submitTestimonial({
+        author_name: reviewAuthorName.trim() || undefined,
+        testimonial_text: testimonialText,
+        service_type: String(resumeApplication?.service_name || applicationRecord?.service_name || "e-Visa").trim() || "e-Visa",
+        rating: reviewRating,
+        application_reference: resolvedApplicationReference || undefined,
+      });
+      setReviewText("");
+      setReviewAuthorName("");
+      setReviewRating(5);
+      setReviewSubmitted(true);
+      setReviewModalOpen(false);
+      toast.success("Thanks. Your review is now live on the homepage.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to submit review.");
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const openCaseSummaryPrint = async () => {
+    const referenceLine = resolvedApplicationReference || "N/A";
+    const serviceLine = String(resumeApplication?.service_name || applicationRecord?.service_name || "Indian e-Visa").trim() || "Indian e-Visa";
+    const statusLine = resolvedDashboardStatus || "Completed";
+    const submissionLine = formatDate(applicationRecord?.submission_date || applicationRecord?.approval_date || applicationRecord?.completion_date);
+    const decisionLine = formatDate(applicationRecord?.approval_date || applicationRecord?.completion_date);
+    const notesLine = normalizedDecisionReference;
+    const safeReference = String(referenceLine)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "case-summary";
+
+    const fallbackToPrintDialog = () => {
+      const printFrame = document.createElement("iframe");
+      printFrame.setAttribute("aria-hidden", "true");
+      printFrame.style.position = "fixed";
+      printFrame.style.right = "0";
+      printFrame.style.bottom = "0";
+      printFrame.style.width = "0";
+      printFrame.style.height = "0";
+      printFrame.style.border = "0";
+      document.body.appendChild(printFrame);
+
+      const printHtml = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>FlyOCI Case Summary</title>
+          <style>
+            body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 32px; color: #123; background: #f5f8fc; }
+            .sheet { max-width: 860px; margin: 0 auto; background: #fff; border: 1px solid #dbe8f7; border-radius: 20px; padding: 28px; box-shadow: 0 20px 50px rgba(18, 47, 89, 0.08); }
+            h1 { margin: 0 0 8px; font-size: 30px; color: #0f4aa6; }
+            p { margin: 0 0 10px; line-height: 1.5; }
+            .meta { margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+            .box { border: 1px solid #dbe8f7; border-radius: 14px; padding: 14px; background: #f9fbff; }
+            .label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #5d7089; margin-bottom: 6px; }
+            .value { font-size: 15px; font-weight: 600; color: #1f3558; }
+            .footer { margin-top: 22px; font-size: 12px; color: #6b7f99; }
+            @media print {
+              body { background: #fff; padding: 0; }
+              .sheet { border: 0; box-shadow: none; border-radius: 0; max-width: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="sheet">
+            <h1>FlyOCI Case Summary</h1>
+            <p>Your completed case record is shown below.</p>
+            <div class="meta">
+              <div class="box"><span class="label">Reference</span><span class="value">${referenceLine}</span></div>
+              <div class="box"><span class="label">Service</span><span class="value">${serviceLine}</span></div>
+              <div class="box"><span class="label">Status</span><span class="value">${statusLine}</span></div>
+              <div class="box"><span class="label">Submission / Finalized Date</span><span class="value">${submissionLine}</span></div>
+              <div class="box"><span class="label">Decision Date</span><span class="value">${decisionLine}</span></div>
+              <div class="box"><span class="label">Decision Reference</span><span class="value">${notesLine}</span></div>
+            </div>
+            <p class="footer">FlyOCI is an independent private service provider.</p>
+          </div>
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+      `;
+
+      const frameDocument = printFrame.contentDocument || printFrame.contentWindow?.document;
+      if (!frameDocument) {
+        document.body.removeChild(printFrame);
+        toast.error("Unable to prepare the printable summary.");
+        return;
+      }
+
+      frameDocument.open();
+      frameDocument.write(printHtml);
+      frameDocument.close();
+
+      const cleanup = () => {
+        if (printFrame.parentNode) {
+          printFrame.parentNode.removeChild(printFrame);
+        }
+        window.removeEventListener("afterprint", cleanup);
+      };
+
+      window.addEventListener("afterprint", cleanup);
+      setTimeout(cleanup, 5000);
+    };
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+      let y = 56;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.text("FlyOCI Case Summary", 48, y);
+      y += 26;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(93, 112, 137);
+      doc.text(`Generated on ${new Date().toLocaleString()}`, 48, y);
+      y += 26;
+
+      const rows: Array<[string, string]> = [
+        ["Reference", String(referenceLine)],
+        ["Service", String(serviceLine)],
+        ["Status", String(statusLine)],
+        ["Submission / Finalized Date", String(submissionLine)],
+        ["Decision Date", String(decisionLine)],
+        ["Decision Reference", String(notesLine)],
+      ];
+
+      doc.setTextColor(31, 53, 88);
+      doc.setFontSize(12);
+
+      rows.forEach(([label, value]) => {
+        if (y > 760) {
+          doc.addPage();
+          y = 56;
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.text(`${label}:`, 48, y);
+        doc.setFont("helvetica", "normal");
+        const wrapped = doc.splitTextToSize(value || "N/A", 380);
+        doc.text(wrapped, 220, y);
+        y += Math.max(22, wrapped.length * 14);
+      });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(107, 127, 153);
+      doc.text("FlyOCI is an independent private service provider.", 48, 800);
+
+      doc.save(`flyoci-case-summary-${safeReference}.pdf`);
+      toast.success("Case summary PDF is downloading.");
+    } catch {
+      toast.error("Direct PDF download failed. Opening print dialog instead.");
+      fallbackToPrintDialog();
+    }
+  };
+
+  const formatDocumentStatus = (status?: string) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (isCompletedDashboard && ["pending", "uploaded", "in_review", "not_verified"].includes(normalized)) {
+      return "Approved";
+    }
+    return formatBackendLabel(status || "pending");
+  };
+
   useEffect(() => {
     if (!detailsMode || !caseFromQuery || !authService.isLoggedIn()) {
       return;
@@ -805,7 +1062,8 @@ export default function RegistrationPage() {
     const docsJson = await docsRes.json().catch(() => ({}));
 
     if (detailRes.ok) {
-      setApplicationRecord(((detailJson as { data?: unknown }).data || null) as {
+      const appData = ((detailJson as { data?: any }).data || null);
+      setApplicationRecord(appData as {
         reference_number?: string;
         stage?: string;
         kanban_stage?: string | null;
@@ -840,6 +1098,11 @@ export default function RegistrationPage() {
           priority?: string;
         }>;
       });
+
+      if (appData?.nationality && !watch("nationality")) {
+        setValue("nationality", appData.nationality as RegistrationData["nationality"], { shouldDirty: true, shouldTouch: true });
+        updateData({ nationality: appData.nationality });
+      }
     }
 
     if (docsRes.ok) {
@@ -853,35 +1116,46 @@ export default function RegistrationPage() {
     }
 
     // ✅ Fill missing fields from profile (only on first load, not on interval refetches)
-    if (profileRes.ok) {
-      const profileJson = await profileRes.json().catch(() => ({}));
-      const coreUser = (profileJson as any)?.data?.core_user;
-      console.log("[FETCH EXTRAS] coreUser received:", coreUser);
-      
-      if (coreUser) {
-        if (!watch("phone") && coreUser.phone_number) {
-          const { countryCode, phone } = splitPhoneNumber(coreUser.phone_number);
-          console.log("[FETCH EXTRAS] about to setValue phone:", phone, "countryCode:", countryCode);
-          setValue("countryCode", countryCode);
-          setValue("phone", phone);
-          console.log("[FETCH EXTRAS] after setValue - watch phone:", watch("phone"), "watch countryCode:", watch("countryCode"));
-        }
+if (profileRes.ok) {
+  const profileJson = await profileRes.json().catch(() => ({}));
+  const coreUser = (profileJson as any)?.data?.core_user;
+  console.log("[FETCH EXTRAS] coreUser received:", coreUser);
 
-        const residenceMap: Record<string, string> = {
-          "Australia": "Australia",
-          "United Kingdom": "United Kingdom",
-          "United States": "United States",
-          "Canada": "Canada",
-          "UAE": "UAE",
-          "Singapore": "Singapore",
-        };
-        if (!watch("countryOfResidence") && coreUser.country) {
-          const mapped = residenceMap[coreUser.country] ?? "Other";
-          setValue("countryOfResidence", mapped as RegistrationData["countryOfResidence"]);
-        }
-      }
+ if (coreUser) {
+  if (coreUser.phone_number) {
+    setValue("phone", coreUser.phone_number, { shouldDirty: true, shouldValidate: true, shouldTouch: true });
+    updateData({ phone: coreUser.phone_number, countryCode: "+44" });
+  }
+
+    if (coreUser.nationality && !watch("nationality")) {
+      const nationalityMap: Record<string, string> = {
+        "British": "British",
+        "American": "American",
+        "Canadian": "Canadian",
+        "Indian": "Indian",
+        "Australian": "Other",
+      };
+      const mapped = nationalityMap[coreUser.nationality] ?? "Other";
+      setValue("nationality", mapped as RegistrationData["nationality"], { shouldDirty: true, shouldTouch: true });
+      updateData({ nationality: mapped });
     }
 
+    const residenceMap: Record<string, string> = {
+      "Australia": "Australia",
+      "United Kingdom": "United Kingdom",
+      "United States": "United States",
+      "Canada": "Canada",
+      "UAE": "UAE",
+      "Singapore": "Singapore",
+    };
+    if (coreUser.country) {
+      const mapped = residenceMap[coreUser.country] ?? "Other";
+      setValue("countryOfResidence", mapped as RegistrationData["countryOfResidence"], { shouldDirty: true });
+      updateData({ countryOfResidence: mapped });
+    }
+
+  }
+}
   } catch {
     // Keep showing available resume data if docs/details fetch fails.
   }
@@ -1200,6 +1474,131 @@ export default function RegistrationPage() {
             </div>
           </section>
 
+          {isCompletedDashboard ? (
+            <>
+              <div className="mt-1 grid gap-4 md:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-[#f8fbff] p-4">
+                  <p className="text-sm font-semibold text-[#1a56db]">Download case summary</p>
+                  <p className="mt-1 text-xs text-[#5e7599]">Open a compact summary and save it as a PDF.</p>
+                  <button
+                    type="button"
+                    onClick={openCaseSummaryPrint}
+                    className="mt-3 inline-flex items-center rounded-lg bg-[#1a56db] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#1648b8]"
+                  >
+                    View case summary
+                  </button>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-[#f8fbff] p-4">
+                  <p className="text-sm font-semibold text-[#1a56db]">Book your next service</p>
+                  <p className="mt-1 text-xs text-[#5e7599]">Start a new OCI, passport or visa application.</p>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/services")}
+                    className="mt-3 inline-flex items-center rounded-lg bg-[#173c78] px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+                  >
+                    Book next service
+                  </button>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-[#f8fbff] p-4">
+                  <p className="text-sm font-semibold text-[#1a56db]">Leave a review</p>
+                  <p className="mt-1 text-xs text-[#5e7599]">A short note and star rating help others decide faster.</p>
+                  {reviewSubmitted ? (
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                      Thanks for the review. It has been saved and approved for the homepage.
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setReviewModalOpen(true)}
+                      className="mt-3 inline-flex items-center rounded-lg bg-[#1a56db] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#1648b8]"
+                    >
+                      Leave a review
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => router.push("/services")}
+                  className="inline-flex items-center rounded-full border border-[#9fc0ef] bg-white px-5 py-2.5 text-base font-semibold text-[#2388ff] transition hover:bg-[#f1f7ff]"
+                >
+                  <ArrowRight className="mr-2 h-4 w-4" /> Start another application
+                </button>
+              </div>
+
+              {reviewModalOpen ? (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+                  onClick={() => setReviewModalOpen(false)}
+                  role="presentation"
+                >
+                  <div
+                    className="w-full max-w-lg rounded-2xl border border-[#d4e3ff] bg-white p-5 shadow-[0_22px_48px_rgba(16,44,92,0.28)]"
+                    onClick={(event) => event.stopPropagation()}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Leave a review"
+                  >
+                    <h4 className="text-lg font-semibold text-[#173c78]">Leave a review</h4>
+                    <p className="mt-1 text-sm text-[#5e7599]">Share your e-Visa experience. We publish approved reviews on the homepage.</p>
+
+                    <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5f7ca8]">Your name (optional)</label>
+                    <input
+                      value={reviewAuthorName}
+                      onChange={(event) => setReviewAuthorName(event.target.value)}
+                      className="mt-1 w-full rounded-xl border border-[#d4e3ff] bg-[#f9fbff] px-3 py-2 text-sm text-[#1d2f4f] outline-none focus:border-[#7aa8e8] focus:ring-2 focus:ring-[#bfd7ff]"
+                      placeholder="Jane Smith"
+                    />
+
+                    <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5f7ca8]">Rating</label>
+                    <div className="mt-2 flex items-center gap-1.5">
+                      {[1, 2, 3, 4, 5].map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setReviewRating(value)}
+                          className="rounded-md p-1 text-amber-500 transition hover:scale-105"
+                          aria-label={`Set rating ${value}`}
+                        >
+                          <Star className={`h-5 w-5 ${reviewRating >= value ? "fill-current" : ""}`} />
+                        </button>
+                      ))}
+                    </div>
+
+                    <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5f7ca8]">Review</label>
+                    <textarea
+                      value={reviewText}
+                      onChange={(event) => setReviewText(event.target.value)}
+                      rows={4}
+                      className="mt-1 w-full rounded-xl border border-[#d4e3ff] bg-[#f9fbff] px-3 py-2 text-sm text-[#1d2f4f] outline-none focus:border-[#7aa8e8] focus:ring-2 focus:ring-[#bfd7ff]"
+                      placeholder="Great support and clear updates throughout the process."
+                    />
+
+                    <div className="mt-5 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setReviewModalOpen(false)}
+                        className="rounded-lg border border-[#c8d9f7] px-3 py-2 text-sm font-semibold text-[#355f9b] hover:bg-[#f2f7ff]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={submitCompletionReview}
+                        disabled={reviewSubmitting}
+                        className="rounded-lg bg-[#173c78] px-3 py-2 text-sm font-semibold text-white hover:bg-[#0f2f66] disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {reviewSubmitting ? "Submitting..." : "Submit review"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
           <section className="rounded-2xl border border-[#d4e3ff] bg-white overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 bg-[#edf3ff] border-b border-[#d9e6ff] px-4 py-3">
               <h3 className="text-[16px] font-semibold text-[#173c78]">Admin Messages</h3>
@@ -1376,26 +1775,26 @@ export default function RegistrationPage() {
                   </div>
                 )}
                 
-                {(detailsMode ||shouldShowField(detailsSnapshot.phone || data.phone) || shouldShowField(detailsSnapshot.countryCode || data.countryCode)) && (() => {
-                  console.log("[DETAILS GRID RENDER] phone:", detailsSnapshot.phone, "countryCode:", detailsSnapshot.countryCode, "isFormLocked:", isFormLocked);
-                  return (
-                  <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
-                    <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Mobile number</label>
-                    <div className="mt-2 flex gap-2">
-                      <select {...register("countryCode")} disabled={false} style={isFormLocked ? {pointerEvents: "none", opacity: 0.7} : {}} className={`${inputClasses()} w-[96px]`}>
-                        <option value="+44">+44</option>
-                        <option value="+1">+1</option>
-                        <option value="+91">+91</option>
-                        <option value="+971">+971</option>
-                        <option value="+65">+65</option>
-                        <option value="+61">+61</option>
-                      </select>
-                      <input {...register("phone")} disabled={false} style={isFormLocked ? {pointerEvents: "none", opacity: 0.7} : {}} className={`${inputClasses()} flex-1`} placeholder="Enter mobile number" />
-                    </div>
-                  </div>
-                  );
-                })()}
-
+               {(detailsMode || shouldShowField(detailsSnapshot.phone || data.phone) || shouldShowField(detailsSnapshot.countryCode || data.countryCode)) && (() => {
+  return (
+    <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
+      <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Mobile number</label>
+      <div className="mt-2 flex gap-2">
+        {isFormLocked ? (
+          <div className={`${inputClasses()} flex-1 flex items-center`}>
+            {watch("phone") || data.phone || "Not provided"}
+          </div>
+        ) : (
+          <input
+            {...register("phone")}
+            className={`${inputClasses()} flex-1`}
+            placeholder="Enter mobile number"
+          />
+        )}
+      </div>
+    </div>
+  );
+})()}
 
                 {shouldShowField(detailsSnapshot.email || data.email) && (
                   <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
@@ -1471,7 +1870,7 @@ export default function RegistrationPage() {
                   {documents.map((doc) => (
                     <div key={doc.id} className="rounded-xl border border-[#d9e4f7] bg-white px-4 py-3 flex flex-wrap items-center justify-between gap-2">
                       <p className="text-[13px] font-semibold text-[#1d2f4f]">{formatBackendLabel(doc.document_type)}</p>
-                      <p className="text-[12px] text-[#6c84ab]">Status: <span className="font-semibold">{formatBackendLabel(doc.verification_status)}</span></p>
+                      <p className="text-[12px] text-[#6c84ab]">Status: <span className="font-semibold">{formatDocumentStatus(doc.verification_status)}</span></p>
                       <p className="text-[12px] text-[#6c84ab]">Uploaded: <span className="font-semibold">{formatDate(doc.upload_date || doc.updated_at)}</span></p>
                     </div>
                   ))}

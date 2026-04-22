@@ -12,6 +12,7 @@ import {
   deactivateStaffUser,
   listStaffUsers,
   resetStaffUserPassword,
+  unlockStaffUser,
   updateStaffUser,
 } from "@/lib/admin-auth";
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -210,6 +211,21 @@ export default function StaffPage() {
     }
   };
 
+  const handleUnlock = async (staffId: number) => {
+    setSaving(true);
+    try {
+      await unlockStaffUser(staffId);
+      toast.success("Staff account unlocked.");
+      await loadStaffUsers();
+    } catch (error) {
+      if (!handleAuthFailure(error)) {
+        toast.error(error instanceof Error ? error.message : "Failed to unlock account.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -379,6 +395,15 @@ export default function StaffPage() {
                         >
                           {resettingStaffId === row.id ? "Resetting..." : "Reset Password"}
                         </button>
+                        {row.is_locked === true && (
+                          <button
+                            className="rounded-[8px] bg-[#027A48]/10 px-2 py-1 text-xs text-[#027A48] disabled:opacity-50"
+                            onClick={() => handleUnlock(row.id)}
+                            disabled={saving}
+                          >
+                            Unlock
+                          </button>
+                        )}
                         <button
                           className="rounded-[8px] bg-[#7A1E12]/10 px-2 py-1 text-xs text-[#7A1E12]"
                           onClick={() => handleDelete(row.id)}

@@ -10,6 +10,8 @@ export interface AdminStaffUser {
   phone?: string;
   role: StaffRole;
   is_active?: boolean;
+  is_locked?: boolean;
+  failed_login_attempts?: number;
   created_at?: string;
   last_login?: string | null;
 }
@@ -264,6 +266,26 @@ export interface AdminPassportSetQuotePayload {
   valid_days?: number;
 }
 
+export interface AdminTaskItem {
+  id: number;
+  application: number;
+  application_reference: string;
+  assigned_staff: number | null;
+  assigned_staff_name?: string | null;
+  assigned_staff_role?: StaffRole | string | null;
+  customer_name?: string;
+  task_type: string;
+  status: string;
+  priority: string;
+  deadline?: string | null;
+  created_at?: string;
+}
+
+export interface TaskAutoAssignResult {
+  assigned_count: number;
+  staff_assignments: Record<string, number>;
+}
+
 interface ApiEnvelope<T> {
   status: "success" | "error";
   message?: string;
@@ -313,6 +335,24 @@ export const clearAdminSession = () => {
   localStorage.removeItem(ADMIN_REFRESH_KEY);
   localStorage.removeItem(ADMIN_USER_KEY);
 };
+
+
+export interface AdminSearchResult {
+  cases: Array<{ id: number; reference_number: string; customer_name?: string; application_status?: string; service_name?: string; created_at: string }>;
+  customers: Array<{ id: number; full_name: string; email?: string; phone?: string }>;
+  leads: Array<{ id: number; reference_number: string; customer_name?: string; stage?: string; created_at: string }>;
+}
+
+export const adminSearch = async (query: string): Promise<AdminSearchResult> => {
+  const { access } = getAdminTokens();
+  console.log("Token being sent:", access); // ← add this
+  const q = encodeURIComponent(query.trim());
+  const response = await adminAuthenticatedFetch(`/admin/search/?q=${q}`, { method: "GET" });
+  const payload = await parseApiResponse<AdminSearchResult>(response);
+  if (!payload.data) throw new Error("Missing search results.");
+  return payload.data;
+};
+
 
 const refreshAdminAccessToken = async (): Promise<string | null> => {
   if (typeof window === "undefined") {
@@ -490,6 +530,13 @@ export const resetStaffUserPassword = async (staffId: number, newPassword: strin
   await parseApiResponse(response);
 };
 
+export const unlockStaffUser = async (staffId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/staff/${staffId}/unlock/`, {
+    method: "POST",
+  });
+  await parseApiResponse(response);
+};
+
 export const requestStaffForgotPassword = async (email: string) => {
   const response = await fetch(`${API_BASE_URL}/admin/forgot-password/request/`, {
     method: "POST",
@@ -545,6 +592,57 @@ export const listAdminApplications = async () => {
   const response = await adminAuthenticatedFetch("/applications/", { method: "GET" });
   const payload = await parseApiResponse<AdminApplication[]>(response);
   return payload.data || [];
+};
+
+export const listAdminTasks = async (params?: { limit?: number; status?: string; assignedStaffId?: number | null }) => {
+  const query = new URLSearchParams();
+  if (typeof params?.limit === "number") {
+    query.set("limit", String(params.limit));
+  }
+  if (params?.status) {
+    query.set("status", params.status);
+  }
+  if (typeof params?.assignedStaffId === "number") {
+    query.set("assigned_staff_id", String(params.assignedStaffId));
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await adminAuthenticatedFetch(`/tasks/${suffix}`, { method: "GET" });
+  const payload = await parseApiResponse<AdminTaskItem[]>(response);
+  return payload.data || [];
+};
+
+export const assignAdminTask = async (taskId: number, staffId: number) => {
+  const response = await adminAuthenticatedFetch("/tasks/assign/", {
+    method: "POST",
+    body: JSON.stringify({ task_id: taskId, staff_id: staffId }),
+  });
+  const payload = await parseApiResponse<AdminTaskItem>(response);
+  if (!payload.data) {
+    throw new Error("Task assignment response missing.");
+  }
+  return payload.data;
+};
+
+export const adminDirectAssignTask = async (taskId: number, staffId: number) => {
+  const response = await adminAuthenticatedFetch("/admin/tasks/assign-direct/", {
+    method: "POST",
+    body: JSON.stringify({ task_id: taskId, staff_id: staffId }),
+  });
+  const payload = await parseApiResponse<AdminTaskItem>(response);
+  if (!payload.data) {
+    throw new Error("Task assignment response missing.");
+  }
+  return payload.data;
+};
+
+export const autoAssignAdminTasks = async () => {
+  const response = await adminAuthenticatedFetch("/tasks/auto-assign/", { method: "POST" });
+  const payload = await parseApiResponse<TaskAutoAssignResult>(response);
+  if (!payload.data) {
+    throw new Error("Auto-assign response missing.");
+  }
+  return payload.data;
 };
 
 export const getAdminApplicationDetails = async (applicationId: number) => {

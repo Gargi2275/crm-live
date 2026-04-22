@@ -860,6 +860,14 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       return "audit-result";
     }
 
+    const hasTerminalDate = Boolean(String(record.approval_date || "").trim() || String(record.completion_date || "").trim());
+    const isTerminalStage = ["decision_received", "closed", "delivered", "dispatched", "collected"].includes(currentStage);
+    const isTerminalStatus = ["approved", "completed", "closed", "delivered", "dispatched", "collected", "decision_received"].includes(applicationStatus);
+
+    if (isTerminalStage || isTerminalStatus || hasTerminalDate) {
+      return "completed";
+    }
+
     if (
       isPassportService &&
       (
@@ -881,10 +889,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
     if (["registered", "draft"].includes(currentStage) || ["draft", "registered"].includes(applicationStatus)) {
       return isResumingExistingCase ? null : "service";
-    }
-
-    if (["decision_received", "closed"].includes(currentStage) || ["approved", "completed", "closed"].includes(applicationStatus)) {
-      return "completed";
     }
 
     if (currentStage === "submitted") {

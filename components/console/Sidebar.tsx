@@ -63,7 +63,7 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
     >
       {/* Logo Header */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-[0.5px] border-[#D9E1EA]">
-        <Link href="/admin" className={cn("flex items-center gap-2", collapsed && "justify-center w-full")}>
+        <Link href="/" className={cn("flex items-center gap-2", collapsed && "justify-center w-full")}>
           <Image
             src="/logo.png"
             alt="FlyOCI Logo"

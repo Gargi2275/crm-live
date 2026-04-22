@@ -14,6 +14,10 @@ import {
   Workflow,
   TrendingUp,
   Target,
+  RefreshCw,
+  Shuffle,
+  UserCog,
+  UserRoundCog,
 } from "lucide-react";
 import {
   XAxis,
@@ -31,12 +35,17 @@ import {
 } from "recharts";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
+  adminDirectAssignTask,
+  assignAdminTask,
+  autoAssignAdminTasks,
   getAdminDashboardOverview,
   getStaffPerformanceBadge,
   listAdminApplications,
+  listAdminTasks,
   patchAdminApplication,
   type AdminApplication,
   type AdminDashboardOverview,
+  type AdminTaskItem,
 } from "@/lib/admin-auth";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
@@ -47,6 +56,9 @@ export default function ConsoleDashboard() {
   const [period, setPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [applications, setApplications] = useState<AdminApplication[]>([]);
+  const [taskItems, setTaskItems] = useState<AdminTaskItem[]>([]);
+  const [taskSelections, setTaskSelections] = useState<Record<number, number | "">>({});
+  const [taskActionLoading, setTaskActionLoading] = useState<number | "auto" | null>(null);
   const [staffBadge, setStaffBadge] = useState<string | null>(null);
   const userRole = adminUser?.role;
   const roleLabelMap: Record<string, string> = {
@@ -64,12 +76,26 @@ export default function ConsoleDashboard() {
 
   const loadDashboard = async () => {
     try {
-      const [payload, appPayload] = await Promise.all([
+      const shouldLoadTasks = isFounderView || isOpsView;
+      const [payload, appPayload, taskPayload] = await Promise.all([
         getAdminDashboardOverview(),
         listAdminApplications(),
+        // shouldLoadTasks ? listAdminTasks({ limit: 500 }) : Promise.resolve([] as AdminTaskItem[]),
+        shouldLoadTasks
+  ? listAdminTasks({ limit: 500 })
+  : isStaffView && adminUser?.id
+    ? listAdminTasks({ limit: 100, assignedStaffId: adminUser.id })
+    : Promise.resolve([] as AdminTaskItem[]),
       ]);
       setDashboardData(payload);
       setApplications(appPayload);
+     if (shouldLoadTasks || isStaffView) {
+  setTaskItems(taskPayload);
+  
+  setTaskSelections(
+    Object.fromEntries(taskPayload.map((task) => [task.id, task.assigned_staff ?? ""])),
+  );
+}
 
       if (isStaffView) {
         try {
@@ -84,9 +110,9 @@ export default function ConsoleDashboard() {
     }
   };
 
-  useEffect(() => {
-    void loadDashboard();
-  }, []);
+ useEffect(() => {
+  if (adminUser) void loadDashboard();
+}, [adminUser]); // re-runs when auth resolves
 
   const kpiSnapshot = dashboardData?.kpi_snapshot ?? {
     total_leads: 0,
@@ -100,13 +126,113 @@ export default function ConsoleDashboard() {
     pending_payments: 0,
     avg_ticket_size: 0,
   };
+  const staffMembers = dashboardData?.staff_members ?? [];
   const dailyRevenue = dashboardData?.daily_revenue ?? [];
   const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
   const serviceRevenueBreakdown = dashboardData?.service_revenue_breakdown ?? [];
-  const staffMembers = dashboardData?.staff_members ?? [];
   const accessLogs = dashboardData?.access_logs ?? [];
   const pipelineOverview = dashboardData?.pipeline_overview ?? [];
   const failedLogins = dashboardData?.failed_logins ?? 0;
+
+  const canManageTasks = isFounderView || isOpsView;
+  const assignableStaff = useMemo(
+    () => staffMembers.filter((staff) => (isFounderView ? true : staff.role !== "admin")),
+    [isFounderView, staffMembers],
+  );
+
+  const pendingTaskStatuses = useMemo(() => new Set(["new", "in_progress", "blocked"]), []);
+
+  const workloadByStaff = useMemo(() => {
+    const counts: Record<number, { assigned: number; pending: number; completed: number; loadStatus: string }> = {};
+
+    for (const task of taskItems) {
+      if (!task.assigned_staff) continue;
+      const staffId = task.assigned_staff;
+      if (!counts[staffId]) {
+        counts[staffId] = { assigned: 0, pending: 0, completed: 0, loadStatus: "Active" };
+      }
+      counts[staffId].assigned += 1;
+      if (pendingTaskStatuses.has(String(task.status || "").toLowerCase())) {
+        counts[staffId].pending += 1;
+      }
+      if (String(task.status || "").toLowerCase() === "completed") {
+        counts[staffId].completed += 1;
+      }
+    }
+
+    for (const [staffId, summary] of Object.entries(counts)) {
+      if (summary.pending >= 8) {
+        summary.loadStatus = "Overloaded";
+      } else if (summary.pending >= 3) {
+        summary.loadStatus = "Busy";
+      } else {
+        summary.loadStatus = "Active";
+      }
+      counts[Number(staffId)] = summary;
+    }
+
+    return counts;
+  }, [pendingTaskStatuses, taskItems]);
+
+  const unassignedTaskCount = useMemo(
+    () => taskItems.filter((task) => !task.assigned_staff).length,
+    [taskItems],
+  );
+
+  const formatTaskDeadline = (deadline?: string | null) => {
+    if (!deadline) {
+      return "No deadline";
+    }
+
+    const parsed = new Date(deadline);
+    if (Number.isNaN(parsed.getTime())) {
+      return "No deadline";
+    }
+
+    return parsed.toLocaleString();
+  };
+
+  const handleTaskSelectionChange = (taskId: number, value: string) => {
+    setTaskSelections((prev) => ({
+      ...prev,
+      [taskId]: value ? Number(value) : "",
+    }));
+  };
+
+  const handleAssignTask = async (task: AdminTaskItem) => {
+    const selectedStaffId = taskSelections[task.id];
+    if (!selectedStaffId) {
+      toast.error("Select a staff member first.");
+      return;
+    }
+
+    setTaskActionLoading(task.id);
+    try {
+      const updatedTask = isFounderView
+        ? await adminDirectAssignTask(task.id, Number(selectedStaffId))
+        : await assignAdminTask(task.id, Number(selectedStaffId));
+      setTaskItems((prev) => prev.map((item) => (item.id === updatedTask.id ? updatedTask : item)));
+      setTaskSelections((prev) => ({ ...prev, [task.id]: updatedTask.assigned_staff ?? Number(selectedStaffId) }));
+      toast.success(`Task ${updatedTask.id} assigned successfully.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to assign task.");
+    } finally {
+      setTaskActionLoading(null);
+    }
+  };
+
+  const handleAutoAssignTasks = async () => {
+    setTaskActionLoading("auto");
+    try {
+      const result = await autoAssignAdminTasks();
+      await loadDashboard();
+      toast.success(`Auto-assigned ${result.assigned_count} tasks.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to auto-assign tasks.");
+    } finally {
+      setTaskActionLoading(null);
+    }
+  };
 
   const healthMetrics = useMemo(
     () => [
@@ -136,34 +262,28 @@ export default function ConsoleDashboard() {
   );
 
   const staffWorklist = useMemo(() => {
-    const openApplications = applications.filter((app) => {
-      const stage = String(app.current_stage || "").toLowerCase();
-      return stage !== "closed";
-    });
-
-    return openApplications.slice(0, 3).map((app) => {
-      const stage = String(app.current_stage || "").replace(/_/g, " ").toLowerCase();
-      const serviceLabel = app.service_name || app.service_type || "Application";
-      const customer = app.customer_name || "Customer";
-      return {
-        id: app.id,
-        reference: app.reference_number,
-        notes: app.notes || "",
-        title: `${serviceLabel} - ${customer}`,
-        subtitle: `Stage: ${stage.charAt(0).toUpperCase()}${stage.slice(1)} • ${app.reference_number}`,
-      };
-    });
-  }, [applications]);
-
+  return taskItems.slice(0, 10).map((task) => {
+    const app = applications.find((a) => a.reference_number === task.application_reference);
+    return {
+      id: task.id,
+      reference: task.application_reference,
+      notes: app?.notes || "",
+      title: `${task.task_type.replace(/_/g, " ")} - ${task.customer_name || "Customer"}`,
+      subtitle: `Status: ${task.status} • Priority: ${task.priority} • ${task.application_reference}`,
+    };
+  });
+}, [taskItems, applications]);
   const appendTimestampedNote = (base: string, note: string) => {
     const now = new Date().toLocaleString();
     const current = (base || "").trim();
     return current ? `${current}\n[${now}] ${note}` : `[${now}] ${note}`;
   };
 
-  const handleOpenCase = (taskId: number) => {
-    router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(taskId))}`);
-  };
+const handleOpenCase = (taskId: number) => {
+  const task = taskItems.find((t) => t.id === taskId);
+  const appId = task?.application ?? taskId;
+  router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(appId))}`);
+};
 
   const handleMarkProgress = async (task: { id: number; reference: string; notes: string }) => {
     try {
@@ -284,33 +404,164 @@ export default function ConsoleDashboard() {
         />
       </div>
 
-      {isOpsView && (
-        <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-          <div className="flex justify-between items-center mb-3">
-            <h2 className="text-lg font-heading font-semibold text-[#102A43]">Workload Distribution</h2>
-            <button
-              onClick={() => void loadDashboard()}
-              className="bg-[#009877] text-white px-4 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#007B61]"
-            >
-              REFRESH
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            {staffMembers.map((item) => (
-              <div key={item.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
-                <p className="text-[#102A43] font-heading font-semibold">{item.name} ({item.initials})</p>
-                <p className="text-xs text-[#627D98]">{item.role}</p>
-                <div className="mt-2 flex gap-2 text-xs">
-                  <span className="bg-[#33A1FD]/12 text-[#0B69B7] px-2 py-1 rounded-full">Assigned {item.assigned}</span>
-                  <span className="bg-[#B87333]/12 text-[#9C4F17] px-2 py-1 rounded-full">Pending {item.pending}</span>
+      {canManageTasks && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-lg font-heading font-semibold text-[#102A43]">Workload Distribution</h2>
+              <button
+                onClick={() => void loadDashboard()}
+                className="inline-flex items-center gap-2 bg-[#009877] text-white px-4 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#007B61] disabled:opacity-60"
+                disabled={taskActionLoading === "auto"}
+              >
+                <RefreshCw className="w-4 h-4" />
+                REFRESH
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {staffMembers.map((item) => (
+                (() => {
+                  const summary = workloadByStaff[item.id] || {
+                    assigned: 0,
+                    pending: 0,
+                    completed: 0,
+                    loadStatus: item.loadStatus,
+                  };
+                  return (
+                <div key={item.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+                  <p className="text-[#102A43] font-heading font-semibold">{item.name} ({item.initials})</p>
+                  <p className="text-xs text-[#627D98]">{item.role}</p>
+                  <div className="mt-2 flex gap-2 text-xs flex-wrap">
+                    <span className="bg-[#33A1FD]/12 text-[#0B69B7] px-2 py-1 rounded-full">Assigned {summary.assigned}</span>
+                    <span className="bg-[#B87333]/12 text-[#9C4F17] px-2 py-1 rounded-full">Pending {summary.pending}</span>
+                  </div>
+                  <p className="text-xs mt-2 text-[#627D98]">Status: {summary.loadStatus}</p>
                 </div>
-                <p className="text-xs mt-2 text-[#627D98]">Status: {item.loadStatus}</p>
+                  );
+                })()
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div>
+                <h2 className="text-lg font-heading font-semibold text-[#102A43]">Task Assignment</h2>
+                <p className="text-xs text-[#627D98] mt-1">{unassignedTaskCount} unassigned tasks in the current queue</p>
               </div>
-            ))}
+              <button
+                onClick={() => void handleAutoAssignTasks()}
+                disabled={taskActionLoading === "auto" || assignableStaff.length === 0}
+                className="inline-flex items-center gap-2 bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-3 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#33A1FD]/18 disabled:opacity-60"
+              >
+                <Shuffle className="w-4 h-4" />
+                {taskActionLoading === "auto" ? "Auto-assigning..." : "Auto-Assign"}
+              </button>
+            </div>
+
+
+
+            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+              {taskItems.length === 0 && (
+                <p className="text-sm text-[#627D98]">No queued tasks are available right now.</p>
+              )}
+              {taskItems.map((task) => {
+                const isBusy = taskActionLoading === task.id;
+                const selectedStaffId = taskSelections[task.id] ?? task.assigned_staff ?? "";
+                return (
+                  <div key={task.id} className="rounded-[12px] border border-[#D9E1EA] bg-[#F8FAFC] p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-heading font-semibold text-[#102A43]">{task.application_reference}</p>
+                        <p className="text-xs text-[#627D98] capitalize">{task.task_type.replace(/_/g, " ")} • {task.customer_name || "Customer"}</p>
+                        <p className="text-xs text-[#627D98] mt-1">Due: {formatTaskDeadline(task.deadline)}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        <span className="rounded-full bg-[#009877]/12 px-2.5 py-1 text-[#006F57]">{task.status}</span>
+                        <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[#9C4F17]">{task.priority}</span>
+                        <span className="rounded-full bg-[#33A1FD]/12 px-2.5 py-1 text-[#0B69B7]">{task.assigned_staff_name || "Unassigned"}</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <select
+                        value={selectedStaffId}
+                        onChange={(event) => handleTaskSelectionChange(task.id, event.target.value)}
+                        className="w-full sm:flex-1 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]"
+                      >
+                        <option value="">Select staff member</option>
+                        {assignableStaff.map((staff) => (
+                          <option key={staff.id} value={staff.id}>
+                            {staff.name} - {staff.role}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => void handleAssignTask(task)}
+                        disabled={isBusy || assignableStaff.length === 0}
+                        className="inline-flex items-center justify-center gap-2 rounded-[10px] bg-[#009877] px-4 py-2 text-sm font-heading font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
+                      >
+                        {isBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UserCog className="w-4 h-4" />}
+                        {isBusy ? "Saving..." : "Assign"}
+                      </button>
+                    </div>
+
+                    <p className="mt-2 text-[11px] text-[#627D98]">
+                      Current assignee: <span className="text-[#102A43] font-medium">{task.assigned_staff_name || "None"}</span>
+                      {isFounderView && task.assigned_staff_role ? (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-[#EAF5FF] px-2 py-0.5 text-[#2B5E93]">
+                          <UserRoundCog className="w-3 h-3" />
+                          {task.assigned_staff_role}
+                        </span>
+                      ) : null}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
-
+{isOpsView && taskItems.filter(t => t.assigned_staff === adminUser?.id).length > 0 && (
+  <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
+    <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">
+      My Assigned Tasks
+    </h2>
+    <div className="space-y-3">
+      {taskItems
+        .filter(t => t.assigned_staff === adminUser?.id)
+        .map((task) => (
+          <div key={task.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[#102A43] text-sm font-medium">
+                {task.application_reference}
+              </p>
+              <p className="text-xs text-[#627D98] capitalize">
+                {task.task_type.replace(/_/g, " ")} • {task.customer_name}
+              </p>
+              <p className="text-xs text-[#627D98]">
+                Due: {formatTaskDeadline(task.deadline)}
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap justify-end">
+              <span className="rounded-full bg-[#009877]/12 px-2.5 py-1 text-[11px] text-[#006F57]">
+                {task.status}
+              </span>
+              <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[11px] text-[#9C4F17]">
+                {task.priority}
+              </span>
+              <button
+                className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full"
+                onClick={() => handleOpenCase(task.id)}
+              >
+                Open Case
+              </button>
+            </div>
+          </div>
+        ))}
+    </div>
+  </div>
+)}
       {!isFounderView && !isOpsView && !isStaffView && (
         <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
           <p className="text-sm text-[#486581]">
@@ -478,7 +729,7 @@ export default function ConsoleDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E5EAF0]">
-                  {staffMembers.map((staff) => (
+                  {staffMembers.filter((staff) => String(staff.role || "").toLowerCase() !== "admin").map((staff) => (
                     <tr key={staff.id} className="hover:bg-[#F8FAFC] transition-colors">
                       <td className="px-5 py-3 text-[#102A43] font-medium">{staff.name}</td>
                       <td className="px-5 py-3 text-center text-[#0B69B7]">{staff.assigned}</td>

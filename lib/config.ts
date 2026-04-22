@@ -3,8 +3,8 @@
  * Centralized configuration for API endpoints and environment variables
  */
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-// export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+// export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 
 export const API_ENDPOINTS = {
@@ -30,6 +30,7 @@ export const API_ENDPOINTS = {
     STAFF_UPDATE: '/admin/staff/:staff_id/update/',
     STAFF_DEACTIVATE: '/admin/staff/:staff_id/deactivate/',
     UNLOCK_STAFF: '/admin/staff/:staff_id/unlock/',
+    CUSTOMER_DETAIL: '/admin/customers/:id/',
   },
   // Services
   SERVICES: {

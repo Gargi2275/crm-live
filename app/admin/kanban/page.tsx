@@ -25,6 +25,12 @@ const getAgeDays = (createdAt?: string) => {
 
 const isClosedStage = (stage: KanbanStage) => stage === "SUBMITTED" || stage === "DELIVERED";
 
+const simplifyNote = (value?: string) => {
+  const clean = String(value || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length > 140 ? `${clean.slice(0, 140)}...` : clean;
+};
+
 export default function OperationsKanbanPage() {
   const [applications, setApplications] = useState<AdminApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -263,9 +269,13 @@ export default function OperationsKanbanPage() {
           <div className="rounded-[12px] border border-[#D9E1EA] p-3 space-y-2 bg-[#F8FAFC]">
             {liveStats.liveNotes.length > 0 ? (
               liveStats.liveNotes.map((application) => (
-                <p key={application.id} className="text-sm text-[#102A43]">
-                  <span className="font-semibold">{application.reference_number}</span> {application.notes}
-                </p>
+                <div key={application.id} className="rounded-lg border border-[#D9E1EA] bg-white px-3 py-2">
+                  <p className="text-xs font-semibold text-[#102A43]">{application.reference_number}</p>
+                  <p className="mt-1 text-sm text-[#334E68]">{simplifyNote(application.notes)}</p>
+                  <p className="mt-1 text-[11px] text-[#627D98]">
+                    {application.updated_at ? new Date(application.updated_at).toLocaleString() : new Date(application.created_at).toLocaleString()}
+                  </p>
+                </div>
               ))
             ) : (
               <p className="text-sm text-[#627D98]">No live case notes are available yet.</p>

@@ -1,11 +1,21 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertCircle, CheckCircle2, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FileDropZone } from "@/components/FileDropZone";
+import { submitApostillePreCheck } from "@/lib/api";
+
+function toApiSlug(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\/\s*/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+}
 
 const progressSteps = ["Pre-Check Form", "Review", "Approval", "Payment", "Processing"];
 
@@ -41,9 +51,10 @@ const validFileTypes = new Set(["application/pdf", "image/jpeg", "image/jpg", "i
 export default function ApostillePreCheckPage() {
   const router = useRouter();
   const [form, setForm] = useState<FormState>(defaultState);
-  const [mainDocument, setMainDocument] = useState<File | null>(null);
-  const [additionalDocument, setAdditionalDocument] = useState<File | null>(null);
+  const [requiredDocuments, setRequiredDocuments] = useState<(File | null)[]>([null]);
+  const [extraDocuments, setExtraDocuments] = useState<(File | null)[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   const reassurance = useMemo(
     () => [
@@ -55,8 +66,23 @@ export default function ApostillePreCheckPage() {
     [],
   );
 
-  const validateFile = (file: File | null) => {
-    if (!file) return "Please upload your main document to continue";
+  const selectedDocCount = useMemo(() => {
+    const raw = String(form.numberOfDocuments || "").trim();
+    if (raw === "4+") return 4;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  }, [form.numberOfDocuments]);
+
+  useEffect(() => {
+    setRequiredDocuments((prev) => {
+      if (prev.length === selectedDocCount) return prev;
+      if (prev.length > selectedDocCount) return prev.slice(0, selectedDocCount);
+      return [...prev, ...Array.from({ length: selectedDocCount - prev.length }, () => null)];
+    });
+  }, [selectedDocCount]);
+
+  const validateFile = (file: File | null, required = true) => {
+    if (!file) return required ? "Please upload the required document(s) to continue" : "";
     if (!validFileTypes.has(file.type)) {
       return "Unsupported file format. Please upload PDF, JPG, or PNG";
     }
@@ -74,8 +100,18 @@ export default function ApostillePreCheckPage() {
     }
     if (!form.phone.trim()) nextErrors.phone = "This field is required";
 
-    const fileError = validateFile(mainDocument);
-    if (fileError) nextErrors.mainDocument = fileError;
+    const requiredDocErrors = requiredDocuments
+      .map((file, index) => ({ index, error: validateFile(file, true) }))
+      .filter((entry) => Boolean(entry.error));
+    if (requiredDocErrors.length > 0) {
+      nextErrors.requiredDocuments = requiredDocErrors[0].error;
+    }
+    extraDocuments.forEach((file, index) => {
+      const extraFileError = validateFile(file, false);
+      if (extraFileError) {
+        nextErrors[`extraDocument_${index}`] = extraFileError;
+      }
+    });
 
     if (!form.declaration) {
       nextErrors.declaration = "Please confirm the declaration before submitting";
@@ -85,12 +121,54 @@ export default function ApostillePreCheckPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next._submit;
+      return next;
+    });
     if (!validate()) return;
 
-    const fileNumber = `FLY-APO-${Math.floor(1000 + Math.random() * 9000)}`;
-    router.push(`/apostille-pre-check/submitted?file=${encodeURIComponent(fileNumber)}`);
+    const extraLines = [
+      `Notarised: ${form.notarised}`,
+      `Number of documents: ${form.numberOfDocuments}`,
+      ...requiredDocuments
+        .filter((file): file is File => Boolean(file))
+        .map((file, index) => `Required document ${index + 1} (filename): ${file.name}`),
+      ...extraDocuments
+        .filter((file): file is File => Boolean(file))
+        .map((file, index) => `Extra document ${index + 1} (filename): ${file.name}`),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const notesPayload = [form.notes.trim(), extraLines].filter(Boolean).join("\n\n") || "";
+
+    try {
+      setSubmitting(true);
+      const fd = new FormData();
+      fd.append("full_name", form.fullName.trim());
+      fd.append("email", form.email.trim());
+      fd.append("phone", form.phone.trim());
+      fd.append("country_of_issue", form.country);
+      fd.append("document_type", toApiSlug(form.documentType));
+      fd.append("purpose", toApiSlug(form.purpose));
+      fd.append("is_notarised", toApiSlug(form.notarised));
+      fd.append("number_of_documents", form.numberOfDocuments);
+      fd.append("additional_notes", notesPayload);
+      requiredDocuments.filter((f): f is File => Boolean(f)).forEach((file) => fd.append("main_documents", file, file.name));
+      extraDocuments.filter((f): f is File => Boolean(f)).forEach((file) => fd.append("additional_documents", file, file.name));
+      const response = await submitApostillePreCheck(fd);
+      const fileNum = response.file_number || response.reference_number;
+      router.push(`/apostille-pre-check/submitted?file=${encodeURIComponent(fileNum)}`);
+    } catch (err) {
+      setErrors((prev) => ({
+        ...prev,
+        _submit: err instanceof Error ? err.message : "Submission failed. Please try again.",
+      }));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -171,22 +249,58 @@ export default function ApostillePreCheckPage() {
             <div>
               <h2 className="text-xl font-heading font-bold text-primary">Upload Documents</h2>
               <div className="mt-4 space-y-4">
-                <FileDropZone
-                  label="Upload Main Document"
-                  accept={fileAccept}
-                  maxSizeMsg="Accepted formats: PDF, JPG, PNG"
-                  onUpload={setMainDocument}
-                  file={mainDocument}
-                  error={errors.mainDocument}
-                />
+                {requiredDocuments.map((file, index) => (
+                  <FileDropZone
+                    key={`required-${index}`}
+                    label={`Required Document ${index + 1}`}
+                    accept={fileAccept}
+                    maxSizeMsg="Accepted formats: PDF, JPG, PNG"
+                    onUpload={(nextFile) =>
+                      setRequiredDocuments((prev) => prev.map((item, itemIndex) => (itemIndex === index ? nextFile : item)))
+                    }
+                    file={file}
+                    error={index === 0 ? errors.requiredDocuments : undefined}
+                  />
+                ))}
 
-                <FileDropZone
-                  label="Upload Additional Document (Optional)"
-                  accept={fileAccept}
-                  maxSizeMsg="Use this if you want to share a second related document"
-                  onUpload={setAdditionalDocument}
-                  file={additionalDocument}
-                />
+                <div className="space-y-3 rounded-xl border border-[#dce9fb] bg-[#f8fbff] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-[#23466f]">Extra Documents (Optional)</p>
+                    <button
+                      type="button"
+                      onClick={() => setExtraDocuments((prev) => [...prev, null])}
+                      className="rounded-full border border-[#bfd8f5] bg-white px-3 py-1.5 text-xs font-semibold text-[#0B69B7] hover:bg-[#eef6ff]"
+                    >
+                      + Add extra document
+                    </button>
+                  </div>
+                  {extraDocuments.length === 0 ? (
+                    <p className="text-xs text-[#5f7698]">You can add as many supporting files as needed.</p>
+                  ) : null}
+                  {extraDocuments.map((file, index) => (
+                    <div key={`extra-${index}`} className="space-y-2">
+                      <FileDropZone
+                        label={`Extra Document ${index + 1}`}
+                        accept={fileAccept}
+                        maxSizeMsg="Accepted formats: PDF, JPG, PNG"
+                        onUpload={(nextFile) =>
+                          setExtraDocuments((prev) => prev.map((item, itemIndex) => (itemIndex === index ? nextFile : item)))
+                        }
+                        file={file}
+                        error={errors[`extraDocument_${index}`]}
+                      />
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setExtraDocuments((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                          className="text-xs font-semibold text-[#1d6fd1] hover:underline"
+                        >
+                          Remove extra document
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-[#23466f]">Additional Notes (Optional)</label>
@@ -216,7 +330,10 @@ export default function ApostillePreCheckPage() {
             </div>
 
             <div>
-              <Button type="submit" className="w-full sm:w-auto">Submit for Free Review</Button>
+              {errors._submit ? <p className="mb-2 text-sm text-red-600">{errors._submit}</p> : null}
+              <Button type="submit" className="w-full sm:w-auto" disabled={submitting}>
+                {submitting ? "Submitting..." : "Submit for Free Review"}
+              </Button>
               <p className="mt-2 text-xs text-[#5f7698]">
                 By submitting this form, you agree to be contacted regarding your Apostille pre-check request.
               </p>

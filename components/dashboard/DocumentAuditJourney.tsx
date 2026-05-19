@@ -29,7 +29,7 @@ import {
 } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
 import { useRouter } from "next/navigation";
-type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "undecided";
+type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "apostille" | "undecided";
 type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "passport-quote-pending" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
 type QuestionId = "journeyType" | "nationality" | "ageGroup" | "maritalStatus" | "nameChanged" | "birthOutsideCore";
 type DocumentStatus = "not_uploaded" | "uploaded" | "pending_reupload";
@@ -270,6 +270,7 @@ const SERVICES: Array<{
   { id: "oci-renewal", name: "OCI Renewal / Transfer", description: "Passport change and renewal checks", price: "£78", backendId: 5 },
   { id: "oci-update", name: "OCI Update (Gratis)", description: "Mandatory update and portal handling", price: "£50", backendId: 6 },
   { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal support for UK or US residents", price: "Price on request", backendId: 7 },
+  { id: "apostille", name: "Apostille Services", description: "Document legalization and apostille handling support", price: "£65", backendId: 8 },
 ];
 
 const ADD_ONS = [
@@ -389,6 +390,14 @@ const defaultDocuments = (service: ServiceId | null, answers: Answers): Document
       }
       }
       break;
+    case "apostille":
+      base.push(
+        { id: "document-copy", title: "Document copy for Apostille", description: "Upload the document that requires apostille/legalization.", required: true, mistakes: "Uploading partial pages or unreadable scans.", sample: "Use full, clear PDF or high-resolution image." },
+        { id: "identity-proof", title: "Applicant ID proof", description: "Passport or national ID of the applicant/requester.", required: true, mistakes: "Expired ID or cropped identity page.", sample: "Upload the full biodata/ID card image." },
+        { id: "address-proof", title: "Current address proof", description: "Recent utility bill, bank statement, or residence document.", required: true, mistakes: "Old address proof or mismatched name.", sample: "Use a recent proof with visible issue date." },
+        { id: "authorization-letter", title: "Authorization letter (if applicable)", description: "Authorization letter when someone applies on behalf of applicant.", required: false, mistakes: "Unsigned letter or missing applicant details.", sample: "Signed authorization with applicant details." },
+      );
+      break;
     default:
       base.push(
         { id: "passport-generic", title: "Passport Bio Page", description: "We will confirm the exact required document set next.", required: true, mistakes: "Uploading the wrong document type.", sample: "Start with the main ID page." },
@@ -423,6 +432,7 @@ const serviceFeeMap: Record<ServiceId, number | null> = {
   "oci-renewal": 78,
   "oci-update": 50,
   "passport-renewal": null,
+  apostille: 65,
   undecided: 88,
 };
 
@@ -431,6 +441,7 @@ const serviceLabelMap: Record<ServiceId, string> = {
   "oci-renewal": "OCI Renewal / Transfer",
   "oci-update": "OCI Update (Gratis)",
   "passport-renewal": "Indian Passport Renewal",
+  apostille: "Apostille Services",
   undecided: "Undecided - we will recommend a service",
 };
 
@@ -544,6 +555,15 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   useEffect(() => {
     stageRef.current = stage;
   }, [stage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const requestedService = new URLSearchParams(window.location.search).get("service");
+    const resolved = mapBackendServiceType(requestedService);
+    if (resolved) {
+      setSelectedService((current) => current || resolved);
+    }
+  }, []);
 
   useEffect(() => {
     if (stage !== "passport-quote-pending") {
@@ -795,6 +815,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
             created_at: String(item?.created_at || "").trim(),
             subject: String(item?.subject || "FlyOCI update").trim() || "FlyOCI update",
             message: String(item?.message || "").trim(),
+            sender: "team" as const,
           }))
           .filter((item) => item.message)
       : [];
@@ -808,12 +829,30 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
           created_at: String(log?.timestamp || "").trim(),
           subject: String(metadata.subject || "FlyOCI update").trim() || "FlyOCI update",
           message,
+          sender: "team" as const,
         };
       })
       .filter((item) => item.message);
 
-    const source = directMessages.length > 0 ? directMessages : fallbackMessages;
-    return source.slice().sort((a, b) => {
+    const threadMessages = (applicationRecord?.audit_logs || [])
+      .filter((log) => String(log?.action || "").trim().toLowerCase() === "application_message")
+      .map((log) => {
+        const metadata = log?.metadata && typeof log.metadata === "object" ? (log.metadata as Record<string, unknown>) : {};
+        const message = String(metadata.message_body || "").trim();
+        const senderRaw = String(metadata.sender || "").trim().toLowerCase();
+        const sender = senderRaw === "customer" ? "customer" : "team";
+        if (!message) return null;
+        return {
+          created_at: String(log?.timestamp || "").trim(),
+          subject: sender === "customer" ? "Your message to FlyOCI Team" : "Message from FlyOCI Team",
+          message,
+          sender: sender as "team" | "customer",
+        };
+      })
+      .filter((item): item is { created_at: string; subject: string; message: string; sender: "team" | "customer" } => Boolean(item));
+
+    const source = directMessages.length > 0 ? [...directMessages, ...threadMessages] : [...fallbackMessages, ...threadMessages];
+    return source.sort((a, b) => {
       const aTs = new Date(String(a.created_at || "")).getTime();
       const bTs = new Date(String(b.created_at || "")).getTime();
       return bTs - aTs;
@@ -868,14 +907,14 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       return "completed";
     }
 
-    if (
-      isPassportService &&
-      (
-        ["PENDING_QUOTE", "QUOTED", "EXPIRED"].includes(quoteStatus) ||
-        ["pending_quote", "quoted"].includes(applicationStatus) ||
-        currentStage === "initial_review"
-      )
-    ) {
+    const passportQuoteFlowStarted =
+      currentStage === "initial_review" ||
+      ["pending_quote", "quoted"].includes(applicationStatus) ||
+      // Important: quote_status defaults to PENDING_QUOTE for new records, so
+      // do not use that default alone to skip questionnaire/upload stages.
+      ["QUOTED", "EXPIRED", "QUOTE_ACCEPTED"].includes(quoteStatus);
+
+    if (isPassportService && passportQuoteFlowStarted) {
       return "passport-quote-pending";
     }
 
@@ -999,11 +1038,12 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
   const serviceType = (selectedService || "undecided").replace(/-/g, "_");
 
-  const mapApplicationServiceType = (service: ServiceId): "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" => {
+  const mapApplicationServiceType = (service: ServiceId): "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "apostille" => {
     if (service === "new-oci") return "new-oci";
     if (service === "oci-renewal") return "oci-renewal";
     if (service === "oci-update") return "oci-update";
     if (service === "passport-renewal") return "passport-renewal";
+    if (service === "apostille") return "apostille";
     return "new-oci";
   };
 
@@ -1012,6 +1052,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
     if (normalized.startsWith("evisa")) return null;
     if (normalized.includes("passport") && normalized.includes("renewal")) return "passport-renewal";
+    if (normalized === "apostille" || normalized.includes("apostille")) return "apostille";
     if (normalized === "new_oci" || normalized.includes("new_oci")) return "new-oci";
     if (normalized === "oci_renewal" || normalized.includes("oci_renewal") || normalized.includes("transfer")) return "oci-renewal";
     if (normalized === "oci_update" || normalized.includes("oci_update") || normalized.includes("gratis")) return "oci-update";
@@ -1383,10 +1424,30 @@ const progressiveStages: FlowStage[] = ["passport-quote-pending", "audit-pending
 const draftStage = stageRef.current;
 const hasGeneratedChecklist = generatedChecklist.length > 0;
 const hasChecklistArtifacts = hasGeneratedChecklist || restoredChecklistCount > 0 || Boolean(resolvedAuditId);
+const isPassport = resolvedService === "passport-renewal";
+const isApostille = resolvedService === "apostille";
 
-if (backendStage && backendStage !== "service" && backendStage !== "questions") {
-  // Backend stage is authoritative for all post-questionnaire states.
-  setStage(backendStage);
+if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
+  setStage("questions");
+} else if (isApostille && !hasUploadedDocs && !hasChecklistArtifacts) {
+  const apostilleChecklist = defaultDocuments("apostille", emptyAnswers);
+  if (apostilleChecklist.length > 0) {
+    setGeneratedChecklist(apostilleChecklist);
+    const idMap: Record<string, string | number> = {};
+    apostilleChecklist.forEach((item) => {
+      idMap[item.id] = item.id;
+    });
+    setChecklistItemIdByDocId(idMap);
+  }
+  setStage("checklist");
+} else if (backendStage && backendStage !== "service" && backendStage !== "questions") {
+  // Passport guard: keep New Lead/questionnaire flow until at least one document exists.
+  if (backendStage === "passport-quote-pending" && !hasUploadedDocs) {
+    setStage("questions");
+  } else {
+    // Backend stage is authoritative for all post-questionnaire states.
+    setStage(backendStage);
+  }
 } else if (draftStage === "checklist" || draftStage === "upload" || draftStage === "summary") {
   // Only restore checklist-family stages when checklist or uploads exist
   if (hasChecklistArtifacts || hasUploadedDocs) {
@@ -1400,6 +1461,18 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 } else if (draftStage && draftStage !== "service") {
   // Mid-questionnaire draft — restore it
   setStage(draftStage);
+} else if (isApostille) {
+  // Apostille flow skips questionnaire and starts at checklist/upload.
+  const apostilleChecklist = defaultDocuments("apostille", emptyAnswers);
+  if (apostilleChecklist.length > 0) {
+    setGeneratedChecklist(apostilleChecklist);
+    const idMap: Record<string, string | number> = {};
+    apostilleChecklist.forEach((item) => {
+      idMap[item.id] = item.id;
+    });
+    setChecklistItemIdByDocId(idMap);
+  }
+  setStage("checklist");
 } else {
   // No useful draft — send to questions, not checklist
   setStage("questions");
@@ -1781,10 +1854,31 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
     }
 
     const app = await syncApplicationFromBackend(referenceNumber, { skipStageSync: true }).catch(() => null);
+    const resolvedAuditId = Number(
+      auditId ||
+      (app as any)?.audit_id ||
+      (app as any)?.latest_audit_id ||
+      (applicationRecord as any)?.audit_id ||
+      (applicationRecord as any)?.latest_audit_id ||
+      app?.id ||
+      applicationRecord?.id ||
+      0
+    );
+
+    if (!app && !applicationRecord) {
+      toast.error("Could not load your application before upload. Please refresh and try again.");
+      return;
+    }
 
     const correctionLoopStatus = String(app?.application_status || applicationRecord?.application_status || "").toLowerCase();
     const isCorrectionLoop = ["correction_requested", "reuploaded_pending_review"].includes(correctionLoopStatus) || stage === "audit-result";
-    if (!auditId && !isCorrectionLoop) {
+    const resolvedService =
+      mapBackendServiceType(app?.service_type) ||
+      mapBackendServiceType(app?.service_name) ||
+      selectedService;
+    const isPassportService = resolvedService === "passport-renewal";
+    const isApostilleService = resolvedService === "apostille";
+    if (!resolvedAuditId && !isCorrectionLoop && !isPassportService && !isApostilleService) {
       toast.error("Start audit first by completing questionnaire.");
       return;
     }
@@ -1807,16 +1901,11 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         return;
       }
 
-      // const effectiveAuditId = Number(auditId || app?.id || applicationRecord?.id || 0);
-
-      const effectiveAuditId = Number(
-  auditId ||
-  (app as any)?.audit_id ||
-  (applicationRecord as any)?.audit_id ||
-  app?.id ||
-  applicationRecord?.id ||
-  0
-);
+      const effectiveAuditId = resolvedAuditId;
+      if (!Number.isFinite(effectiveAuditId) || effectiveAuditId <= 0) {
+        toast.error("Could not determine the audit record for this upload.");
+        return;
+      }
 
       await uploadDocument(
         effectiveAuditId,
@@ -1879,7 +1968,19 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
     // forceCreate=true so we never accidentally resume a stale application
     const applicationIdValue = await startApplicationIfNeeded(service, true);
     setApplicationId(applicationIdValue);
-    setStage("questions");
+    if (service === "apostille") {
+      const apostilleChecklist = defaultDocuments("apostille", emptyAnswers);
+      setGeneratedChecklist(apostilleChecklist);
+      const idMap: Record<string, string | number> = {};
+      apostilleChecklist.forEach((item) => {
+        idMap[item.id] = item.id;
+      });
+      setChecklistItemIdByDocId(idMap);
+      setStage("checklist");
+      setBannerMessage("Upload your Apostille documents for review.");
+    } else {
+      setStage("questions");
+    }
   } catch {
     setApplicationStartError("Could not start your application. Please try again.");
   } finally {
@@ -2035,17 +2136,19 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
   };
 
   const submitAuditPayment = async () => {
-    if (!auditId) {
-      toast.error("Audit not initialized.");
-      return;
-    }
+     const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
+  const refNum = app?.reference_number;
+  if (!refNum) {
+    toast.error("Application reference not found.");
+    return;
+  }
 
-    const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
-    const refNum = app?.reference_number;
-    if (!refNum) {
-      toast.error("Application reference not found.");
-      return;
-    }
+  if (!auditId && !refNum) {
+    toast.error("Audit not initialized.");
+    return;
+  }
+
+  
 
     try {
       setApiLoading(true);
@@ -2576,7 +2679,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 
       {customerMessages.length > 0 ? (
         <div className="rounded-3xl border border-[#dce7f8] bg-[#f5f9ff] p-6 shadow-sm">
-          <h3 className="text-xl font-heading font-bold text-primary mb-4">Messages from FlyOCI Team</h3>
+          <h3 className="text-xl font-heading font-bold text-primary mb-4">Messages</h3>
           <div className="space-y-3">
             {customerMessages.map((msg, idx) => (
               <div key={`${msg.created_at || "message"}-${idx}`} className="rounded-2xl border border-[#d9e8ff] bg-white p-4">
@@ -2587,6 +2690,9 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                       {msg.created_at ? new Date(msg.created_at).toLocaleString() : "Recently"}
                     </p>
                   </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${msg.sender === "customer" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}>
+                    {msg.sender === "customer" ? "You" : "FlyOCI Team"}
+                  </span>
                 </div>
                 <p className="mt-3 text-sm text-slate-700 leading-relaxed">{msg.message}</p>
               </div>

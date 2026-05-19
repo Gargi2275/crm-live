@@ -55,7 +55,7 @@ export function KanbanCard({
       </div>
       
       <h4 className="font-heading font-semibold text-[#102A43] text-sm">{customer}</h4>
-      <p className="text-xs text-[#627D98] mt-1">{flag} {assignedTo ?? "Unassigned"}</p>
+      <p className="text-xs text-[#627D98] mt-1">{flag} {assignedTo || "Unassigned"}</p>
       
       <div className="flex items-center justify-between mt-3 gap-2">
         <span className="text-xs font-medium bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-0.5 rounded-full text-[10px]">

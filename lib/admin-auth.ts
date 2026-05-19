@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "./config";
 
 export type StaffRole = "admin" | "ops_manager" | "case_processor" | "reviewer" | "support_agent";
+export type AccessScope = "all" | "easyfly_only" | "exclude_easyfly";
 
 export interface AdminStaffUser {
   id: number;
@@ -9,6 +10,7 @@ export interface AdminStaffUser {
   email?: string | null;
   phone?: string;
   role: StaffRole;
+  access_scope: AccessScope;
   is_active?: boolean;
   is_locked?: boolean;
   failed_login_attempts?: number;
@@ -136,6 +138,16 @@ export interface AdminNotification {
   type_label?: string;
   message: string;
   timestamp: string;
+  is_read?: boolean;
+  severity?: "low" | "medium" | "high" | "critical";
+  actor?: string;
+  task_ids?: Array<{
+    id: number;
+    priority: string;
+    task_type: string;
+    deadline: string;
+    application__reference_number: string | null;
+  }>;
 }
 
 export interface AdminAlertsResponse {
@@ -145,19 +157,22 @@ export interface AdminAlertsResponse {
     open: number;
     acknowledged: number;
     critical: number;
+    unread?: number;
   };
 }
 
 export interface AdminApplication {
   id: number;
   reference_number: string;
+  file_number?: string | null;
+  case_type?: string;
   service?: number;
   service_name?: string;
   service_type?: string;
   stage?: string;
   current_stage?: string;
   customer_name?: string;
-  assigned_staff?: string;
+  assigned_staff?: string | number | null;
   application_status?: string;
   application_date?: string | null;
   submission_date?: string | null;
@@ -245,6 +260,26 @@ export interface AdminApplicationDocument {
   updated_at?: string;
 }
 
+export interface AdminApplicationThreadMessage {
+  id: string;
+  sender: "team" | "customer";
+  message_body: string;
+  created_at: string;
+  is_read?: boolean;
+}
+
+export interface AdminApplicationMessagesResponse {
+  threads: Array<{
+    id: string;
+    subject: string;
+    unread?: boolean;
+    latest_message_preview?: string;
+    latest_message_at?: string;
+    messages: AdminApplicationThreadMessage[];
+  }>;
+  unread_count?: number;
+}
+
 export interface AdminAuditFindingInput {
   document_type: string;
   finding_description: string;
@@ -293,11 +328,54 @@ interface ApiEnvelope<T> {
   error?: { code?: string; message?: string };
 }
 
+export const normalizeAdminStaffUser = (user: Partial<AdminStaffUser>): AdminStaffUser => ({
+  id: user.id ?? 0,
+  full_name: user.full_name ?? "",
+  username: user.username ?? "",
+  email: user.email ?? null,
+  phone: user.phone,
+  role: user.role ?? "support_agent",
+  access_scope: user.access_scope ?? "all",
+  is_active: user.is_active,
+  is_locked: user.is_locked,
+  failed_login_attempts: user.failed_login_attempts,
+  created_at: user.created_at,
+  last_login: user.last_login,
+});
+
 const ADMIN_ACCESS_KEY = "flyoci_admin_access_token";
 const ADMIN_REFRESH_KEY = "flyoci_admin_refresh_token";
 const ADMIN_USER_KEY = "flyoci_admin_staff_user";
 
 let adminRefreshPromise: Promise<string | null> | null = null;
+
+const extractErrorMessage = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractErrorMessage(item);
+      if (nested) {
+        return nested;
+      }
+    }
+    return null;
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    for (const [, nestedValue] of entries) {
+      const nested = extractErrorMessage(nestedValue);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+};
 
 const parseApiResponse = async <T>(response: Response): Promise<ApiEnvelope<T>> => {
   let payload: ApiEnvelope<T>;
@@ -308,7 +386,11 @@ const parseApiResponse = async <T>(response: Response): Promise<ApiEnvelope<T>> 
   }
 
   if (!response.ok || payload.status === "error") {
-    throw new Error(payload.error?.message || payload.message || "Request failed.");
+    const message =
+      extractErrorMessage(payload.error?.message) ||
+      extractErrorMessage(payload.message) ||
+      "Request failed.";
+    throw new Error(message);
   }
 
   return payload;
@@ -327,7 +409,7 @@ export const getAdminTokens = () => {
 export const setAdminSession = (access: string, refresh: string, staffUser: AdminStaffUser) => {
   localStorage.setItem(ADMIN_ACCESS_KEY, access);
   localStorage.setItem(ADMIN_REFRESH_KEY, refresh);
-  localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(staffUser));
+  localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(normalizeAdminStaffUser(staffUser)));
 };
 
 export const clearAdminSession = () => {
@@ -345,7 +427,6 @@ export interface AdminSearchResult {
 
 export const adminSearch = async (query: string): Promise<AdminSearchResult> => {
   const { access } = getAdminTokens();
-  console.log("Token being sent:", access); // ← add this
   const q = encodeURIComponent(query.trim());
   const response = await adminAuthenticatedFetch(`/admin/search/?q=${q}`, { method: "GET" });
   const payload = await parseApiResponse<AdminSearchResult>(response);
@@ -406,7 +487,7 @@ export const getStoredAdminUser = (): AdminStaffUser | null => {
     return null;
   }
   try {
-    return JSON.parse(raw) as AdminStaffUser;
+    return normalizeAdminStaffUser(JSON.parse(raw) as Partial<AdminStaffUser>);
   } catch {
     return null;
   }
@@ -428,8 +509,9 @@ export const loginAdmin = async (username: string, password: string) => {
     throw new Error("Missing authentication payload.");
   }
 
-  setAdminSession(payload.data.tokens.access, payload.data.tokens.refresh, payload.data.staff_user);
-  return payload.data.staff_user;
+  const staffUser = normalizeAdminStaffUser(payload.data.staff_user);
+  setAdminSession(payload.data.tokens.access, payload.data.tokens.refresh, staffUser);
+  return staffUser;
 };
 
 export const adminAuthenticatedFetch = async (path: string, options: RequestInit = {}) => {
@@ -438,8 +520,10 @@ export const adminAuthenticatedFetch = async (path: string, options: RequestInit
     throw new Error("Admin session expired. Please login again.");
   }
 
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
   const headers = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers || {}),
     Authorization: `Bearer ${access}`,
   };
@@ -454,7 +538,7 @@ export const adminAuthenticatedFetch = async (path: string, options: RequestInit
     }
 
     const retryHeaders = {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(options.headers || {}),
       Authorization: `Bearer ${nextAccess}`,
     };
@@ -481,7 +565,14 @@ export const listStaffUsers = async () => {
   return payload.data || [];
 };
 
-export const createStaffUser = async (body: { full_name: string; username: string; email?: string; phone?: string; role: StaffRole }) => {
+export const createStaffUser = async (body: {
+  full_name: string;
+  username: string;
+  email?: string;
+  phone?: string;
+  role: StaffRole;
+  access_scope?: AccessScope;
+}) => {
   const response = await adminAuthenticatedFetch("/admin/staff/create/", {
     method: "POST",
     body: JSON.stringify(body),
@@ -490,7 +581,15 @@ export const createStaffUser = async (body: { full_name: string; username: strin
   return payload.data?.staff_user;
 };
 
-export const createStaffUserWithPassword = async (body: { full_name: string; username: string; email?: string; phone?: string; password: string; role: StaffRole }) => {
+export const createStaffUserWithPassword = async (body: {
+  full_name: string;
+  username: string;
+  email?: string;
+  phone?: string;
+  password: string;
+  role: StaffRole;
+  access_scope?: AccessScope;
+}) => {
   const response = await adminAuthenticatedFetch("/admin/staff/create/", {
     method: "POST",
     body: JSON.stringify(body),
@@ -499,7 +598,10 @@ export const createStaffUserWithPassword = async (body: { full_name: string; use
   return payload.data?.staff_user;
 };
 
-export const updateStaffUser = async (staffId: number, body: Partial<{ role: StaffRole; is_active: boolean }>) => {
+export const updateStaffUser = async (
+  staffId: number,
+  body: Partial<{ role: StaffRole; is_active: boolean; access_scope: AccessScope }>,
+) => {
   const response = await adminAuthenticatedFetch(`/admin/staff/${staffId}/update/`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -564,8 +666,9 @@ export const getAdminDashboardOverview = async () => {
   return payload.data;
 };
 
-export const getAdminAlerts = async () => {
-  const response = await adminAuthenticatedFetch("/admin/alerts/", { method: "GET" });
+export const getAdminAlerts = async (markRead: boolean = false) => {
+  const suffix = markRead ? "?mark_read=1" : "";
+  const response = await adminAuthenticatedFetch(`/admin/alerts/${suffix}`, { method: "GET" });
   const payload = await parseApiResponse<AdminAlertsResponse>(response);
   if (!payload.data) {
     throw new Error("Missing admin alerts payload.");
@@ -645,6 +748,20 @@ export const autoAssignAdminTasks = async () => {
   return payload.data;
 };
 
+
+export const patchAdminTask = async (taskId: number, body: { status?: string; priority?: string; completion_notes?: string }) => {
+  const response = await adminAuthenticatedFetch(`/tasks/${taskId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<AdminTaskItem>(response);
+  if (!payload.data) {
+    throw new Error("Task update response missing.");
+  }
+  return payload.data;
+};
+
+
 export const getAdminApplicationDetails = async (applicationId: number) => {
   const response = await adminAuthenticatedFetch(`/applications/${applicationId}/`, { method: "GET" });
   const payload = await parseApiResponse<AdminApplication>(response);
@@ -660,6 +777,17 @@ export const getAdminApplicationDocuments = async (referenceNumber: string) => {
   });
   const payload = await parseApiResponse<AdminApplicationDocument[]>(response);
   return payload.data || [];
+};
+
+export const getAdminApplicationMessages = async (applicationId: number) => {
+  const response = await adminAuthenticatedFetch(`/applications/${applicationId}/messages/`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<AdminApplicationMessagesResponse>(response);
+  if (!payload.data) {
+    return { threads: [], unread_count: 0 } as AdminApplicationMessagesResponse;
+  }
+  return payload.data;
 };
 
 export const updateAdminApplicationStage = async (
@@ -795,6 +923,55 @@ export const submitAdminAuditResult = async (payloadBody: AdminAuditResultPayloa
   const response = await adminAuthenticatedFetch("/admin/audit/result/", {
     method: "POST",
     body: JSON.stringify(payloadBody),
+  });
+  return parseApiResponse(response);
+};
+
+export type AdminApostilleListRow = {
+  file_number: string | null;
+  reference_number: string;
+  email: string;
+  full_name: string;
+  status: string;
+  quoted_fee: string | null;
+  created_at: string | null;
+};
+
+export const listAdminApostilleCases = async (status?: string) => {
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await adminAuthenticatedFetch(`/admin/apostille/${q}`, { method: "GET" });
+  const payload = await parseApiResponse<{ results: AdminApostilleListRow[] }>(response);
+  return payload.data?.results || [];
+};
+
+export const getAdminApostilleDetail = async (fileNumber: string) => {
+  const response = await adminAuthenticatedFetch(`/admin/apostille/${encodeURIComponent(fileNumber)}/`, { method: "GET" });
+  const payload = await parseApiResponse<Record<string, unknown>>(response);
+  return (payload.data || {}) as Record<string, unknown>;
+};
+
+export const patchAdminApostilleCase = async (fileNumber: string, body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch(`/admin/apostille/${encodeURIComponent(fileNumber)}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<Record<string, unknown>>(response);
+  return (payload.data || {}) as Record<string, unknown>;
+};
+
+export const downloadAdminApostilleDocumentBlob = async (docId: number): Promise<Blob> => {
+  const response = await adminAuthenticatedFetch(`/admin/apostille/document/${docId}/`, { method: "GET" });
+  if (!response.ok) {
+    const message = await response.text().catch(() => "Download failed");
+    throw new Error(message || "Download failed");
+  }
+  return response.blob();
+};
+
+export const sendAdminApostilleThreadMessage = async (fileNumber: string, subject: string, message: string) => {
+  const response = await adminAuthenticatedFetch("/admin/apostille/message/", {
+    method: "POST",
+    body: JSON.stringify({ file_number: fileNumber, subject, message }),
   });
   return parseApiResponse(response);
 };

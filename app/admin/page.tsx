@@ -42,6 +42,7 @@ import {
   getStaffPerformanceBadge,
   listAdminApplications,
   listAdminTasks,
+  patchAdminTask,
   patchAdminApplication,
   type AdminApplication,
   type AdminDashboardOverview,
@@ -57,7 +58,7 @@ export default function ConsoleDashboard() {
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [applications, setApplications] = useState<AdminApplication[]>([]);
   const [taskItems, setTaskItems] = useState<AdminTaskItem[]>([]);
-  const [taskSelections, setTaskSelections] = useState<Record<number, number | "">>({});
+  const [taskSelections, setTaskSelections] = useState<Record<number, string>>({});
   const [taskActionLoading, setTaskActionLoading] = useState<number | "auto" | null>(null);
   const [staffBadge, setStaffBadge] = useState<string | null>(null);
   const userRole = adminUser?.role;
@@ -73,42 +74,57 @@ export default function ConsoleDashboard() {
   const isOpsView = userRole === "ops_manager";
   const isStaffView = userRole === "case_processor" || userRole === "reviewer" || userRole === "support_agent";
   const chartColors = ["#009877", "#33A1FD", "#B87333", "#DCE7F3"];
+const [loading, setLoading] = useState(true);
+
 
   const loadDashboard = async () => {
-    try {
-      const shouldLoadTasks = isFounderView || isOpsView;
-      const [payload, appPayload, taskPayload] = await Promise.all([
-        getAdminDashboardOverview(),
-        listAdminApplications(),
-        // shouldLoadTasks ? listAdminTasks({ limit: 500 }) : Promise.resolve([] as AdminTaskItem[]),
-        shouldLoadTasks
-  ? listAdminTasks({ limit: 500 })
-  : isStaffView && adminUser?.id
-    ? listAdminTasks({ limit: 100, assignedStaffId: adminUser.id })
-    : Promise.resolve([] as AdminTaskItem[]),
-      ]);
-      setDashboardData(payload);
-      setApplications(appPayload);
-     if (shouldLoadTasks || isStaffView) {
-  setTaskItems(taskPayload);
-  
-  setTaskSelections(
-    Object.fromEntries(taskPayload.map((task) => [task.id, task.assigned_staff ?? ""])),
-  );
-}
-
-      if (isStaffView) {
-        try {
-          const badgePayload = await getStaffPerformanceBadge();
-          setStaffBadge(badgePayload.badge);
-        } catch {
-          setStaffBadge(null);
-        }
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load dashboard overview.");
+  setLoading(true);
+  try {
+    const shouldLoadTasks = isFounderView || isOpsView;
+    const [payload, appPayload, taskPayload] = await Promise.all([
+      getAdminDashboardOverview(),
+      listAdminApplications(),
+      shouldLoadTasks
+        ? listAdminTasks({ limit: 500 })
+        : isStaffView && adminUser?.id
+          ? listAdminTasks({ limit: 100, assignedStaffId: adminUser.id })
+          : Promise.resolve([] as AdminTaskItem[]),
+    ]);
+    setDashboardData(payload);
+    setApplications(appPayload);
+    if (shouldLoadTasks || isStaffView) {
+      setTaskItems(taskPayload);
     }
-  };
+   setTaskSelections(
+  Object.fromEntries(
+    taskPayload.map((task) => [
+      task.id,
+      task.assigned_staff 
+        ? String(task.assigned_staff)  
+        : task.assigned_staff_name
+          ? String(
+              staffMembers.find(s => 
+                s.name === task.assigned_staff_name
+              )?.id ?? ""
+            )
+          : ""
+    ])
+  )
+);
+    if (isStaffView) {
+      try {
+        const badgePayload = await getStaffPerformanceBadge();
+        setStaffBadge(badgePayload.badge);
+      } catch {
+        setStaffBadge(null);
+      }
+    }
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to load dashboard overview.");
+  } finally {
+    setLoading(false);  // ← this is what was missing
+  }
+};
 
  useEffect(() => {
   if (adminUser) void loadDashboard();
@@ -135,11 +151,15 @@ export default function ConsoleDashboard() {
   const failedLogins = dashboardData?.failed_logins ?? 0;
 
   const canManageTasks = isFounderView || isOpsView;
-  const assignableStaff = useMemo(
-    () => staffMembers.filter((staff) => (isFounderView ? true : staff.role !== "admin")),
-    [isFounderView, staffMembers],
-  );
-
+ const assignableStaff = useMemo(
+  () => staffMembers.filter((staff) => {
+    const role = String(staff.role || "").toLowerCase();
+    if (staff.id === adminUser?.id) return false;        // never see yourself
+    if (role === "admin") return false;                  // ops_manager can't see admin
+    return true;
+  }),
+  [staffMembers, adminUser],
+);
   const pendingTaskStatuses = useMemo(() => new Set(["new", "in_progress", "blocked"]), []);
 
   const workloadByStaff = useMemo(() => {
@@ -192,47 +212,62 @@ export default function ConsoleDashboard() {
     return parsed.toLocaleString();
   };
 
-  const handleTaskSelectionChange = (taskId: number, value: string) => {
-    setTaskSelections((prev) => ({
-      ...prev,
-      [taskId]: value ? Number(value) : "",
-    }));
-  };
+ 
 
-  const handleAssignTask = async (task: AdminTaskItem) => {
-    const selectedStaffId = taskSelections[task.id];
-    if (!selectedStaffId) {
-      toast.error("Select a staff member first.");
-      return;
-    }
+// Change to:
+const handleTaskSelectionChange = (taskId: number, value: string) => {
+  setTaskSelections((prev) => ({
+    ...prev,
+    [taskId]: value,  // ← keep as string
+  }));
+};
 
-    setTaskActionLoading(task.id);
-    try {
-      const updatedTask = isFounderView
-        ? await adminDirectAssignTask(task.id, Number(selectedStaffId))
-        : await assignAdminTask(task.id, Number(selectedStaffId));
-      setTaskItems((prev) => prev.map((item) => (item.id === updatedTask.id ? updatedTask : item)));
-      setTaskSelections((prev) => ({ ...prev, [task.id]: updatedTask.assigned_staff ?? Number(selectedStaffId) }));
-      toast.success(`Task ${updatedTask.id} assigned successfully.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to assign task.");
-    } finally {
-      setTaskActionLoading(null);
-    }
-  };
+const handleAssignTask = async (task: AdminTaskItem) => {
+  const selectedStaffId = taskSelections[task.id];
+  if (!selectedStaffId) {
+    toast.error("Select a staff member first.");
+    return;
+  }
 
-  const handleAutoAssignTasks = async () => {
-    setTaskActionLoading("auto");
-    try {
-      const result = await autoAssignAdminTasks();
-      await loadDashboard();
-      toast.success(`Auto-assigned ${result.assigned_count} tasks.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to auto-assign tasks.");
-    } finally {
-      setTaskActionLoading(null);
-    }
-  };
+  setTaskActionLoading(task.id);
+  try {
+    const updatedTask = isFounderView
+  ? await adminDirectAssignTask(task.id, Number(selectedStaffId))
+  : await assignAdminTask(task.id, Number(selectedStaffId));
+
+if (task.application) {
+  await patchAdminApplication(task.application, {
+    assigned_staff: Number(selectedStaffId),
+  });
+}
+
+setTaskItems((prev) => prev.map((item) => (item.id === updatedTask.id ? updatedTask : item)));
+    setTaskItems((prev) => prev.map((item) => (item.id === updatedTask.id ? updatedTask : item)));
+   setTaskSelections((prev) => ({
+  ...prev,
+  [task.id]: updatedTask.assigned_staff ? String(updatedTask.assigned_staff) : String(selectedStaffId),
+}));
+    toast.success(`Task ${updatedTask.id} assigned successfully.`);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to assign task.");
+  } finally {
+    setTaskActionLoading(null);
+  }
+};
+
+ const handleAutoAssignTasks = async () => {
+  setTaskActionLoading("auto");
+  try {
+    const result = await autoAssignAdminTasks();
+    setTaskSelections({});
+    await loadDashboard();
+    toast.success(`Auto-assigned ${result.assigned_count ?? 0} tasks.`);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to auto-assign tasks.");
+  } finally {
+    setTaskActionLoading(null);
+  }
+};
 
   const healthMetrics = useMemo(
     () => [
@@ -261,11 +296,12 @@ export default function ConsoleDashboard() {
     [dashboardData, insightIconMap],
   );
 
-  const staffWorklist = useMemo(() => {
-  return taskItems.slice(0, 10).map((task) => {
+ const staffWorklist = useMemo(() => {
+  return taskItems.map((task) => {
     const app = applications.find((a) => a.reference_number === task.application_reference);
     return {
       id: task.id,
+      applicationId: task.application,  // ← confirmed field name from API
       reference: task.application_reference,
       notes: app?.notes || "",
       title: `${task.task_type.replace(/_/g, " ")} - ${task.customer_name || "Customer"}`,
@@ -273,6 +309,7 @@ export default function ConsoleDashboard() {
     };
   });
 }, [taskItems, applications]);
+
   const appendTimestampedNote = (base: string, note: string) => {
     const now = new Date().toLocaleString();
     const current = (base || "").trim();
@@ -281,36 +318,57 @@ export default function ConsoleDashboard() {
 
 const handleOpenCase = (taskId: number) => {
   const task = taskItems.find((t) => t.id === taskId);
-  const appId = task?.application ?? taskId;
-  router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(appId))}`);
+  if (!task?.application) {
+    toast.error("Application not found for this task.");
+    return;
+  }
+  // task.application is confirmed as the application ID from the API
+  router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(task.application))}`);
 };
 
-  const handleMarkProgress = async (task: { id: number; reference: string; notes: string }) => {
-    try {
-      await patchAdminApplication(task.id, {
-        notes: appendTimestampedNote(task.notes, `Progress updated by staff for ${task.reference}`),
-      });
-      await loadDashboard();
-      toast.success(`Progress updated for ${task.reference}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update progress.");
-    }
-  };
 
-  const handleEscalate = async (task: { id: number; reference: string; notes: string }) => {
-    try {
-      await patchAdminApplication(task.id, {
-        stage: "DOCUMENTS_REQUIRED",
-        correction_cause: "staff_error",
-        notes: appendTimestampedNote(task.notes, `Escalated by staff for review: ${task.reference}`),
-      });
-      await loadDashboard();
-      toast.success(`Escalation recorded for ${task.reference}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to escalate case.");
-    }
-  };
+const handleMarkProgress = async (task: { id: number; applicationId: number; reference: string; notes: string }) => {
+  try {
+    await patchAdminTask(task.id, { status: "in_progress" });
+    await patchAdminApplication(task.applicationId, {
+      notes: appendTimestampedNote(task.notes, `Progress updated by staff for ${task.reference}`),
+    });
+    await loadDashboard();
+    toast.success(`Progress updated for ${task.reference}`);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to update progress.");
+  }
+};
 
+const handleEscalate = async (task: { id: number; applicationId: number; reference: string; notes: string }) => {
+  try {
+    await patchAdminTask(task.id, { status: "blocked" });
+    await patchAdminApplication(task.applicationId, {
+      stage: "DOCUMENTS_REQUIRED",
+      correction_cause: "staff_error",
+      notes: appendTimestampedNote(task.notes, `Escalated by staff for review: ${task.reference}`),
+    });
+    await loadDashboard();
+    toast.success(`Escalation recorded for ${task.reference}`);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to escalate case.");
+  }
+};
+
+const handleMarkComplete = async (task: { id: number; applicationId: number; reference: string; notes: string }) => {
+  try {
+    await patchAdminTask(task.id, { status: "completed" });
+    await patchAdminApplication(task.applicationId, {
+      notes: appendTimestampedNote(task.notes, `Task completed by staff for ${task.reference}`),
+    });
+    await loadDashboard();
+    toast.success(`Task marked complete for ${task.reference}`);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to mark task complete.");
+  }
+};
+
+ 
   const accountabilityFeed = useMemo(() => {
     return [...applications]
       .sort((left, right) => {
@@ -328,6 +386,14 @@ const handleOpenCase = (taskId: number) => {
         };
       });
   }, [applications]);
+
+  if (loading) {
+  return (
+    <div className="flex items-center justify-center h-64 text-[#627D98] text-sm">
+      Loading dashboard...
+    </div>
+  );
+}
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 max-w-[1500px] mx-auto space-y-6 font-body">
@@ -409,17 +475,29 @@ const handleOpenCase = (taskId: number) => {
           <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
             <div className="flex justify-between items-center mb-3">
               <h2 className="text-lg font-heading font-semibold text-[#102A43]">Workload Distribution</h2>
-              <button
-                onClick={() => void loadDashboard()}
-                className="inline-flex items-center gap-2 bg-[#009877] text-white px-4 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#007B61] disabled:opacity-60"
-                disabled={taskActionLoading === "auto"}
-              >
-                <RefreshCw className="w-4 h-4" />
-                REFRESH
-              </button>
+             <div className="flex gap-2">
+  <button
+    onClick={() => void loadDashboard()}
+    className="inline-flex items-center gap-2 bg-[#009877] text-white px-4 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#007B61] disabled:opacity-60"
+    disabled={taskActionLoading === "auto"}
+  >
+    <RefreshCw className="w-4 h-4" />
+    REFRESH
+  </button>
+  <button
+    onClick={() => void handleAutoAssignTasks()}
+    disabled={taskActionLoading === "auto"}
+    className="inline-flex items-center gap-2 bg-[#33A1FD] text-white px-4 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#0B69B7] disabled:opacity-60"
+  >
+    {taskActionLoading === "auto" ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Shuffle className="w-4 h-4" />}
+    {taskActionLoading === "auto" ? "Assigning..." : "AUTO ASSIGN"}
+  </button>
+</div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {staffMembers.map((item) => (
+            {staffMembers
+  .filter((item) => item.id !== adminUser?.id)
+  .map((item) => (
                 (() => {
                   const summary = workloadByStaff[item.id] || {
                     assigned: 0,
@@ -443,125 +521,154 @@ const handleOpenCase = (taskId: number) => {
             </div>
           </div>
 
-          <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-              <div>
-                <h2 className="text-lg font-heading font-semibold text-[#102A43]">Task Assignment</h2>
-                <p className="text-xs text-[#627D98] mt-1">{unassignedTaskCount} unassigned tasks in the current queue</p>
-              </div>
-              <button
-                onClick={() => void handleAutoAssignTasks()}
-                disabled={taskActionLoading === "auto" || assignableStaff.length === 0}
-                className="inline-flex items-center gap-2 bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-3 py-2 rounded-[10px] text-sm font-heading font-semibold hover:bg-[#33A1FD]/18 disabled:opacity-60"
-              >
-                <Shuffle className="w-4 h-4" />
-                {taskActionLoading === "auto" ? "Auto-assigning..." : "Auto-Assign"}
-              </button>
-            </div>
+       <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+  {taskItems.length === 0 && (
+    <p className="text-sm text-[#627D98]">No queued tasks are available right now.</p>
+  )}
+  {taskItems.map((task) => {
+    const isBusy = taskActionLoading === task.id;
+    const selectedStaffId = taskSelections[task.id] ?? task.assigned_staff ?? "";
+    const isCompleted = task.status === "completed";
+    const isCancelled = task.status === "cancelled";
+    const isClosedOut = isCompleted || isCancelled;
 
-
-
-            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-              {taskItems.length === 0 && (
-                <p className="text-sm text-[#627D98]">No queued tasks are available right now.</p>
-              )}
-              {taskItems.map((task) => {
-                const isBusy = taskActionLoading === task.id;
-                const selectedStaffId = taskSelections[task.id] ?? task.assigned_staff ?? "";
-                return (
-                  <div key={task.id} className="rounded-[12px] border border-[#D9E1EA] bg-[#F8FAFC] p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-heading font-semibold text-[#102A43]">{task.application_reference}</p>
-                        <p className="text-xs text-[#627D98] capitalize">{task.task_type.replace(/_/g, " ")} • {task.customer_name || "Customer"}</p>
-                        <p className="text-xs text-[#627D98] mt-1">Due: {formatTaskDeadline(task.deadline)}</p>
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-[11px]">
-                        <span className="rounded-full bg-[#009877]/12 px-2.5 py-1 text-[#006F57]">{task.status}</span>
-                        <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[#9C4F17]">{task.priority}</span>
-                        <span className="rounded-full bg-[#33A1FD]/12 px-2.5 py-1 text-[#0B69B7]">{task.assigned_staff_name || "Unassigned"}</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <select
-                        value={selectedStaffId}
-                        onChange={(event) => handleTaskSelectionChange(task.id, event.target.value)}
-                        className="w-full sm:flex-1 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]"
-                      >
-                        <option value="">Select staff member</option>
-                        {assignableStaff.map((staff) => (
-                          <option key={staff.id} value={staff.id}>
-                            {staff.name} - {staff.role}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => void handleAssignTask(task)}
-                        disabled={isBusy || assignableStaff.length === 0}
-                        className="inline-flex items-center justify-center gap-2 rounded-[10px] bg-[#009877] px-4 py-2 text-sm font-heading font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
-                      >
-                        {isBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UserCog className="w-4 h-4" />}
-                        {isBusy ? "Saving..." : "Assign"}
-                      </button>
-                    </div>
-
-                    <p className="mt-2 text-[11px] text-[#627D98]">
-                      Current assignee: <span className="text-[#102A43] font-medium">{task.assigned_staff_name || "None"}</span>
-                      {isFounderView && task.assigned_staff_role ? (
-                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-[#EAF5FF] px-2 py-0.5 text-[#2B5E93]">
-                          <UserRoundCog className="w-3 h-3" />
-                          {task.assigned_staff_role}
-                        </span>
-                      ) : null}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
+    return (
+      <div
+        key={task.id}
+        className={`rounded-[12px] border p-3 ${
+          isCompleted
+            ? "border-[#009877]/30 bg-[#F0FBF8]"
+            : isCancelled
+            ? "border-[#D9E1EA] bg-[#F5F7FA] opacity-60"
+            : "border-[#D9E1EA] bg-[#F8FAFC]"
+        }`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-heading font-semibold text-[#102A43]">
+              {task.application_reference}
+            </p>
+            <p className="text-xs text-[#627D98] capitalize">
+              {task.task_type.replace(/_/g, " ")} • {task.customer_name || "Customer"}
+            </p>
+            <p className="text-xs text-[#627D98] mt-1">
+              Due: {formatTaskDeadline(task.deadline)}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            <span
+              className={`rounded-full px-2.5 py-1 ${
+                isCompleted
+                  ? "bg-[#009877]/20 text-[#006F57] font-semibold"
+                  : task.status === "blocked"
+                  ? "bg-[#DC2626]/12 text-[#B42318]"
+                  : task.status === "in_progress"
+                  ? "bg-[#33A1FD]/12 text-[#0B69B7]"
+                  : "bg-[#009877]/12 text-[#006F57]"
+              }`}
+            >
+              {isCompleted ? "✓ Completed" : task.status}
+            </span>
+            <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[#9C4F17]">
+              {task.priority}
+            </span>
+            <span className="rounded-full bg-[#33A1FD]/12 px-2.5 py-1 text-[#0B69B7]">
+              {task.assigned_staff_name || "Unassigned"}
+            </span>
           </div>
         </div>
+
+        {isClosedOut ? (
+          // Completed/cancelled — show read-only summary, no assignment controls
+          <div className="mt-3 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs text-[#627D98]">
+            {isCompleted
+              ? "This task has been completed. No further action needed."
+              : "This task has been cancelled."}
+          </div>
+        ) : (
+          // Active task — show assignment controls
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <select
+              value={selectedStaffId}
+              onChange={(event) => handleTaskSelectionChange(task.id, event.target.value)}
+              className="w-full sm:flex-1 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]"
+            >
+              <option value="">Select staff member</option>
+              {assignableStaff.map((staff) => (
+                <option key={staff.id} value={staff.id}>
+                  {staff.name} - {staff.role}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => void handleAssignTask(task)}
+              disabled={isBusy || assignableStaff.length === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-[10px] bg-[#009877] px-4 py-2 text-sm font-heading font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
+            >
+              {isBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UserCog className="w-4 h-4" />}
+              {isBusy ? "Saving..." : "Assign"}
+            </button>
+          </div>
+        )}
+
+        <p className="mt-2 text-[11px] text-[#627D98]">
+          Current assignee:{" "}
+          <span className="text-[#102A43] font-medium">
+            {task.assigned_staff_name || "None"}
+          </span>
+          {isFounderView && task.assigned_staff_role ? (
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-[#EAF5FF] px-2 py-0.5 text-[#2B5E93]">
+              <UserRoundCog className="w-3 h-3" />
+              {task.assigned_staff_role}
+            </span>
+          ) : null}
+        </p>
+      </div>
+    );
+  })}
+</div>
+
+        </div>
       )}
-{isOpsView && taskItems.filter(t => t.assigned_staff === adminUser?.id).length > 0 && (
+
+
+{isOpsView && (
   <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
     <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">
       My Assigned Tasks
     </h2>
     <div className="space-y-3">
-      {taskItems
-        .filter(t => t.assigned_staff === adminUser?.id)
-        .map((task) => (
-          <div key={task.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[#102A43] text-sm font-medium">
-                {task.application_reference}
-              </p>
-              <p className="text-xs text-[#627D98] capitalize">
-                {task.task_type.replace(/_/g, " ")} • {task.customer_name}
-              </p>
-              <p className="text-xs text-[#627D98]">
-                Due: {formatTaskDeadline(task.deadline)}
-              </p>
+      {taskItems.filter(t => t.assigned_staff === adminUser?.id).length === 0 ? (
+        <p className="text-sm text-[#627D98]">No tasks currently assigned to you.</p>
+      ) : (
+        taskItems
+          .filter(t => t.assigned_staff === adminUser?.id)
+          .map((task) => (
+            <div key={task.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[#102A43] text-sm font-medium">{task.application_reference}</p>
+                <p className="text-xs text-[#627D98] capitalize">
+                  {task.task_type.replace(/_/g, " ")} • {task.customer_name}
+                </p>
+                <p className="text-xs text-[#627D98]">Due: {formatTaskDeadline(task.deadline)}</p>
+              </div>
+              <div className="flex gap-2 flex-wrap justify-end">
+                <span className="rounded-full bg-[#009877]/12 px-2.5 py-1 text-[11px] text-[#006F57]">{task.status}</span>
+                <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[11px] text-[#9C4F17]">{task.priority}</span>
+                <button
+                  className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full"
+                  onClick={() => handleOpenCase(task.id)}
+                >
+                  Open Case
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2 flex-wrap justify-end">
-              <span className="rounded-full bg-[#009877]/12 px-2.5 py-1 text-[11px] text-[#006F57]">
-                {task.status}
-              </span>
-              <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[11px] text-[#9C4F17]">
-                {task.priority}
-              </span>
-              <button
-                className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full"
-                onClick={() => handleOpenCase(task.id)}
-              >
-                Open Case
-              </button>
-            </div>
-          </div>
-        ))}
+          ))
+      )}
     </div>
   </div>
 )}
+
       {!isFounderView && !isOpsView && !isStaffView && (
         <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
           <p className="text-sm text-[#486581]">
@@ -728,20 +835,66 @@ const handleOpenCase = (taskId: number) => {
                     <th className="px-5 py-3 font-medium text-center">Audits P/F</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#E5EAF0]">
-                  {staffMembers.filter((staff) => String(staff.role || "").toLowerCase() !== "admin").map((staff) => (
-                    <tr key={staff.id} className="hover:bg-[#F8FAFC] transition-colors">
-                      <td className="px-5 py-3 text-[#102A43] font-medium">{staff.name}</td>
-                      <td className="px-5 py-3 text-center text-[#0B69B7]">{staff.assigned}</td>
-                      <td className="px-5 py-3 text-center text-[#006F57]">{staff.completed}</td>
-                      <td className="px-5 py-3 text-center text-[#9C4F17]">{staff.pending}</td>
-                      <td className="px-5 py-3 text-center text-[#486581]">{staff.avgTime}</td>
-                      <td className="px-5 py-3 text-center text-[#B42318]">{staff.slaBreach}</td>
-                      <td className="px-5 py-3 text-center text-[#102A43]">{staff.accuracy}%</td>
-                      <td className="px-5 py-3 text-center text-[#102A43]">{staff.auditsPassed}/{staff.auditsFailed}</td>
-                    </tr>
-                  ))}
-                </tbody>
+              <tbody className="divide-y divide-[#E5EAF0]">
+  {staffMembers
+    .filter((staff) => String(staff.role || "").toLowerCase() !== "admin")
+    .map((staff) => {
+      const live = workloadByStaff[staff.id];
+      // Use live task counts if available, fall back to API data
+      const assigned = live?.assigned ?? staff.assigned;
+      const completed = live?.completed ?? staff.completed;
+      const pending = live?.pending ?? staff.pending;
+
+      return (
+        <tr key={staff.id} className="hover:bg-[#F8FAFC] transition-colors">
+          <td className="px-5 py-3 text-[#102A43] font-medium">
+            {staff.name}
+            <span className="ml-2 text-[11px] text-[#627D98] font-normal">{staff.role}</span>
+          </td>
+          <td className="px-5 py-3 text-center font-semibold text-[#0B69B7]">
+            {assigned}
+          </td>
+          <td className="px-5 py-3 text-center font-semibold text-[#006F57]">
+            {completed}
+          </td>
+          <td className="px-5 py-3 text-center font-semibold text-[#9C4F17]">
+            {pending}
+          </td>
+          <td className="px-5 py-3 text-center text-[#486581]">
+            {staff.avgTime}
+          </td>
+          <td className="px-5 py-3 text-center">
+            <span className={staff.slaBreach > 0 ? "text-[#B42318] font-semibold" : "text-[#486581]"}>
+              {staff.slaBreach}
+            </span>
+          </td>
+          <td className="px-5 py-3 text-center">
+            <span className={`font-semibold ${
+              staff.accuracy >= 90
+                ? "text-[#006F57]"
+                : staff.accuracy >= 70
+                ? "text-[#9C4F17]"
+                : "text-[#B42318]"
+            }`}>
+              {staff.accuracy}%
+            </span>
+          </td>
+          <td className="px-5 py-3 text-center">
+            <span className="text-[#006F57] font-semibold">{staff.auditsPassed}</span>
+            <span className="text-[#627D98] mx-0.5">/</span>
+            <span className="text-[#B42318] font-semibold">{staff.auditsFailed}</span>
+          </td>
+        </tr>
+      );
+    })}
+  {staffMembers.filter((s) => String(s.role || "").toLowerCase() !== "admin").length === 0 && (
+    <tr>
+      <td colSpan={8} className="px-5 py-6 text-center text-sm text-[#627D98]">
+        No staff members found.
+      </td>
+    </tr>
+  )}
+</tbody>
               </table>
             </div>
           </div>
@@ -775,6 +928,8 @@ const handleOpenCase = (taskId: number) => {
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffBadge || "Needs Improvement"}</p>
           </div>
           <div className="space-y-3">
+
+            
             {staffWorklist.map((task) => (
               <div key={task.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
                 <div>
@@ -785,9 +940,17 @@ const handleOpenCase = (taskId: number) => {
                   <button className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full" onClick={() => handleOpenCase(task.id)}>Open Case</button>
                   <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full" onClick={() => void handleMarkProgress(task)}>Mark Progress</button>
                   <button className="text-xs bg-[#B87333]/12 text-[#9C4F17] border-[0.5px] border-[#B87333]/35 px-2 py-1 rounded-full" onClick={() => void handleEscalate(task)}>Escalate</button>
+                  <button 
+  className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full" 
+  onClick={() => void handleMarkComplete(task)}
+>
+  Mark Complete
+</button>
                 </div>
               </div>
             ))}
+
+
             {staffWorklist.length === 0 && <p className="text-sm text-[#627D98]">No active work items found.</p>}
           </div>
           <h3 className="text-[#102A43] font-heading font-semibold mt-6 mb-2">Accountability Panel</h3>

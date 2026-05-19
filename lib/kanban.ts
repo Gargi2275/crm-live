@@ -12,11 +12,12 @@ export type KanbanStage =
   | "SUBMITTED"
   | "DELIVERED";
 
-export type ServiceType = "OCI" | "Passport Renewal" | "E-Visa";
+export type ServiceType = "OCI" | "Passport Renewal" | "E-Visa" | "Apostille";
 export type PaymentStatus = "Paid" | "Pending" | "Prepaid";
 
 export interface PipelineCase {
   id: string;
+  applicationId?: number | string;
   customer: string;
   serviceType: ServiceType;
   country: string;

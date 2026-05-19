@@ -151,3 +151,11 @@ body::-webkit-scrollbar {
 			linear-gradient(180deg, #ffffff 0%, #f7fbff 52%, #ffffff 100%);
 	}
 }
+
+.scrollbar-none {
+  scrollbar-width: none;        /* Firefox */
+  -ms-overflow-style: none;     /* IE/Edge */
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;                /* Chrome/Safari */
+}

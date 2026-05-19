@@ -11,6 +11,8 @@ import { eVisaApi } from "@/lib/api-client";
 type DashboardApplication = {
   id: number;
   reference_number: string;
+  file_number?: string | null;
+  case_type?: string;
   service: number;
   service_name: string;
   service_type?: string;
@@ -45,6 +47,12 @@ function extractGovernmentReference(notes: string | null | undefined): string {
 }
 
 const APPS_CACHE_KEY_PREFIX = "dashboard_apps_cache:";
+
+const isApostilleDashboardApp = (app?: DashboardApplication | null) => {
+  const st = String(app?.service_type || "").toLowerCase();
+  const ct = String(app?.case_type || "").toLowerCase();
+  return st.includes("apostille") || ct === "apostille";
+};
 
 export default function DashboardApplicationsPage() {
   const router = useRouter();
@@ -149,6 +157,10 @@ export default function DashboardApplicationsPage() {
 
   const openApplication = async (referenceNumber: string) => {
     const selected = applications.find((item) => item.reference_number === referenceNumber);
+    if (isApostilleDashboardApp(selected)) {
+      router.push("/track-apostille");
+      return;
+    }
     const normalizedServiceType = String(selected?.service_type || "").toLowerCase();
     const isEVisa = normalizedServiceType.startsWith("evisa");
 
@@ -170,6 +182,10 @@ export default function DashboardApplicationsPage() {
 
   const openApplicationDetails = (referenceNumber: string) => {
     const selected = applications.find((item) => item.reference_number === referenceNumber);
+    if (isApostilleDashboardApp(selected)) {
+      router.push("/track-apostille");
+      return;
+    }
     const normalizedServiceType = String(selected?.service_type || "").toLowerCase();
     const isEVisa = normalizedServiceType.startsWith("evisa");
     if (isEVisa) {
@@ -244,6 +260,8 @@ export default function DashboardApplicationsPage() {
           {applications.length > 0 && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {applications.map((app) => {
+                const apostille = isApostilleDashboardApp(app);
+                const displayRef = apostille && (app.file_number || "").trim() ? String(app.file_number).trim() : app.reference_number;
                 const isOpeningThis = openingReference === app.reference_number;
                 const paymentStatus = app.payment_confirmed ? "Confirmed" : "Pending";
                 const emailStatus = app.email_confirmed ? "Confirmed" : "Pending";
@@ -254,14 +272,17 @@ export default function DashboardApplicationsPage() {
 
                 return (
                   <div
-                    key={app.reference_number}
+                    key={app.id}
                     className={`text-left rounded-2xl border p-5 sm:p-6 transition ${
                       "border-slate-200 bg-[#fcfdff] hover:border-slate-300 hover:shadow-[0_12px_30px_rgba(24,62,115,0.10)]"
                     } ${isOpeningThis ? "opacity-70" : ""}`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
                       <div className="flex-1">
-                        <p className="font-semibold text-primary text-base mb-1">{app.reference_number}</p>
+                        <p className="font-semibold text-primary text-base mb-1">{displayRef}</p>
+                        {apostille ? (
+                          <p className="text-xs text-slate-500 mb-1">Internal reference: {app.reference_number}</p>
+                        ) : null}
                         <p className="text-sm text-slate-600">{app.service_name || "e-Visa Service"}</p>
                       </div>
                       <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${statusTone(app.application_status)}`}>

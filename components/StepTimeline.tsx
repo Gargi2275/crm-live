@@ -39,15 +39,31 @@ export function StepTimeline({ steps }: StepTimelineProps) {
         />
 
         {steps.map((step, index) => (
-          <div key={index} className="relative flex md:flex-col items-start md:items-center relative z-10 md:w-1/3 px-4">
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={inView ? { scale: 1 } : { scale: 0 }}
-              transition={{ type: "spring", stiffness: 300, damping: 20, delay: index * 0.4 }}
-              className="w-12 h-12 rounded-full bg-primary text-white flex items-center justify-center font-bold text-lg shadow-[0_8px_24px_rgba(51,161,253,0.35)] flex-shrink-0 z-10"
-            >
-              {step.icon || (index + 1)}
-            </motion.div>
+          <div key={index} className="group relative flex md:flex-col items-start md:items-center relative z-10 md:w-1/3 px-4">
+            <div className="relative flex-shrink-0">
+              <motion.span
+                className="absolute inset-0 rounded-full bg-primary/20 blur-[10px] z-0"
+                initial={false}
+                animate={inView ? { scale: [1, 1.8, 1], opacity: [0.28, 0.06, 0.28] } : { scale: 0 }}
+                transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut", delay: index * 0.3 }}
+              />
+
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={inView ? { scale: 1 } : { scale: 0 }}
+                whileHover={{ scale: 1.12, boxShadow: "0 18px 40px rgba(28,105,221,0.18)" }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20, delay: index * 0.4 }}
+                className="w-12 h-12 rounded-full bg-primary text-white flex items-center justify-center font-bold text-lg shadow-[0_8px_24px_rgba(51,161,253,0.35)] z-10"
+              >
+                {step.icon || (index + 1)}
+              </motion.div>
+
+              {/* Tooltip (desktop) */}
+              <div className="hidden md:block absolute top-16 left-1/2 transform -translate-x-1/2 bg-white border border-[#e8f2ff] shadow-md rounded-md px-3 py-2 text-sm text-primary opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
+                {step.title}
+              </div>
+            </div>
 
             <motion.div
               initial={{ opacity: 0, y: 20 }}

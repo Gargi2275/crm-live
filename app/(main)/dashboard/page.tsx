@@ -9,6 +9,8 @@ import { ArrowRight, Globe2, HelpCircle, Search, Sparkles, TimerReset } from "lu
 type DashboardApplication = {
   id: number;
   reference_number: string;
+  file_number?: string | null;
+  case_type?: string;
   service: number;
   service_name: string;
   service_type?: string;
@@ -74,6 +76,12 @@ function extractGovernmentReference(notes: string | null | undefined): string {
 
   return "";
 }
+
+const isApostilleDashboardApp = (app?: DashboardApplication | null) => {
+  const st = String(app?.service_type || "").toLowerCase();
+  const ct = String(app?.case_type || "").toLowerCase();
+  return st.includes("apostille") || ct === "apostille";
+};
 
 function ActionCard({ eyebrow, title, description, href, cta, tone, icon }: ActionCardProps) {
   const styles = toneStyles[tone];
@@ -204,17 +212,23 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {applications.map((app) => (
                 <div
-                  key={app.reference_number}
+                  key={app.id}
                   className="text-left rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm hover:shadow-lg transition"
                 >
                   {(() => {
+                    const apostille = isApostilleDashboardApp(app);
+                    const displayRef =
+                      apostille && (app.file_number || "").trim() ? String(app.file_number).trim() : app.reference_number;
                     const governmentReference = extractGovernmentReference(app.notes);
                     const decisionDate = app.approval_date || app.completion_date;
                     return (
                       <>
                   <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
                     <div className="flex-1">
-                      <p className="font-semibold text-primary text-base mb-1">{app.reference_number}</p>
+                      <p className="font-semibold text-primary text-base mb-1">{displayRef}</p>
+                      {apostille ? (
+                        <p className="text-xs text-slate-500 mb-1">Internal reference: {app.reference_number}</p>
+                      ) : null}
                       <p className="text-sm text-slate-600">{app.service_name || "e-Visa Service"}</p>
                     </div>
                     <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border whitespace-nowrap bg-slate-100 text-slate-700 border-slate-200">
@@ -240,9 +254,13 @@ export default function DashboardPage() {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Link
-                      href={app.service_type && app.service_type.toLowerCase().startsWith("evisa")
-                        ? `/indian-e-visa?case=${encodeURIComponent(app.reference_number)}&view=details`
-                        : `/dashboard/document-audit?reference=${encodeURIComponent(app.reference_number)}&resume=1`}
+                      href={
+                        isApostilleDashboardApp(app)
+                          ? "/track-apostille"
+                          : app.service_type && app.service_type.toLowerCase().startsWith("evisa")
+                            ? `/indian-e-visa?case=${encodeURIComponent(app.reference_number)}&view=details`
+                            : `/dashboard/document-audit?reference=${encodeURIComponent(app.reference_number)}&resume=1`
+                      }
                       className="inline-flex items-center rounded-lg border border-slate-300 text-slate-700 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
                     >
                       View Application

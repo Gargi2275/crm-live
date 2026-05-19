@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import {
+  AccessScope,
   AdminStaffUser,
   StaffRole,
   createStaffUserWithPassword,
@@ -24,6 +25,7 @@ export default function StaffPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resettingStaffId, setResettingStaffId] = useState<number | null>(null);
+
   const [newStaff, setNewStaff] = useState({
     full_name: "",
     username: "",
@@ -31,6 +33,7 @@ export default function StaffPage() {
     phone: "",
     password: "",
     role: "case_processor" as StaffRole,
+    access_scope: "all" as AccessScope,
   });
 
   const canCreate = adminUser?.role === "admin";
@@ -111,7 +114,7 @@ export default function StaffPage() {
     try {
       await createStaffUserWithPassword(newStaff);
       toast.success("Staff user created successfully.");
-      setNewStaff({ full_name: "", username: "", email: "", phone: "", password: "", role: "case_processor" });
+      setNewStaff({ full_name: "", username: "", email: "", phone: "", password: "", role: "case_processor", access_scope: "all" });
       await loadStaffUsers();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create staff user.");
@@ -129,6 +132,21 @@ export default function StaffPage() {
     } catch (error) {
       if (!handleAuthFailure(error)) {
         toast.error(error instanceof Error ? error.message : "Failed to update role.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAccessScopeChange = async (staffId: number, access_scope: AccessScope) => {
+    setSaving(true);
+    try {
+      await updateStaffUser(staffId, { access_scope });
+      toast.success("Access scope updated.");
+      await loadStaffUsers();
+    } catch (error) {
+      if (!handleAuthFailure(error)) {
+        toast.error(error instanceof Error ? error.message : "Failed to update access scope.");
       }
     } finally {
       setSaving(false);
@@ -293,7 +311,12 @@ export default function StaffPage() {
             />
             <select
               value={newStaff.role}
-              onChange={(e) => setNewStaff((prev) => ({ ...prev, role: e.target.value as StaffRole }))}
+              onChange={(e) =>
+                setNewStaff((prev) => ({
+                  ...prev,
+                  role: e.target.value as StaffRole,
+                }))
+              }
               className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
             >
               {allowedCreateRoles.map((role) => (
@@ -302,6 +325,23 @@ export default function StaffPage() {
                 </option>
               ))}
             </select>
+
+            {isAdmin && (
+              <select
+                value={newStaff.access_scope}
+                onChange={(e) =>
+                  setNewStaff((prev) => ({
+                    ...prev,
+                    access_scope: e.target.value as AccessScope,
+                  }))
+                }
+                className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+              >
+                <option value="all">All Access</option>
+                <option value="easyfly_only">EasyFly Only</option>
+                <option value="exclude_easyfly">FlyOCI only</option>
+              </select>
+            )}
           </div>
           <button
             onClick={handleCreate}
@@ -334,6 +374,7 @@ export default function StaffPage() {
                 <th className="px-4 py-2.5 text-left">Name</th>
                 <th className="px-4 py-2.5 text-left">Email</th>
                 <th className="px-4 py-2.5 text-left">Role</th>
+                <th className="px-4 py-2.5 text-left">Access scope</th>
                 <th className="px-4 py-2.5 text-left">Active</th>
                 <th className="px-4 py-2.5 text-left">Last login</th>
                 <th className="px-4 py-2.5 text-left">Actions</th>
@@ -361,6 +402,21 @@ export default function StaffPage() {
                       </select>
                     ) : (
                       row.role
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {isAdmin ? (
+                      <select
+                        value={row.access_scope ?? "all"}
+                        onChange={(e) => handleAccessScopeChange(row.id, e.target.value as AccessScope)}
+                        className="rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-xs"
+                      >
+                        <option value="all">All Access</option>
+                        <option value="easyfly_only">EasyFly Only</option>
+                        <option value="exclude_easyfly">FlyOCI only</option>
+                      </select>
+                    ) : (
+                      row.access_scope ?? "all"
                     )}
                   </td>
                   <td className="px-4 py-2.5">
@@ -415,6 +471,8 @@ export default function StaffPage() {
                   </td>
                 </tr>
               ))}
+
+
             </tbody>
           </table>
         </div>

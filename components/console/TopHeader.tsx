@@ -27,7 +27,8 @@ export function TopHeader() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
   const [openAlertCount, setOpenAlertCount] = useState(0);
-  const [notifications, setNotifications] = useState<Array<{ id: string | number; type: string; message: string; timestamp: string }>>([]);
+  // const [notifications, setNotifications] = useState<Array<{ id: string | number; type: string; message: string; timestamp: string }>>([]);
+  const [notifications, setNotifications] = useState<import("@/lib/admin-auth").AdminNotification[]>([]);
   const { logout, adminUser } = useAdminAuth();
   const router = useRouter();
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
@@ -47,6 +48,25 @@ const debouncedQuery = useDebounce(searchQuery, 350);
   };
   const roleLabel = roleLabelMap[String(adminUser?.role || "")] || "Staff";
 
+  const loadAlertSummary = useCallback(async (markRead = false) => {
+    try {
+      const payload = await getAdminAlerts(markRead);
+      const notificationsData = payload?.notifications ?? [];
+      setNotifications(notificationsData);
+
+      const unreadFromSummary = payload?.summary?.unread;
+      if (typeof unreadFromSummary === "number") {
+        setOpenAlertCount(unreadFromSummary);
+      } else {
+        const unreadCount = notificationsData.filter((n) => !n.is_read).length;
+        setOpenAlertCount(unreadCount);
+      }
+    } catch {
+      setOpenAlertCount(0);
+      setNotifications([]);
+    }
+  }, []);
+
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -65,24 +85,6 @@ const debouncedQuery = useDebounce(searchQuery, 350);
   useEffect(() => {
     let isMounted = true;
 
-    const loadAlertSummary = async () => {
-      try {
-        const payload = await getAdminAlerts();
-        if (!isMounted) {
-          return;
-        }
-        const unresolvedCount = Number(payload?.summary?.open || 0);
-        setOpenAlertCount(unresolvedCount);
-        setNotifications(payload?.notifications ?? []);
-      } catch {
-        if (!isMounted) {
-          return;
-        }
-        setOpenAlertCount(0);
-        setNotifications([]);
-      }
-    };
-
     void loadAlertSummary();
     const intervalId = window.setInterval(() => {
       void loadAlertSummary();
@@ -92,7 +94,7 @@ const debouncedQuery = useDebounce(searchQuery, 350);
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [adminUser?.role]);
 
 const runSearch = useCallback(async (q: string) => {
   if (q.trim().length < 2) { setSearchResults(null); return; }
@@ -109,6 +111,7 @@ const runSearch = useCallback(async (q: string) => {
 }, []);
 
 useEffect(() => { void runSearch(debouncedQuery); }, [debouncedQuery, runSearch]);
+
 
 const totalResults = searchResults
   ? (searchResults.cases?.length ?? 0) + (searchResults.customers?.length ?? 0) + (searchResults.leads?.length ?? 0)
@@ -231,13 +234,19 @@ const totalResults = searchResults
 
 
         {/* Notifications */}
+        
         <div ref={notificationMenuRef} className="relative">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             className="relative p-2 text-slate-600 hover:bg-[#F5F7FA] rounded-full transition-colors"
             onClick={() => {
-              setShowNotificationMenu((prev) => !prev);
+              setShowNotificationMenu((prev) => {
+                const next = !prev;
+                // when opening the menu, mark visible alerts as read on the server
+                if (next) void loadAlertSummary(true);
+                return next;
+              });
               setShowProfileMenu(false);
             }}
             aria-label="Open notifications"
@@ -255,16 +264,18 @@ const totalResults = searchResults
             <div className="absolute right-0 mt-2 w-[340px] max-w-[90vw] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] z-20 overflow-hidden">
               <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
                 <p className="text-sm font-semibold text-[#102A43] font-heading">Notifications</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowNotificationMenu(false);
-                    router.push("/admin/alerts");
-                  }}
-                  className="text-xs text-[#009877] hover:underline"
-                >
-                  View all
-                </button>
+               {["admin", "ops_manager"].includes(adminUser?.role || "") && (
+  <button
+    type="button"
+    onClick={() => {
+      setShowNotificationMenu(false);
+      router.push("/admin/alerts");
+    }}
+    className="text-xs text-[#009877] hover:underline"
+  >
+    View all
+  </button>
+)}
               </div>
 
               <div className="max-h-80 overflow-y-auto">

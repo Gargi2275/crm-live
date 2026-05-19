@@ -11,14 +11,14 @@ export function ServiceFees() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-5">
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-4 sm:p-5 flex flex-col">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-5">
+          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-4 sm:p-4 flex flex-col">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">OCI Update</h3>
-            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[34px] sm:min-h-[40px]">Gratis service on govt portal</p>
+            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Gratis service on govt portal</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-2xl sm:text-3xl font-mono font-bold text-primary mt-1">£50</p>
+            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£50</p>
             <span className="bg-[#e6f4ee] text-[#0f5c38] text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">£35 with audit credit</span>
             <p className="text-xs text-[#0f5c38] mt-2">Save £15 with audit</p>
 
@@ -29,14 +29,14 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border-2 border-[#1a7f5a] bg-[#f4fbf7] rounded-2xl p-4 sm:p-5 flex flex-col relative">
-            <span className="absolute top-4 right-4 bg-[#1a7f5a] text-white text-[11px] px-2.5 sm:px-3 py-1 rounded-full font-semibold">Popular</span>
-            <h3 className="text-base sm:text-lg font-heading font-bold text-primary pr-16 sm:pr-20 leading-snug">New OCI Application</h3>
+          <article className="border-2 border-[#1a7f5a] bg-[#f4fbf7] rounded-2xl p-3 sm:p-4 flex flex-col relative">
+            <span className="absolute top-3 right-3 bg-[#1a7f5a] text-white text-[10px] px-2 sm:px-3 py-1 rounded-full font-semibold">Popular</span>
+            <h3 className="text-base sm:text-lg font-heading font-bold text-primary pr-12 sm:pr-16 leading-snug">New OCI Application</h3>
             <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[34px] sm:min-h-[40px]">Most selected by applicants</p>
             <div className="border-t border-[#cfe9de] mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-2xl sm:text-3xl font-mono font-bold text-primary mt-1">£88</p>
+            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£88</p>
             <span className="bg-[#e6f4ee] text-[#0f5c38] text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">£73 with audit credit</span>
             <p className="text-xs text-[#0f5c38] mt-2">Save £15 with audit</p>
 
@@ -47,13 +47,13 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-4 sm:p-5 flex flex-col">
+          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-3 sm:p-4 flex flex-col">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">OCI Renewal / Transfer</h3>
-            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[34px] sm:min-h-[40px]">Transfer to new passport</p>
+            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Transfer to new passport</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-2xl sm:text-3xl font-mono font-bold text-primary mt-1">£78</p>
+            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£78</p>
             <span className="bg-[#e6f4ee] text-[#0f5c38] text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">£63 with audit credit</span>
             <p className="text-xs text-[#0f5c38] mt-2">Save £15 with audit</p>
 
@@ -64,13 +64,13 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-4 sm:p-5 flex flex-col">
+          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-3 sm:p-4 flex flex-col">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">Indian e-Visa 1 Year</h3>
-            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[34px] sm:min-h-[40px]">Includes government fee of approx. £32</p>
+            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Includes government fee of approx. £32</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-2xl sm:text-3xl font-mono font-bold text-primary mt-1">£88</p>
+            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£88</p>
             <span className="bg-gray-100 text-gray-400 text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">No credit</span>
             <p className="text-xs text-gray-400 mt-2">Government fee included</p>
 
@@ -81,13 +81,13 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-4 sm:p-5 flex flex-col lg:col-start-2">
+          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-3 sm:p-4 flex flex-col lg:col-start-2">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">Indian e-Visa 5 Year</h3>
-            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[34px] sm:min-h-[40px]">Includes government fee of approx. £70</p>
+            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Includes government fee of approx. £70</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-2xl sm:text-3xl font-mono font-bold text-primary mt-1">£150</p>
+            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£150</p>
             <span className="bg-gray-100 text-gray-400 text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">No credit</span>
             <p className="text-xs text-gray-400 mt-2">Government fee included</p>
 
@@ -98,13 +98,13 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-dashed border-gray-300 bg-gray-50 rounded-2xl p-4 sm:p-5 flex flex-col lg:col-start-3">
+          <article className="border border-dashed border-gray-300 bg-gray-50 rounded-2xl p-3 sm:p-4 flex flex-col lg:col-start-3">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">Indian Passport Renewal</h3>
-            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[34px] sm:min-h-[40px]">UK/US applicants, depends on category and courier options</p>
+            <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">UK/US applicants, depends on category and courier options</p>
             <div className="border-t border-gray-300 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-2xl sm:text-3xl font-mono font-bold text-gray-500 mt-1">Price on request</p>
+            <p className="text-xl sm:text-2xl font-mono font-bold text-gray-500 mt-1">Price on request</p>
             <span className="bg-gray-100 text-gray-400 text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">No credit</span>
             <p className="text-xs text-gray-400 mt-2">Share your case for an exact quote</p>
 

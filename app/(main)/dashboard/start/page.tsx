@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Globe2, Sparkles } from "lucide-react";
+import { FileCheck2, Globe2, Sparkles } from "lucide-react";
 
 export default function StartApplicationPage() {
   return (
@@ -17,6 +17,11 @@ export default function StartApplicationPage() {
           <Sparkles className="h-8 w-8 text-[#0B69B7] mb-2" />
           <span className="font-semibold text-[#0B69B7]">OCI</span>
           <span className="mt-1 text-xs text-[#486581]">OCI Card</span>
+        </Link>
+        <Link href="/apostille-pre-check" className="w-full inline-flex flex-col items-center justify-center rounded-xl border border-[#CFE4F8] bg-[#EAF5FF] px-4 py-6 text-center shadow-sm hover:bg-[#DDEEFF] transition-colors">
+          <FileCheck2 className="h-8 w-8 text-[#0B69B7] mb-2" />
+          <span className="font-semibold text-[#0B69B7]">Apostille</span>
+          <span className="mt-1 text-xs text-[#486581]">Document Apostille Service</span>
         </Link>
       </div>
     </section>

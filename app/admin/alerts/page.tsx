@@ -89,8 +89,16 @@ export default function AlertsPage() {
           <motion.div key={alert.id} whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 flex items-center justify-between gap-3 shadow-sm">
             <div>
               <p className="text-sm text-[#102A43] font-medium">{alert.title}</p>
-              <p className="text-xs text-[#627D98]">{alert.formatted_message || alert.message || alert.source_reference}</p>
-              <p className="mt-1 text-[11px] uppercase tracking-[0.08em] text-[#486581]">{alert.alert_type_label || getAlertTypeLabel(alert.alert_type)} | Status: {alert.status}</p>
+             <p className="text-xs text-[#627D98]">{alert.formatted_message || alert.message || alert.source_reference}</p>
+{alert.source_reference === "tasks:high_priority" &&
+  Array.isArray((alert.metadata as Record<string, unknown>)?.task_ids) &&
+  ((alert.metadata as Record<string, unknown>).task_ids as Record<string, unknown>[]).map((task) => (
+    <p key={String(task.id)} className="text-xs text-[#B42318] mt-0.5">
+      #{String(task.application__reference_number ?? "N/A")} — {String(task.task_type)} — {String(task.priority).toUpperCase()} — due {new Date(String(task.deadline)).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+    </p>
+  ))
+}
+<p className="mt-1 text-[11px] uppercase tracking-[0.08em] text-[#486581]">{alert.alert_type_label || getAlertTypeLabel(alert.alert_type)} | Status: {alert.status}</p>
             </div>
             <div className="flex gap-2">
               <motion.button whileTap={{ scale: 0.97 }} className="text-xs px-3 py-1 rounded-full bg-[#F5F7FA] text-[#334E68] border-[0.5px] border-[#D9E1EA] disabled:opacity-60" onClick={() => void handleAlertStatusUpdate(alert, "dismissed")} disabled={updatingAlertId === alert.id || alert.status === "dismissed"}>
@@ -119,16 +127,46 @@ export default function AlertsPage() {
                 <th className="px-4 py-2.5 text-left">Priority</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              {(alertsData?.notifications ?? []).map((notification, index) => (
-                <tr key={notification.id}>
-                  <td className="px-4 py-2.5">{notification.message}</td>
-                  <td className="px-4 py-2.5">{notification.type_label || getAlertTypeLabel(notification.type)}</td>
-                  <td className="px-4 py-2.5">{new Date(notification.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
-                  <td className="px-4 py-2.5">{index === 0 ? "Critical" : index < 3 ? "High" : "Medium"}</td>
-                </tr>
-              ))}
-            </tbody>
+           <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+  {(alertsData?.notifications ?? []).map((notification) => (
+    <tr key={notification.id}>
+      {/* Case column — show task details if available */}
+      <td className="px-4 py-2.5">
+        <span>{notification.message}</span>
+        {Array.isArray(notification.task_ids) &&
+          notification.task_ids.map((task) => (
+            <p key={String(task.id)} className="text-xs text-[#B42318] mt-0.5">
+              #{String(task.application__reference_number ?? "N/A")} — {String(task.task_type)} — {String(task.priority).toUpperCase()} — due {new Date(String(task.deadline)).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+            </p>
+          ))
+        }
+      </td>
+      {/* Owner column — show actor name if available */}
+      <td className="px-4 py-2.5">
+        {notification.actor
+          ? notification.actor
+          : notification.type_label || getAlertTypeLabel(notification.type)}
+      </td>
+      {/* Age column */}
+      <td className="px-4 py-2.5">
+        {new Date(notification.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+      </td>
+      {/* Priority column */}
+      <td className="px-4 py-2.5">
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+          notification.severity === "critical" ? "bg-red-100 text-red-700" :
+          notification.severity === "high" ? "bg-orange-100 text-orange-700" :
+          notification.severity === "low" ? "bg-gray-100 text-gray-600" :
+          "bg-yellow-100 text-yellow-700"
+        }`}>
+          {notification.severity
+            ? notification.severity.charAt(0).toUpperCase() + notification.severity.slice(1)
+            : "Medium"}
+        </span>
+      </td>
+    </tr>
+  ))}
+</tbody>
           </table>
         </div>
       </div>

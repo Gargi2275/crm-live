@@ -7,6 +7,7 @@ import {
   getAdminTokens,
   getStoredAdminUser,
   loginAdmin,
+  normalizeAdminStaffUser,
 } from "@/lib/admin-auth";
 
 interface AdminAuthContextType {
@@ -27,14 +28,14 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     const { access } = getAdminTokens();
     const storedUser = getStoredAdminUser();
     if (access && storedUser) {
-      setAdminUser(storedUser);
+      setAdminUser(normalizeAdminStaffUser(storedUser));
     }
     setIsBootstrapped(true);
   }, []);
 
   const login = async (username: string, password: string) => {
     const user = await loginAdmin(username, password);
-    setAdminUser(user);
+    setAdminUser(normalizeAdminStaffUser(user));
   };
 
   const logout = () => {

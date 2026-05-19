@@ -318,6 +318,62 @@ export type CreateApplicationResponse = {
   reference_number?: string;
 };
 
+export type ApostillePreCheckPayload = {
+  full_name: string;
+  email: string;
+  phone_number?: string;
+  country?: string;
+  document_type?: string;
+  document_issued_in?: string;
+  purpose?: string;
+  notes?: string;
+};
+
+export type ApostillePreCheckResponse = {
+  application_id: number;
+  reference_number: string;
+  status: string;
+  resume_url: string;
+  file_number?: string;
+  success?: boolean;
+  message?: string;
+};
+
+export type ApostilleTrackMessage = {
+  sender: string;
+  subject?: string;
+  message: string;
+  created_at: string;
+  is_read?: boolean;
+};
+
+export type ApostilleTrackStatusLog = {
+  action: string;
+  timestamp: string;
+  actor: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ApostilleTrackCaseResponse = {
+  file_number: string;
+  full_name: string;
+  document_type: string;
+  status: string;
+  review_note: string;
+  quoted_fee: string | null;
+  quote_currency: string;
+  payment_verified: boolean;
+  final_submission_completed: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  messages: ApostilleTrackMessage[];
+  status_logs: ApostilleTrackStatusLog[];
+  documents: Array<{ id: number; name: string }>;
+};
+
+/** Legacy GET track by reference in URL path */
+export type ApostilleTrackResponse = ApostilleTrackCaseResponse;
+
 export type ApplicationDetailResponse = {
   id: number;
   reference_number: string;
@@ -429,7 +485,7 @@ export type SubmitTestimonialResponse = {
 };
 
 
-const extractErrorMessage = async (response: Response): Promise<string> => {
+export const extractErrorMessage = async (response: Response): Promise<string> => {
   const fallback = 'Request failed';
   try {
     const data = await response.json();
@@ -475,6 +531,129 @@ export const createApplication = async (serviceType: string): Promise<CreateAppl
     throw new Error(error instanceof Error ? error.message : 'Could not start your application. Please try again.');
   }
 }
+
+export const createApostillePreCheck = async (payload: ApostillePreCheckPayload): Promise<ApostillePreCheckResponse> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/apostille/pre-check/`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as ApostillePreCheckResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to submit apostille pre-check');
+  }
+};
+
+/** Multipart public pre-check (main_document required). */
+export const submitApostillePreCheck = async (formData: FormData): Promise<ApostillePreCheckResponse> => {
+  const response = await fetch(`${API_BASE_URL}/apostille/pre-check/`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as ApostillePreCheckResponse;
+};
+
+export const trackApostilleCase = async (fileNumber: string, email: string): Promise<ApostilleTrackCaseResponse> => {
+  const response = await apiCall(`${API_BASE_URL}/apostille/track/`, {
+    method: 'POST',
+    body: JSON.stringify({ file_number: fileNumber, email }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as ApostilleTrackCaseResponse;
+};
+
+export const trackApostilleLegacy = async (
+  referenceNumber: string,
+  email: string
+): Promise<ApostilleTrackCaseResponse> => {
+  const response = await apiCall(
+    `${API_BASE_URL}/apostille/track/${encodeURIComponent(referenceNumber)}/?email=${encodeURIComponent(email)}`,
+    { method: 'GET' }
+  );
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as ApostilleTrackCaseResponse;
+};
+
+export const createApostillePaymentOrder = async (
+  fileNumber: string,
+  email: string
+): Promise<{ order_id: string; amount: number; currency: string; key_id: string }> => {
+  const response = await apiCall(`${API_BASE_URL}/apostille/payment/create-order/`, {
+    method: 'POST',
+    body: JSON.stringify({ file_number: fileNumber, email }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as { order_id: string; amount: number; currency: string; key_id: string };
+};
+
+export const verifyApostillePayment = async (
+  fileNumber: string,
+  email: string,
+  razorpay_order_id: string,
+  razorpay_payment_id: string,
+  razorpay_signature: string
+): Promise<{ status: string }> => {
+  const response = await apiCall(`${API_BASE_URL}/apostille/payment/verify/`, {
+    method: 'POST',
+    body: JSON.stringify({
+      file_number: fileNumber,
+      email,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as { status: string };
+};
+
+export const submitApostilleFinalDetails = async (formData: FormData): Promise<{ status: string }> => {
+  const response = await fetch(`${API_BASE_URL}/apostille/final-submission/`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as { status: string };
+};
+
+export const sendApostilleCustomerMessage = async (
+  fileNumber: string,
+  email: string,
+  message: string
+): Promise<void> => {
+  const response = await apiCall(`${API_BASE_URL}/apostille/message/`, {
+    method: 'POST',
+    body: JSON.stringify({ file_number: fileNumber, email, message }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+};
 
 export const getApplicationByReference = async (referenceNumber: string): Promise<ApplicationDetailResponse> => {
   try {
@@ -618,12 +797,8 @@ export const uploadDocument = async (
     }
     formData.append('file', file);
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || '' : '';
-    const response = await fetch(`${API_BASE_URL}/audit/upload-document/`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/audit/upload-document/`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
       body: formData,
     });
 

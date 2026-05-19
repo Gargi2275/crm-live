@@ -41,7 +41,7 @@ export function Navbar() {
   const [activeDropdown, setActiveDropdown] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [dashboardQuoteHref, setDashboardQuoteHref] = useState<string>("/dashboard");
+  // const [dashboardQuoteHref, setDashboardQuoteHref] = useState<string>("/dashboard");
   const [hasQuoteNotification, setHasQuoteNotification] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
@@ -101,7 +101,7 @@ export function Navbar() {
   useEffect(() => {
     if (!isAuthenticated) {
       setHasQuoteNotification(false);
-      setDashboardQuoteHref("/dashboard");
+      // setDashboardQuoteHref("/dashboard");
       return;
     }
 
@@ -126,10 +126,8 @@ export function Navbar() {
 
         if (quotedPassport?.reference_number) {
           setHasQuoteNotification(true);
-          setDashboardQuoteHref(`/dashboard/document-audit?reference=${encodeURIComponent(quotedPassport.reference_number)}&resume=1&focusQuote=1`);
         } else {
           setHasQuoteNotification(false);
-          setDashboardQuoteHref("/dashboard");
         }
       } catch {
         if (!cancelled) {
@@ -155,24 +153,24 @@ export function Navbar() {
         transition={{ duration: 0.3 }}
         className={`fixed top-0 w-full z-50 border-b transition-shadow backdrop-blur-xl ${isScrolled ? "shadow-navbar" : ""}`}
       >
-        <div className="max-w-7xl mx-auto px-2">
-          <div className="flex justify-between items-center h-20">
+        <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10">
+          <div className="flex h-18 items-center justify-between gap-4 lg:h-20">
             {/* Logo */}
-            <Link href="/" className="flex-shrink-0 flex items-center relative z-50 ">
+            <Link href="/" className="relative z-50 flex flex-shrink-0 items-center">
 
               <Image
                 src="/logo.png"
                 alt="FlyOCI Logo"
                 width={120}
                 height={40}
-                className="h-10 w-auto"
+                className="h-9 w-auto sm:h-10"
                 priority
               />
             </Link>
 
             {/* Desktop Navigation */}
             {!isDashboardRoute && (
-            <div className="hidden lg:flex items-center space-x-2 lg:space-x-1">
+            <div className="hidden flex-1 items-center justify-center lg:flex lg:space-x-1 xl:space-x-2">
               {navLinks.map((link) => (
                 <div
                   key={link.name}
@@ -182,7 +180,7 @@ export function Navbar() {
                 >
                   <Link
                     href={link.href}
-                    className="px-3 py-2 rounded-md text-sm font-medium transition-all duration-250 ease-out flex items-center relative group text-dark/90 hover:text-primary"
+                    className="relative group flex items-center rounded-md px-2 py-2 text-sm font-medium text-dark/90 transition-all duration-250 ease-out hover:text-primary xl:px-3"
                   >
                     {link.name}
                     {link.dropdown && <ChevronDown className="ml-1 w-4 h-4" />}
@@ -227,7 +225,7 @@ export function Navbar() {
             )}
 
             {/* CTA / Auth Buttons */}
-            <div className="hidden lg:flex items-center gap-2">
+            <div className="hidden shrink-0 items-center gap-2 lg:flex">
               {isDashboardRoute ? (
                 <>
                   <Link
@@ -292,7 +290,7 @@ export function Navbar() {
                 <Button variant="outline" className="text-sm" disabled>Loading...</Button>
               ) : isAuthenticated ? (
                 <>
-                  <Link href={dashboardQuoteHref} className="relative">
+                  <Link href="/dashboard" className="relative">
                     {hasQuoteNotification ? <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-rose-500" aria-hidden="true" /> : null}
                     <Button variant="outline" className="text-sm">Dashboard</Button>
                   </Link>
@@ -314,10 +312,10 @@ export function Navbar() {
 
 
             {/* Mobile menu button */}
-            <div className="flex lg:hidden items-center z-50">
+            <div className="z-50 flex items-center lg:hidden">
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="p-2 rounded-md focus:outline-none text-dark hover:text-primary"
+                className="rounded-md p-2 text-dark focus:outline-none hover:text-primary"
               >
                 {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
               </button>
@@ -347,7 +345,7 @@ export function Navbar() {
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 right-0 max-w-sm w-full bg-white/95 backdrop-blur-xl z-40 shadow-[0_18px_48px_rgba(51,161,253,0.2)] overflow-y-auto lg:hidden pt-24 pb-8 px-6"
+            className="fixed inset-y-0 right-0 z-40 w-full max-w-sm overflow-y-auto bg-white/95 px-5 pb-8 pt-24 shadow-[0_18px_48px_rgba(51,161,253,0.2)] backdrop-blur-xl lg:hidden sm:px-6"
           >
             <div className="flex flex-col space-y-6">
               {isDashboardRoute ? (

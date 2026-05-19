@@ -1,214 +1,148 @@
-// "use client";
-
-// import { motion } from "framer-motion";
-// import { CheckCircle, ShieldCheck, Clock, MessageCircle } from "lucide-react";
-// import Link from "next/link";
-// import { Button } from "./ui/Button";
-
-// const containerVariants = {
-//   hidden: {},
-//   visible: {
-//     transition: {
-//       staggerChildren: 0.15,
-//     },
-//   },
-// };
-
-// const itemVariants = {
-//   hidden: { opacity: 0, y: 20 },
-//   visible: {
-//     opacity: 1,
-//     y: 0,
-//     transition: { duration: 0.6, ease: "easeOut" as const },
-//   },
-// };
-
-// const badges = [
-//   { text: "UK-based support", icon: <CheckCircle className="w-4 h-4 text-secondary" /> },
-//   { text: "Transparent fixed fees", icon: <ShieldCheck className="w-4 h-4 text-accent" /> },
-//   { text: "Secure document uploads", icon: <Clock className="w-4 h-4 text-primary" /> },
-//   { text: "WhatsApp & email updates", icon: <MessageCircle className="w-4 h-4 text-primary" /> },
-// ];
-
-// export function HeroSection() {
-//   return (
-//     <section className="relative min-h-[90vh] flex flex-col justify-center items-center overflow-hidden pt-28 pb-16 px-4 sm:px-6 lg:px-8 bg-hero">
-//       {/* Animated Background Mesh and SVG Shapes */}
-//       <motion.div
-//         animate={{ x: [0, 30, 0], y: [0, -20, 0] }}
-//         transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-//         className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(0,152,119,0.15)_0%,transparent_70%)] pointer-events-none blur-3xl z-0"
-//       />
-//       <motion.div
-//         animate={{ x: [0, -40, 0], y: [0, 30, 0] }}
-//         transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-//         className="absolute bottom-[-10%] right-[-10%] w-[60vw] h-[60vw] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.15)_0%,transparent_70%)] pointer-events-none blur-3xl z-0"
-//       />
-
-    
-
-//       <motion.div
-//         variants={containerVariants}
-//         initial="hidden"
-//         animate="visible"
-//         className="relative z-10 w-full max-w-4xl mx-auto text-center"
-//       >
-//         <motion.h1
-//           variants={itemVariants}
-//           className="font-heading text-dark font-extrabold tracking-tight mb-6 leading-[1.1]"
-//           style={{ fontSize: "clamp(40px, 5vw, 72px)" }}
-//         >
-//           <span className="text-primary font-bold">Hassle-Free</span> OCI, Indian e-Visa & Passport Services <span className="text-accent italic">— Done For You</span>
-//         </motion.h1>
-
-//         <motion.p
-//           variants={itemVariants}
-//           className="font-body text-lg sm:text-xl text-muted max-w-2xl mx-auto mb-10 leading-relaxed"
-//         >
-//           For UK & US residents of Indian origin. We handle the forms, documents and appointments so you don&apos;t lose time or miss travel plans.
-//         </motion.p>
-
-//         <motion.div
-//           variants={itemVariants}
-//           className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14"
-//         >
-//           <Link href="/document-audit" className="w-full sm:w-auto">
-//             <Button variant="primary" className="w-full sm:w-auto text-lg py-4">
-//               Get My Documents Checked
-//             </Button>
-//           </Link>
-//           <Link href="/services" className="w-full sm:w-auto">
-//             <Button variant="outline" className="w-full sm:w-auto text-lg py-4 bg-white/50 backdrop-blur-sm">
-//               View Services & Pricing
-//             </Button>
-//           </Link>
-//         </motion.div>
-
-//         <motion.div
-//           variants={itemVariants}
-//           className="flex flex-wrap justify-center items-center gap-3 sm:gap-6"
-//         >
-//           {badges.map((badge, index) => (
-//             <motion.div
-//               key={index}
-//               whileHover={{ y: -3, boxShadow: "0 4px 12px rgba(51,161,253,0.15)" }}
-//               className="flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-badge px-3 py-1 text-sm font-medium text-primary transition-all"
-//             >
-//               {badge.icon}
-//               {badge.text}
-//             </motion.div>
-//           ))}
-//         </motion.div>
-//       </motion.div>
-//     </section>
-//   );
-// }
-
-
-
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { CheckCircle, ShieldCheck, Clock, MessageCircle, ChevronRight, IdCard, Plane, BookUser, Stamp } from "lucide-react";
-import Link from "next/link";
+import { AnimatePresence, motion, useMotionValue, useTransform, useSpring } from "framer-motion";
+import {
+  ArrowRight,
+  BadgeCheck,
+  BookUser,
+  CheckCircle,
+  ChevronDown,
+  IdCard,
+  MessageCircle,
+  Plane,
+  ShieldCheck,
+  Sparkles,
+  Stamp,
+  Star,
+  Zap,
+} from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { useState } from "react";
-import { Button } from "./ui/Button";
 
-const containerVariants = {
+// ─── Animation variants ───────────────────────────────────────────────────────
+const container = {
   hidden: {},
-  visible: {
-    transition: {
-      staggerChildren: 0.12,
-    },
-  },
+  visible: { transition: { staggerChildren: 0.09 } },
 };
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
+const item = {
+  hidden: { opacity: 0, y: 22 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.5, ease: "easeOut" as const },
+    transition: { duration: 0.52, ease: "easeOut" as const },
   },
 };
 
-const badges = [
-  { text: "UK-based support", icon: <CheckCircle className="w-4 h-4 text-secondary" /> },
-  { text: "Transparent fixed fees", icon: <ShieldCheck className="w-4 h-4 text-accent" /> },
-  { text: "Secure document uploads", icon: <Clock className="w-4 h-4 text-primary" /> },
-  { text: "WhatsApp & email updates", icon: <MessageCircle className="w-4 h-4 text-primary" /> },
+// ─── Data ─────────────────────────────────────────────────────────────────────
+const trustBadges = [
+  { text: "UK-based support", icon: CheckCircle },
+  { text: "Transparent fixed fees", icon: ShieldCheck },
+  { text: "Secure document uploads", icon: BadgeCheck },
+  { text: "WhatsApp & email updates", icon: MessageCircle },
 ];
 
-export function HeroSection() {
-  const serviceGroups: Array<{
-    key: "oci" | "evisa" | "passport" | "apostille";
-    label: string;
-    tag?: string;
-    icon: React.ComponentType<{ className?: string }>;
-    options: Array<{ label: string; href: string }>;
-  }> = [
-    {
-      key: "oci",
-      label: "OCI Services",
-      tag: "Popular",
-      icon: IdCard,
-      options: [
-        { label: "New OCI Card", href: "/services/new-oci" },
-        { label: "OCI Renewal / Transfer", href: "/services/oci-renewal" },
-        { label: "OCI Update (Gratis)", href: "/services/oci-update" },
-      ],
-    },
-    {
-      key: "evisa",
-      label: "Indian e-Visa",
-      icon: Plane,
-      options: [
-        { label: "Indian e-Visa", href: "/services/indian-evisa" },
-      ],
-    },
-    {
-      key: "passport",
-      label: "Passport Services",
-      icon: BookUser,
-      options: [
-        { label: "Indian Passport Renewal", href: "/services/passport-renewal" },
-      ],
-    },
-    {
-      key: "apostille",
-      label: "Apostille & Attestation",
-      icon: Stamp,
-      options: [
-        { label: "Apostille & Attestation", href: "/apostille-services" },
-      ],
-    },
-  ];
+const quickStats = [
+  { label: "Fast review", value: "24–48h", icon: Zap, color: "#60a5fa" },
+  { label: "Support", value: "WhatsApp + Email", icon: MessageCircle, color: "#34d399" },
+  { label: "Coverage", value: "OCI / e-Visa / Passport", icon: Sparkles, color: "#a78bfa" },
+];
 
-  const [activeGroup, setActiveGroup] = useState<"oci" | "evisa" | "passport" | "apostille" | null>("oci");
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>(
-    () => serviceGroups.reduce((acc, group) => {
-      acc[group.key] = group.options[0]?.label ?? "";
-      return acc;
-    }, {} as Record<string, string>),
+type ServiceKey = "oci" | "evisa" | "passport" | "apostille";
+
+const serviceGroups: Array<{
+  key: ServiceKey;
+  label: string;
+  tag?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  options: Array<{ label: string; href: string }>;
+}> = [
+  {
+    key: "oci",
+    label: "OCI Services",
+    tag: "Popular",
+    icon: IdCard,
+    options: [
+      { label: "New OCI Card", href: "/services/new-oci" },
+      { label: "OCI Renewal / Transfer", href: "/services/oci-renewal" },
+      { label: "OCI Update (Gratis)", href: "/services/oci-update" },
+    ],
+  },
+  {
+    key: "evisa",
+    label: "Indian e-Visa",
+    icon: Plane,
+    options: [{ label: "Indian e-Visa", href: "/services/indian-evisa" }],
+  },
+  {
+    key: "passport",
+    label: "Passport Services",
+    icon: BookUser,
+    options: [{ label: "Indian Passport Renewal", href: "/services/passport-renewal" }],
+  },
+  {
+    key: "apostille",
+    label: "Apostille & Attestation",
+    icon: Stamp,
+    options: [{ label: "Apostille & Attestation", href: "/apostille-services" }],
+  },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
+export default function HeroSection() {
+  // Parallax motion values (normalized -1..1)
+  const mouseX = useMotionValue(0);
+  const mouseY = useMotionValue(0);
+
+  const bgX = useTransform(mouseX, [-1, 1], [-24, 24]);
+  const bgY = useTransform(mouseY, [-1, 1], [-12, 12]);
+  const orb1X = useTransform(mouseX, [-1, 1], [-40, 40]);
+  const orb1Y = useTransform(mouseY, [-1, 1], [-20, 20]);
+  const orb2X = useTransform(mouseX, [-1, 1], [30, -30]);
+  const orb2Y = useTransform(mouseY, [-1, 1], [12, -12]);
+
+  // Smooth springs for nicer motion
+  const springBgX = useSpring(bgX, { stiffness: 140, damping: 24 });
+  const springBgY = useSpring(bgY, { stiffness: 140, damping: 24 });
+  const springOrb1X = useSpring(orb1X, { stiffness: 140, damping: 26 });
+  const springOrb1Y = useSpring(orb1Y, { stiffness: 140, damping: 26 });
+  const springOrb2X = useSpring(orb2X, { stiffness: 140, damping: 26 });
+  const springOrb2Y = useSpring(orb2Y, { stiffness: 140, damping: 26 });
+  const [activeGroup, setActiveGroup] = useState<ServiceKey | null>("oci");
+  const [selectedOptions, setSelectedOptions] = useState<Record<ServiceKey, string>>(
+    () =>
+      serviceGroups.reduce(
+        (acc, g) => ({ ...acc, [g.key]: g.options[0]?.label ?? "" }),
+        {} as Record<ServiceKey, string>,
+      ),
   );
 
-  const getSelectedHref = (groupKey: string) => {
-    const group = serviceGroups.find((item) => item.key === groupKey);
-    if (!group) return "/services";
-    const selected = selectedOptions[groupKey];
-    return group.options.find((opt) => opt.label === selected)?.href || group.options[0]?.href || "/services";
+  const getHref = (key: ServiceKey) => {
+    const g = serviceGroups.find((x) => x.key === key);
+    if (!g) return "/services";
+    return g.options.find((o) => o.label === selectedOptions[key])?.href ?? g.options[0]?.href ?? "/services";
   };
 
   return (
-    <section className="relative bg-[#f8fbff]">
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        className="relative z-10 w-full"
+    <section
+      className="relative overflow-hidden"
+      onMouseMove={(e) => {
+        // normalize mouse position to -1..1
+        const nx = (e.clientX - window.innerWidth / 2) / (window.innerWidth / 2);
+        const ny = (e.clientY - window.innerHeight / 2) / (window.innerHeight / 2);
+        mouseX.set(Math.max(-1, Math.min(1, nx)));
+        mouseY.set(Math.max(-1, Math.min(1, ny)));
+      }}
+      onMouseLeave={() => {
+        mouseX.set(0);
+        mouseY.set(0);
+      }}
+    >
+
+      {/* ── Background image — untouched ── */}
+      <div
+        className="absolute inset-0"
       >
-        <div className="relative overflow-hidden min-h-screen">
         <Image
           src="/hero_section_banner.jpeg"
           alt="OCI assistance banner"
@@ -216,174 +150,384 @@ export function HeroSection() {
           priority
           className="object-cover object-center"
         />
-        <div className="absolute inset-0 bg-[linear-gradient(98deg,rgba(8,22,52,0.82)_0%,rgba(10,34,82,0.66)_45%,rgba(31,86,183,0.24)_100%)]" />
+        {/* Multi-layer overlay: deep dark left → semi-transparent right */}
+        <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(4,10,28,0.95)_0%,rgba(5,18,54,0.86)_35%,rgba(10,36,100,0.60)_60%,rgba(18,54,150,0.22)_100%)]" />
+        {/* Top vignette */}
+        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/35 to-transparent" />
+        {/* Bottom vignette */}
+        <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-black/45 to-transparent" />
+      </div>
 
-        <motion.div
-          animate={{ x: [0, 20, 0], y: [0, -12, 0] }}
-          transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.24)_0%,transparent_70%)] blur-3xl z-0"
-        />
-        <motion.div
-          animate={{ x: [0, -24, 0], y: [0, 14, 0] }}
-          transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-[radial-gradient(circle,rgba(143,206,255,0.3)_0%,transparent_70%)] blur-3xl z-0"
-        />
+      {/* ── Ambient glow orbs ── */}
+      <motion.div
+        className="pointer-events-none absolute left-[-10%] top-[-8%] h-[60vw] w-[60vw] rounded-full"
+        style={{
+          background: "radial-gradient(circle, rgba(37,99,235,0.20) 0%, transparent 65%)",
+          filter: "blur(60px)",
+          translateX: springOrb1X as any,
+          translateY: springOrb1Y as any,
+        }}
+        animate={{ x: [0, 22, 0], y: [0, -16, 0] }}
+        transition={{ duration: 16, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="pointer-events-none absolute bottom-[-10%] right-[15%] h-[45vw] w-[45vw] rounded-full"
+        style={{
+          background: "radial-gradient(circle, rgba(96,165,250,0.15) 0%, transparent 65%)",
+          filter: "blur(70px)",
+          translateX: springOrb2X as any,
+          translateY: springOrb2Y as any,
+        }}
+        animate={{ x: [0, -18, 0], y: [0, 18, 0] }}
+        transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
+      />
 
-        <div className="relative z-10 h-full px-5 sm:px-8 lg:px-10 pt-24 sm:pt-28 lg:pt-24 pb-8 lg:pb-10">
-        <div className={`grid grid-cols-1 ${activeGroup ? "lg:grid-cols-[minmax(0,1fr)_430px]" : "lg:grid-cols-[minmax(0,1fr)_348px]"} gap-6 lg:gap-8 h-full items-start lg:items-center transition-all duration-300`}>
-        <div className="max-w-4xl mx-auto lg:mx-0 text-center lg:text-left">
-        <motion.h1
-          variants={itemVariants}
-          className="font-heading text-[26px] sm:text-[38px] lg:text-[52px] font-bold tracking-[-0.02em] leading-[1.06] text-white"
-        >
-          Hassle-Free OCI,
-          <span className="block mt-2 bg-gradient-to-r from-[#9dd3ff] to-white bg-clip-text text-transparent">
-            Indian e-Visa and Passport Services
-          </span>
-          <span className="block mt-2 text-[0.58em] font-semibold text-[#d9e8ff]">Done For You</span>
-        </motion.h1>
+      {/* ── Main grid ── */}
+      <motion.div
+        variants={container}
+        initial="hidden"
+        animate="visible"
+        className="relative z-10 mx-auto grid min-h-[90vh] w-full grid-cols-1 items-center gap-8 px-4 pb-14 pt-24 sm:px-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:gap-10 lg:px-6 lg:pt-28 xl:grid-cols-[minmax(0,1fr)_440px] xl:gap-12 xl:px-10"
+      >
 
-        <motion.p
-          variants={itemVariants}
-          className="mt-6 text-[14px] sm:text-[16px] text-[#ecf3ff] max-w-[760px] mx-auto lg:mx-0 mb-7 leading-relaxed"
-        >
-          For UK and US residents of Indian origin. We handle forms, documents, and appointments so you avoid delays and travel stress.
-        </motion.p>
+        {/* ════════════════════════════════════════
+            LEFT — Copy block
+        ════════════════════════════════════════ */}
+        <div className="flex flex-col items-center text-center lg:items-start lg:text-left lg:pr-6 xl:pr-10">
 
-        <motion.div
-          variants={itemVariants}
-          className="flex flex-col sm:flex-row items-center lg:items-start justify-center lg:justify-start gap-3 mb-7"
-        >
-          <Link href="/auth/login?next=%2Findian-e-visa" className="w-full sm:w-auto">
-            <Button className="w-full sm:w-auto px-6 py-3 text-[15px] rounded-md shadow-[0_10px_24px_rgba(28,105,221,0.34)]">
-              Start My Application
-            </Button>
-          </Link>
+          {/* Eyebrow */}
+          <motion.div variants={item}>
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-100 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_20px_rgba(0,0,0,0.25)]">
+              <div className="flex h-4 w-4 items-center justify-center rounded-full bg-sky-400/30 ring-1 ring-sky-400/40">
+                <Sparkles className="h-2.5 w-2.5 text-sky-50" />
+              </div>
+              Trusted support for Indian-origin families
+            </div>
+          </motion.div>
 
-          <Link href="/document-audit" className="w-full sm:w-auto">
-            <Button variant="outline" className="w-full sm:w-auto px-6 py-3 text-[15px] rounded-md border-white/70 text-white bg-[#ffffff1a] hover:bg-[#ffffff26]">
-              Get My Documents Checked
-            </Button>
-          </Link>
-        </motion.div>
+          {/* Headline */}
+          <motion.div variants={item}>
+            <h1 className="font-heading text-[clamp(2.25rem,4.6vw,4.3rem)] font-extrabold leading-[0.98] tracking-[-0.05em] text-white">
+              Hassle-free OCI,
+              <span
+                className="mt-1 block bg-clip-text text-transparent"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(92deg, #7dd3fc 0%, #bfdbfe 50%, #e0f2fe 100%)",
+                }}
+              >
+                Indian e-Visa and
+              </span>
+              <span
+                className="mt-1 block bg-clip-text text-transparent"
+                style={{
+                  backgroundImage: "linear-gradient(92deg, #93c5fd 0%, #dbeafe 100%)",
+                }}
+              >
+                Passport services
+              </span>
+            </h1>
+            <p className="mt-3 text-[clamp(0.95rem,1.5vw,1.1rem)] font-semibold tracking-[-0.01em] text-sky-100/90">
+              done for you with clarity and speed
+            </p>
+          </motion.div>
 
-        <motion.div
-          variants={itemVariants}
-          className="flex flex-wrap justify-center lg:justify-start gap-2"
-        >
-          {badges.map((badge, index) => (
-            <motion.div
-              key={index}
-              whileHover={{ y: -2 }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-[#0b1f45]/45 border border-white/40 shadow-[0_8px_18px_rgba(8,23,56,0.2)] text-[12px] text-white"
-            >
-              {badge.icon}
-              {badge.text}
-            </motion.div>
-          ))}
-        </motion.div>
+          {/* Body copy */}
+          <motion.p
+            variants={item}
+            className="mt-4 max-w-[500px] text-[14px] leading-[1.7] text-slate-100/80 sm:text-[15px]"
+          >
+            For UK and US residents of Indian origin. We handle forms, documents and
+            appointments so you avoid delays, stress and back-and-forth.
+          </motion.p>
+
+          {/* CTA row */}
+          <motion.div
+            variants={item}
+            className="mt-8 flex w-full flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start"
+          >
+            <Link href="/auth/login?next=%2Findian-e-visa" className="w-full sm:w-auto">
+              <button className="group relative w-full overflow-hidden rounded-2xl bg-[#1c69dd] px-7 py-3.5 text-[14px] font-semibold text-white shadow-[0_8px_32px_rgba(28,105,221,0.55)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_44px_rgba(28,105,221,0.7)] sm:w-auto">
+                <span className="relative z-10 flex items-center justify-center gap-2">
+                  Start My Application
+                  <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+                </span>
+                {/* Shimmer layer */}
+                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+              </button>
+            </Link>
+            <Link href="/document-audit" className="w-full sm:w-auto">
+              <button className="w-full rounded-2xl border border-white/25 bg-white/10 px-7 py-3.5 text-[14px] font-semibold text-white backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/16 hover:border-white/40 sm:w-auto">
+                Get My Documents Checked
+              </button>
+            </Link>
+          </motion.div>
+
+          {/* Quick stat cards */}
+          <motion.div
+            variants={item}
+            className="mt-7 grid w-full grid-cols-1 gap-3 sm:grid-cols-3"
+          >
+            {quickStats.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <motion.div
+                  key={stat.label}
+                  whileHover={{ y: -4, scale: 1.02 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                  className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/8 p-3.5 backdrop-blur-md"
+                  style={{ boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 28px rgba(0,0,0,0.22)" }}
+                >
+                  {/* Colored glow dot top-right */}
+                  <div
+                    className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full"
+                    style={{ background: stat.color, boxShadow: `0 0 10px ${stat.color}99` }}
+                  />
+                  <div
+                    className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em]"
+                    style={{ color: stat.color }}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {stat.label}
+                  </div>
+                  <p className="mt-2.5 font-heading text-[15px] font-bold leading-snug text-white sm:text-[16px]">
+                    {stat.value}
+                  </p>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+
+          {/* Trust badges */}
+          <motion.div
+            variants={item}
+            className="mt-5 flex flex-wrap justify-center gap-2 lg:justify-start"
+          >
+            {trustBadges.map((badge, i) => {
+              const Icon = badge.icon;
+              return (
+                <div
+                  key={i}
+                  className="flex items-center gap-1.5 rounded-full border border-white/12 bg-white/8 px-3 py-1.5 text-[11px] font-medium text-white/70 backdrop-blur-sm transition-colors hover:border-white/25 hover:text-white/90"
+                >
+                  <Icon className="h-3.5 w-3.5 text-sky-300/80" />
+                  {badge.text}
+                </div>
+              );
+            })}
+          </motion.div>
+
+          {/* Social proof row */}
+          <motion.div
+            variants={item}
+            className="mt-6 flex items-center gap-4"
+          >
+            {/* Avatar stack */}
+            <div className="flex -space-x-2.5">
+              {[
+                { initials: "RK", hue: 215 },
+                { initials: "AP", hue: 235 },
+                { initials: "MS", hue: 198 },
+                { initials: "PS", hue: 255 },
+                { initials: "NK", hue: 180 },
+              ].map((av, i) => (
+                <div
+                  key={i}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white/20 text-[9px] font-bold text-white ring-1 ring-inset ring-white/10"
+                  style={{
+                    background: `hsl(${av.hue}, 62%, 44%)`,
+                    zIndex: 10 - i,
+                  }}
+                >
+                  {av.initials}
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="flex items-center gap-0.5">
+                {[...Array(5)].map((_, i) => (
+                  <Star key={i} className="h-3 w-3 fill-amber-400 text-amber-400" />
+                ))}
+                <span className="ml-1.5 text-[11px] font-bold text-sky-50">5.0</span>
+              </div>
+              <p className="text-[10.5px] text-sky-100/70">Trusted by 500+ UK &amp; US families</p>
+            </div>
+          </motion.div>
         </div>
 
-        <motion.aside
-          variants={itemVariants}
-          className={`w-full ${activeGroup ? "max-w-[430px]" : "max-w-[348px]"} mx-auto lg:mx-0 rounded-2xl border border-[#dbe6f3] bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(247,250,255,0.98)_100%)] p-3.5 sm:p-4 shadow-[0_16px_40px_rgba(6,23,54,0.24)] backdrop-blur transition-all duration-300`}
-        >
-          <div className="mb-3">
-            <h3 className="text-[30px] sm:text-[32px] leading-none font-heading font-bold text-[#102A43]">Our Services</h3>
-            <p className="mt-1 text-[12px] text-[#627D98]">Select a service to get started</p>
-          </div>
+        {/* ════════════════════════════════════════
+            RIGHT — Services card
+        ════════════════════════════════════════ */}
+        <motion.aside variants={item} className="mx-auto w-full max-w-[450px] lg:mx-0">
+          <motion.div
+            whileHover={{ y: -5 }}
+            transition={{ type: "spring", stiffness: 180, damping: 22 }}
+            className="overflow-hidden rounded-3xl border border-white/20 bg-white shadow-[0_40px_100px_rgba(4,12,40,0.55),0_0_0_1px_rgba(255,255,255,0.1)] backdrop-blur-2xl"
+          >
 
-          <div className="space-y-2.5">
-            {serviceGroups.map((group) => {
-              const isOpen = activeGroup === group.key;
-              const ServiceIcon = group.icon;
-              return (
-                <div key={group.key} className={`rounded-xl border overflow-hidden transition-all ${isOpen ? "border-[#5ea9ff] bg-[#f2f8ff] shadow-[0_8px_22px_rgba(19,108,201,0.14)]" : "border-[#D9E1EA] bg-white/95 hover:border-[#bfd6f4]"}`}>
-                  <div className="px-2.5 py-2.5">
-                    <div className="w-full min-w-0 flex items-center gap-2 px-1.5 py-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setActiveGroup((prev) => (prev === group.key ? null : group.key))}
-                        className="min-w-0 flex-1 flex items-center gap-2.5 text-left"
+            {/* Card header */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-[#f4f8ff] to-white px-6 pb-4 pt-5">
+              {/* Decorative accent blob */}
+              <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-[#1c69dd]/8" />
+              <div className="relative flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-heading text-[22px] font-bold leading-tight text-[#0d1f3c] sm:text-[24px]">
+                    Our Services
+                  </h3>
+                  <p className="mt-1 text-[11.5px] text-[#7a8fa8]">
+                    Select a service to get started
+                  </p>
+                </div>
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#1c69dd] text-white shadow-[0_6px_20px_rgba(28,105,221,0.45)]">
+                  <ArrowRight className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="relative mt-4 h-px bg-gradient-to-r from-transparent via-[#d6e4f7] to-transparent" />
+            </div>
+
+            {/* Service list */}
+            <div className="space-y-2 bg-white px-4 pb-4 pt-1 sm:px-5">
+              {serviceGroups.map((group) => {
+                const isOpen = activeGroup === group.key;
+                const Icon = group.icon;
+
+                return (
+                  <div
+                    key={group.key}
+                    className={`overflow-hidden rounded-2xl border transition-all duration-200 ${
+                      isOpen
+                        ? "border-[#1c69dd]/25 bg-gradient-to-br from-[#eef5ff] to-[#e6f0ff] shadow-[0_4px_24px_rgba(28,105,221,0.1)]"
+                        : "border-[#e8eef8] bg-[#fafcff] hover:border-[#c8d9ef] hover:bg-white"
+                    }`}
+                  >
+                    {/* Row trigger */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveGroup((prev) => (prev === group.key ? null : group.key))
+                      }
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left"
+                    >
+                      {/* Icon box */}
+                      <div
+                        className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl transition-all duration-200 ${
+                          isOpen
+                            ? "bg-[#1c69dd] text-white shadow-[0_4px_16px_rgba(28,105,221,0.40)]"
+                            : "border border-[#d9e8f8] bg-[#eef5ff] text-[#1c69dd]"
+                        }`}
                       >
-                        <span className="w-7 h-7 rounded-lg bg-[#EAF3FF] border border-[#d5e6ff] flex-shrink-0 inline-flex items-center justify-center">
-                          <ServiceIcon className="w-4 h-4 text-[#2d74c4]" />
-                        </span>
-                        <span className="text-[14px] font-medium text-[#243B53] truncate">{group.label}</span>
-                        {group.tag && (
-                          <span className="hidden sm:inline-flex rounded-full border border-[#cde2ff] bg-[#eef6ff] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#486581]">
-                            {group.tag}
-                          </span>
-                        )}
-                      </button>
+                        <Icon className="h-4 w-4" />
+                      </div>
 
-                      <AnimatePresence initial={false}>
-                        {isOpen && (
-                          <motion.div
-                            key={`${group.key}-inline-select`}
-                            initial={{ opacity: 0, x: 12, scale: 0.98 }}
-                            animate={{ opacity: 1, x: 0, scale: 1 }}
-                            exit={{ opacity: 0, x: 8, scale: 0.98 }}
-                            transition={{ duration: 0.2, ease: "easeOut" }}
+                      {/* Labels */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`truncate text-[13px] font-semibold transition-colors ${
+                              isOpen ? "text-[#0d1f3c]" : "text-[#243b53]"
+                            }`}
                           >
-                            <select
-                              value={selectedOptions[group.key]}
-                              onChange={(event) => setSelectedOptions((prev) => ({ ...prev, [group.key]: event.target.value }))}
-                              className="w-[172px] rounded-md border border-[#B9D7FF] bg-white px-2.5 py-1.5 text-[12px] text-[#334E68] focus:outline-none focus:ring-2 focus:ring-[#1c69dd]/20 focus:border-[#1c69dd]"
-                            >
-                              {group.options.map((option) => (
-                                <option key={option.label} value={option.label}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                            {group.label}
+                          </span>
+                          {group.tag && (
+                            <span className="hidden shrink-0 rounded-full bg-[#1c69dd]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#1c69dd] sm:inline-block">
+                              {group.tag}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-[#8fa3bc]">
+                          {group.options.length} option
+                          {group.options.length > 1 ? "s" : ""} available
+                        </p>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setActiveGroup((prev) => (prev === group.key ? null : group.key))}
-                        className="p-1"
-                        aria-label={`Toggle ${group.label}`}
+                      {/* Animated chevron */}
+                      <motion.div
+                        animate={{ rotate: isOpen ? 180 : 0 }}
+                        transition={{ duration: 0.22 }}
+                        className="flex-shrink-0"
                       >
-                        <ChevronRight className={`w-4 h-4 text-[#7B8794] transition-transform ${isOpen ? "rotate-90" : ""}`} />
-                      </button>
-                    </div>
+                        <ChevronDown
+                          className={`h-4 w-4 transition-colors ${
+                            isOpen ? "text-[#1c69dd]" : "text-[#b4c4d8]"
+                          }`}
+                        />
+                      </motion.div>
+                    </button>
 
+                    {/* Expanded dropdown */}
                     <AnimatePresence initial={false}>
                       {isOpen && (
                         <motion.div
-                          key={`${group.key}-cta`}
-                          initial={{ opacity: 0, y: -8, height: 0 }}
-                          animate={{ opacity: 1, y: 0, height: "auto" }}
-                          exit={{ opacity: 0, y: -6, height: 0 }}
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
                           transition={{ duration: 0.22, ease: "easeOut" }}
                           className="overflow-hidden"
                         >
-                          <div className="mt-2 pl-9">
-                            <Link
-                              href={getSelectedHref(group.key)}
-                              className="w-full inline-flex items-center justify-center rounded-md bg-[linear-gradient(90deg,#4ea6f5_0%,#136cc9_100%)] px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-95"
-                            >
-                              Get Started
+                          <div className="border-t border-[#1c69dd]/10 px-4 pb-4 pt-3">
+                            {/* Select */}
+                            <div className="relative">
+                              <select
+                                value={selectedOptions[group.key]}
+                                onChange={(e) =>
+                                  setSelectedOptions((prev) => ({
+                                    ...prev,
+                                    [group.key]: e.target.value,
+                                  }))
+                                }
+                                className="w-full appearance-none rounded-xl border border-[#c8d9f0] bg-white px-4 py-2.5 pr-9 text-[12px] font-medium text-[#0d1f3c] shadow-[0_1px_4px_rgba(0,0,0,0.06)] focus:border-[#1c69dd] focus:outline-none focus:ring-2 focus:ring-[#1c69dd]/15 transition-colors"
+                              >
+                                {group.options.map((opt) => (
+                                  <option key={opt.label} value={opt.label}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#8fa3bc]" />
+                            </div>
+
+                            {/* Get Started CTA */}
+                            <Link href={getHref(group.key)}>
+                              <button className="group mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#1c69dd] px-5 py-3 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(28,105,221,0.38)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#1558c0] hover:shadow-[0_8px_28px_rgba(28,105,221,0.52)]">
+                                Get Started
+                                <ArrowRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-1" />
+                              </button>
                             </Link>
                           </div>
                         </motion.div>
                       )}
                     </AnimatePresence>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
 
-          
+            {/* Card footer */}
+            <div className="flex items-center justify-between border-t border-[#edf2fb] bg-[#f7faff] px-5 py-3">
+              <div className="flex items-center gap-2">
+                <div
+                  className="h-2 w-2 rounded-full bg-emerald-400"
+                  style={{ boxShadow: "0 0 8px rgba(52,211,153,0.7)" }}
+                />
+                <span className="text-[11px] font-medium text-[#6b80a0]">
+                  Secure &amp; encrypted
+                </span>
+              </div>
+              <div className="flex items-center gap-0.5">
+                {[...Array(5)].map((_, i) => (
+                  <Star key={i} className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+                ))}
+                <span className="ml-1.5 text-[10.5px] font-semibold text-[#4a5568]">5.0</span>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Disclaimer below card */}
+          <p className="mt-3 text-center text-[10.5px] leading-relaxed text-sky-100/55 lg:text-left">
+            Private independent service · Not affiliated with any government body or VFS Global
+          </p>
         </motion.aside>
-
-        </div>
-        </div>
-        </div>
       </motion.div>
     </section>
   );

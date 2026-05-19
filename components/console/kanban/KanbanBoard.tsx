@@ -7,6 +7,7 @@ import { KanbanCard } from "./KanbanCard";
 import { SlideOverPanel } from "./SlideOverPanel";
 import { KANBAN_COLUMNS, type PipelineCase } from "@/lib/kanban";
 import {
+  getAdminApostilleDetail,
   getAdminApplicationDetails,
   getAdminApplicationDocuments,
   listAdminApplications,
@@ -45,14 +46,22 @@ const toStage = (rawStage?: string): PipelineCase["stage"] => {
   return STAGE_ALIAS[normalized] || "NEW_LEAD";
 };
 
-const normalizeServiceType = (serviceType?: string): PipelineCase["serviceType"] => {
+const normalizeServiceType = (serviceType?: string, caseType?: string): PipelineCase["serviceType"] => {
   const normalized = (serviceType || "").toLowerCase();
+  const normalizedCaseType = (caseType || "").toLowerCase();
+  if (normalizedCaseType.includes("apostille")) return "Apostille";
+  if (normalized.includes("apostille")) return "Apostille";
   if (normalized.includes("passport")) return "Passport Renewal";
   if (normalized.includes("visa")) return "E-Visa";
   return "OCI";
 };
 
 const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
+  const backendStage = String(item.stage || "").trim();
+  if (backendStage) {
+    return toStage(backendStage);
+  }
+
   const rawStage = String(item.stage || item.current_stage || "").trim().toUpperCase().replace(/\s+/g, "_");
   const auditResult = String(item.audit_result || "").toLowerCase();
   const applicationStatus = String(item.application_status || "").toLowerCase();
@@ -188,21 +197,28 @@ const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"]
 const toKanbanCase = (item: AdminApplication): KanbanCase => {
   const createdAt = item.created_at || new Date().toISOString();
   const ageHours = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60)));
+  const st = String(item.service_type || "").toLowerCase();
+  const ct = String(item.case_type || "").toLowerCase();
+  const isApostille = st.includes("apostille") || ct.includes("apostille");
+  const displayId =
+    isApostille && (item.file_number || "").trim()
+      ? String(item.file_number).trim()
+      : item.reference_number || `APP-${item.id}`;
   return {
     applicationId: item.id,
     createdAt,
     updatedAt: item.updated_at || item.created_at || new Date().toISOString(),
     applicationStatus: String(item.application_status || ""),
     auditResult: String(item.audit_result || ""),
-    id: item.reference_number || `APP-${item.id}`,
+    id: displayId,
     customer: item.customer_name || `Customer ${item.id}`,
-    serviceType: normalizeServiceType(item.service_type),
+    serviceType: normalizeServiceType(item.service_type, item.case_type),
     country: "",
     flag: "",
     amount: 0,
     paymentStatus: getPaymentStatus(item),
     stage: resolveStage(item),
-    assignedTo: item.assigned_staff || null,
+    assignedTo: item.assigned_staff ? String(item.assigned_staff) : null,
     slaTimer: `${ageHours}h`,
     slaBreached: ageHours >= 24 * 7,
   };
@@ -399,6 +415,7 @@ export function KanbanBoard() {
   };
 
   const handleCardClick = async (caseItem: KanbanCase) => {
+    const isApostilleCase = caseItem.serviceType === "Apostille";
     setSelectedCase(caseItem);
     setSelectedCaseDetails(null);
     setSelectedCaseDocuments([]);
@@ -408,6 +425,49 @@ export function KanbanBoard() {
     setDocumentsLoading(true);
 
     try {
+      if (isApostilleCase) {
+        const [detailsResult, apostilleResult] = await Promise.allSettled([
+          getAdminApplicationDetails(caseItem.applicationId),
+          getAdminApostilleDetail(caseItem.id),
+        ]);
+
+        let mergedDetails: AdminApplication | null = null;
+        if (detailsResult.status === "fulfilled") {
+          mergedDetails = detailsResult.value;
+        }
+
+        if (apostilleResult.status === "fulfilled") {
+          const apostilleData = apostilleResult.value as Record<string, unknown>;
+          mergedDetails = {
+            ...(mergedDetails || ({} as AdminApplication)),
+            ...(apostilleData as Partial<AdminApplication>),
+            id: mergedDetails?.id ?? caseItem.applicationId,
+            reference_number: String(
+              (mergedDetails as Record<string, unknown> | null)?.reference_number
+              || apostilleData.reference_number
+              || caseItem.id
+            ),
+            service_type: String(
+              (mergedDetails as Record<string, unknown> | null)?.service_type
+              || apostilleData.service_type
+              || "Apostille Services"
+            ),
+          } as AdminApplication;
+        }
+
+        if (mergedDetails) {
+          setSelectedCaseDetails(mergedDetails);
+        } else if (detailsResult.status === "rejected") {
+          setDetailsError(detailsResult.reason instanceof Error ? detailsResult.reason.message : "Failed to load application details.");
+        } else if (apostilleResult.status === "rejected") {
+          setDetailsError(apostilleResult.reason instanceof Error ? apostilleResult.reason.message : "Failed to load apostille details.");
+        }
+
+        setSelectedCaseDocuments([]);
+        setDocumentsError(null);
+        return;
+      }
+
       const [detailsResult, documentsResult] = await Promise.allSettled([
         getAdminApplicationDetails(caseItem.applicationId),
         getAdminApplicationDocuments(caseItem.id),

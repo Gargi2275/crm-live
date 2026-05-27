@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { FileDropZone } from "@/components/FileDropZone";
+import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 
 const progress = ["Pre-Check Submitted", "Approved", "Payment Received", "Final Submission", "Processing", "Completed"];
 
@@ -20,11 +21,12 @@ export default function ApostilleFinalSubmissionPage() {
   const [supportingDoc, setSupportingDoc] = useState<File | null>(null);
   const [idDoc, setIdDoc] = useState<File | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [consentsAccepted, setConsentsAccepted] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!deliveryName || !line1 || !city || !postcode || !country || !confirmed) {
+    if (!deliveryName || !line1 || !city || !postcode || !country || !confirmed || !consentsAccepted) {
       setError("Please complete required fields and confirm declaration.");
       return;
     }
@@ -83,6 +85,10 @@ export default function ApostilleFinalSubmissionPage() {
           </div>
 
           <div>
+            <ConsentCheckboxes mode="upload" onAcceptanceChange={setConsentsAccepted} />
+          </div>
+
+          <div>
             <label className="block text-sm font-semibold text-[#23466f]">Special Instructions (Optional)</label>
             <textarea
               value={specialInstructions}
@@ -108,7 +114,7 @@ export default function ApostilleFinalSubmissionPage() {
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <div className="flex flex-col gap-3 sm:flex-row">
-            <Button type="submit" className="w-full sm:w-auto">Submit Final Details</Button>
+            <Button type="submit" className="w-full sm:w-auto" disabled={!confirmed || !consentsAccepted}>Submit Final Details</Button>
             <Link href="/track-apostille/status?file=FLY-APO-1048&stage=processing">
               <Button variant="outline" className="w-full sm:w-auto">Refresh Status</Button>
             </Link>

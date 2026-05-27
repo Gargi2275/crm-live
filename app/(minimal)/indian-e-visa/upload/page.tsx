@@ -10,6 +10,7 @@ import { Reveal } from "@/components/Reveal";
 import { ProgressStepper } from "@/components/ProgressStepper";
 import { FileDropZone } from "@/components/FileDropZone";
 import { AnimatedCheckmark } from "@/components/AnimatedCheckmark";
+import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 import { eVisaApi } from "@/lib/api-client";
 import { authenticatedFetch } from "@/lib/api";
 import { authService } from "@/lib/auth";
@@ -65,6 +66,8 @@ export default function UploadPage() {
   const [flaggedDocuments, setFlaggedDocuments] = useState<CorrectionDocument[]>([]);
   const [correctionFiles, setCorrectionFiles] = useState<Record<string, File | null>>({});
   const [correctionErrors, setCorrectionErrors] = useState<Record<string, string>>({});
+  const [consentsAccepted, setConsentsAccepted] = useState(false);
+  const showMinorConsent = searchParams.get("minor") === "1" || searchParams.get("applicant_type")?.toLowerCase() === "minor";
 
   const fileNumber = caseNumber || "FO-EV-...";
 
@@ -500,6 +503,10 @@ export default function UploadPage() {
     if (!photoRef) {
       setPhotoError("Applicant photograph is required.");
     }
+    if (!consentsAccepted) {
+      setUploadError("Please accept all required consents before submitting.");
+      return;
+    }
 
     if (!isFormValid) return;
 
@@ -793,8 +800,8 @@ export default function UploadPage() {
 
             {/* Optional Section */}
             <div className="bg-card rounded-card shadow-card p-6 sm:p-8 border border-border">
-               <h3 className="font-body font-bold text-primary text-xl mb-3">Optional Information</h3>
-               <p className="font-body text-sm text-muted mb-6">If you have extra supporting documents, upload them below.</p>
+              <h3 className="font-body font-bold text-primary text-xl mb-3">Optional Information</h3>
+              <p className="font-body text-sm text-muted mb-6">If you have extra supporting documents, upload them below.</p>
                
                <label className="block font-body font-bold text-primary text-sm mb-2">Supporting Documents</label>
                <input 
@@ -822,12 +829,24 @@ export default function UploadPage() {
                  className={`${inputClasses} resize-none`}
                />
             </div>
+
+            <div className="bg-card rounded-card shadow-card p-6 sm:p-8 border border-border space-y-4">
+              <h3 className="font-body font-bold text-primary text-xl">Consent Before Submission</h3>
+              <ConsentCheckboxes mode="upload" showMinorConsent={showMinorConsent} onAcceptanceChange={setConsentsAccepted} />
+            </div>
             </>
+            ) : null}
+
+            {isCorrectionMode ? (
+              <div className="bg-card rounded-card shadow-card p-6 sm:p-8 border border-border space-y-4">
+                <h3 className="font-body font-bold text-primary text-xl">Consent Before Submission</h3>
+                <ConsentCheckboxes mode="upload" onAcceptanceChange={setConsentsAccepted} />
+              </div>
             ) : null}
 
             <motion.button
               type="submit"
-              disabled={!isFormValid || isUploading}
+              disabled={!isFormValid || isUploading || !consentsAccepted}
               whileHover={isFormValid && !isUploading ? { scale: 1.02, y: -2 } : {}}
               whileTap={isFormValid && !isUploading ? { scale: 0.98 } : {}}
               className={`w-full font-bold text-[16px] px-7 py-[18px] rounded-btn shadow-[0_4px_16px_rgba(245,166,35,0.28)] flex justify-center items-center transition-all duration-300 mt-8 ${

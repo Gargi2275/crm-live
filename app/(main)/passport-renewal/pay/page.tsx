@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 import {
   createPassportRenewalQuoteOrder,
   getPassportRenewalQuoteDetail,
@@ -39,6 +40,7 @@ export default function PassportRenewalPayPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [quote, setQuote] = useState<PassportRenewalQuoteDetailResponse | null>(null);
+  const [consentsAccepted, setConsentsAccepted] = useState(false);
 
   const status = String(quote?.quote_status || "").toUpperCase();
 
@@ -109,6 +111,10 @@ export default function PassportRenewalPayPage() {
 
   const handlePayNow = async () => {
     if (!reference) return;
+    if (!consentsAccepted) {
+      setError("Please accept all required consents before paying.");
+      return;
+    }
     setPaying(true);
     setError(null);
     try {
@@ -198,8 +204,11 @@ export default function PassportRenewalPayPage() {
             <p>Quote amount: <strong>{quoteAmount}</strong></p>
             <p>Quote valid until: <strong>{quote?.quote_expires_at ? new Date(quote.quote_expires_at).toLocaleString() : "Not set"}</strong></p>
             {quote?.quote_notes ? <p className="mt-2">Notes from admin: {quote.quote_notes}</p> : null}
+            <div className="mt-4">
+              <ConsentCheckboxes mode="payment" onAcceptanceChange={setConsentsAccepted} />
+            </div>
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button isLoading={paying} onClick={() => void handlePayNow()}>Pay Now</Button>
+              <Button isLoading={paying} onClick={() => void handlePayNow()} disabled={!consentsAccepted}>Pay Now</Button>
               <Button variant="outline" onClick={() => router.push("/contact")}>Contact Support</Button>
             </div>
           </div>

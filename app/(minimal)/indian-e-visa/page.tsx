@@ -54,23 +54,297 @@ const outfit = Outfit({
 
 const REGISTER_DRAFT_SESSION_KEY = "flyoci:evisa-register-draft-active";
 
-function splitPhoneNumber(combined: string): {
+type CountryOption = {
+  country: string;
+  nationality: string;
+  dialCode: string;
+  flag: string;
+  cca2: string;
+};
+
+type SearchableSelectFieldProps = {
+  value?: string;
+  options: readonly string[];
+  placeholder: string;
+  loading?: boolean;
+  disabled?: boolean;
+  className: string;
+  onChange: (value: string) => void;
+};
+
+function SearchableSelectField({
+  value,
+  options,
+  placeholder,
+  loading,
+  disabled,
+  className,
+  onChange,
+}: SearchableSelectFieldProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState(value || "");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    setQuery(value || "");
+  }, [value]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current || wrapperRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    const trimmedQuery = query.trim().toLowerCase();
+    if (!trimmedQuery) {
+      return options;
+    }
+
+    return options.filter((option) => option.toLowerCase().includes(trimmedQuery));
+  }, [options, query]);
+
+  const commitSelection = (selectedValue: string) => {
+    onChange(selectedValue);
+    setQuery(selectedValue);
+    setIsOpen(false);
+  };
+
+  const showLoading = Boolean(loading && options.length === 0);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        type="text"
+        value={query}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+        className={className}
+        onFocus={() => {
+          if (!disabled) {
+            setIsOpen(true);
+          }
+        }}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setIsOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setIsOpen(false);
+            setQuery(value || "");
+            return;
+          }
+
+          if (event.key === "Enter") {
+            event.preventDefault();
+            const exactMatch = filteredOptions.find((option) => option.toLowerCase() === query.trim().toLowerCase()) || filteredOptions[0];
+            if (exactMatch) {
+              commitSelection(exactMatch);
+            }
+          }
+        }}
+        onBlur={() => {
+          window.setTimeout(() => {
+            setIsOpen(false);
+            setQuery(value || "");
+          }, 120);
+        }}
+      />
+
+      {isOpen && !disabled && (
+        <div className="absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-[14px] border border-[#d9e4f7] bg-white shadow-[0_18px_40px_rgba(22,62,120,0.14)] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {showLoading ? (
+            <div className="px-3 py-2 text-[13px] text-[#7a8bab]">Loading...</div>
+          ) : filteredOptions.length > 0 ? (
+            filteredOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="block w-full px-3 py-2 text-left text-[13px] text-[#1d2f4f] transition-colors hover:bg-[#edf3ff]"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => commitSelection(option)}
+              >
+                {option}
+              </button>
+            ))
+          ) : (
+            <div className="px-3 py-2 text-[13px] text-[#7a8bab]">No matches found</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type SearchableDialCodeProps = {
+  value?: string;
+  options: readonly CountryOption[];
+  loading?: boolean;
+  disabled?: boolean;
+  className: string;
+  onChange: (value: string) => void;
+};
+
+function SearchableDialCode({
+  value,
+  options,
+  loading,
+  disabled,
+  className,
+  onChange,
+}: SearchableDialCodeProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  const selectedOption = useMemo(
+    () => options.find((option) => option.dialCode === value) || null,
+    [options, value],
+  );
+
+  useEffect(() => {
+    setQuery("");
+  }, [value]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current || wrapperRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    const trimmedQuery = query.trim().toLowerCase();
+    if (!trimmedQuery) {
+      return options;
+    }
+
+    return options.filter((option) => {
+      const haystack = `${option.flag} ${option.dialCode} ${option.country} ${option.cca2}`.toLowerCase();
+      return haystack.includes(trimmedQuery);
+    });
+  }, [options, query]);
+
+  const commitSelection = (selectedValue: string) => {
+    onChange(selectedValue);
+    setIsOpen(false);
+    setQuery("");
+  };
+
+  const showLoading = Boolean(loading && options.length === 0);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        className={className}
+        onClick={() => {
+          if (!disabled) {
+            setIsOpen((current) => !current);
+          }
+        }}
+      >
+        <span className="truncate">
+          {selectedOption ? `${selectedOption.flag} ${selectedOption.dialCode}` : "Select code"}
+        </span>
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-[14px] border border-[#d9e4f7] bg-white shadow-[0_18px_40px_rgba(22,62,120,0.14)]">
+          <input
+            type="text"
+            value={query}
+            placeholder="Search country or code"
+            autoComplete="off"
+            className="w-full border-0 border-b border-[#edf2fb] px-3 py-2 text-[13px] outline-none"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div className="max-h-60 overflow-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {showLoading ? (
+              <div className="px-3 py-2 text-[13px] text-[#7a8bab]">Loading...</div>
+            ) : filteredOptions.length > 0 ? (
+              filteredOptions.map((option) => (
+                <button
+                  key={option.cca2 || option.dialCode}
+                  type="button"
+                  className="block w-full px-3 py-2 text-left text-[13px] text-[#1d2f4f] transition-colors hover:bg-[#edf3ff]"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => commitSelection(option.dialCode)}
+                >
+                  {option.flag} {option.dialCode} {option.country}
+                </button>
+              ))
+            ) : (
+              <div className="px-3 py-2 text-[13px] text-[#7a8bab]">No matches found</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function dedupeAndSortOptions(options: string[]): string[] {
+  return Array.from(new Set(options.filter((value) => Boolean(value && value.trim())))).sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+function appendOtherOption(options: string[]): string[] {
+  const filtered = options.filter((value) => value !== "Other");
+  return [...filtered, "Other"];
+}
+
+function getDefaultDialCode(options: CountryOption[]): string {
+  return options.find((option) => option.country === "United Kingdom")?.dialCode || options[0]?.dialCode || "";
+}
+
+function extractCountryOptions(data: Array<{
+  name?: { common?: string };
+  demonyms?: { eng?: { m?: string; f?: string } };
+  idd?: { root?: string; suffixes?: string[] };
+  flag?: string;
+  cca2?: string;
+}>): CountryOption[] {
+  return data
+    .filter((country) => Boolean(country.idd?.root))
+    .map((country) => ({
+      country: country.name?.common?.trim() || "",
+      nationality: (country.demonyms?.eng?.m || country.demonyms?.eng?.f || country.name?.common || "").trim(),
+      dialCode: `${country.idd?.root || ""}${country.idd?.suffixes?.length === 1 ? country.idd.suffixes[0] : ""}`.trim(),
+      flag: country.flag || "",
+      cca2: country.cca2 || "",
+    }))
+    .filter((entry) => Boolean(entry.country && entry.dialCode))
+    .sort((left, right) => left.country.localeCompare(right.country));
+}
+
+const restCountriesApiUrl = "https://restcountries.com/v3.1/all?fields=name,demonyms,cca2,idd,flag";
+
+function splitPhoneNumber(combined: string, dialCodes: string[] = [], fallbackCountryCode = ""): {
   countryCode: string;
   phone: string;
 } {
   if (!combined || !combined.trim()) {
-    return { countryCode: "+44", phone: "" };
+    return { countryCode: fallbackCountryCode, phone: "" };
   }
 
-  // Check longer codes first to avoid
-  // "+1" matching "+971" etc.
-  const codes = [
-    "+971", "+972", "+973", "+974",
-    "+975", "+976", "+977", "+965",
-    "+966", "+968", "+354", "+353",
-    "+352", "+351", "+350",
-    "+44", "+91", "+61", "+65", "+1",
-  ];
+  const codes = Array.from(new Set(dialCodes.filter((code) => Boolean(code && code.trim()))))
+    .sort((left, right) => right.length - left.length);
 
   const cleaned = combined.trim();
 
@@ -84,7 +358,7 @@ function splitPhoneNumber(combined: string): {
   }
 
   // Fallback if no known code found
-  return { countryCode: "+44", phone: cleaned };
+  return { countryCode: fallbackCountryCode || codes[0] || "", phone: cleaned };
 }
 
 export default function RegistrationPage() {
@@ -95,6 +369,8 @@ export default function RegistrationPage() {
   const [hasSubmitError, setHasSubmitError] = useState(false);
   const [hasActiveDraftSession, setHasActiveDraftSession] = useState(false);
   const [draftSessionChecked, setDraftSessionChecked] = useState(false);
+  const [countryOptions, setCountryOptions] = useState<CountryOption[]>([]);
+  const [isCountryOptionsLoading, setIsCountryOptionsLoading] = useState(true);
   const [resumeApplication, setResumeApplication] = useState<{
     case_number: string;
     application_status: string;
@@ -198,32 +474,103 @@ export default function RegistrationPage() {
   const isExistingCase = Boolean(caseFromQuery);
   const isReadOnlyApplication = searchParams.get("readonly") === "1";
   const shouldHydrateFromPersistedState = Boolean(magicToken || caseFromQuery || resumeMode || detailsMode || hasActiveDraftSession);
-  const nationalityOptions = new Set(["British", "American", "Canadian", "Indian", "Other"]);
-  const residenceOptions = new Set([
-    "United Kingdom",
-    "United States",
-    "Canada",
-    "Australia",
-    "UAE",
-    "Singapore",
-    "Other",
-  ]);
+  const nationalityOptions = useMemo(
+    () => appendOtherOption(dedupeAndSortOptions(countryOptions.map((option) => option.nationality || option.country))),
+    [countryOptions],
+  );
+  const residenceOptions = useMemo(
+    () => appendOtherOption(dedupeAndSortOptions(countryOptions.map((option) => option.country))),
+    [countryOptions],
+  );
+  const defaultDialCode = useMemo(() => getDefaultDialCode(countryOptions), [countryOptions]);
   const purposeOptions = new Set(["Tourism", "Business", "Medical", "Conference", "Other"]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCountryOptions = async () => {
+      try {
+        setIsCountryOptionsLoading(true);
+        const response = await fetch(restCountriesApiUrl);
+        const payload = await response.json().catch(() => []);
+
+        if (cancelled) {
+          return;
+        }
+
+        setCountryOptions(Array.isArray(payload) ? extractCountryOptions(payload) : []);
+      } catch {
+        if (!cancelled) {
+          setCountryOptions([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCountryOptionsLoading(false);
+        }
+      }
+    };
+
+    void loadCountryOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const { register, handleSubmit, control, setValue, watch, reset, resetField } = useForm<RegistrationData>({
     resolver: zodResolver(registrationSchema),
     defaultValues: {
       visaDuration: shouldHydrateFromPersistedState ? data.visaDuration || undefined : undefined,
       email: shouldHydrateFromPersistedState ? data.email || "" : "",
-      countryCode: shouldHydrateFromPersistedState ? data.countryCode || "+44" : "+44",
+      countryCode: shouldHydrateFromPersistedState ? data.countryCode || defaultDialCode : defaultDialCode,
       phone: shouldHydrateFromPersistedState ? data.phone || "" : "",
       fullName: shouldHydrateFromPersistedState ? data.fullName || "" : "",
-      nationality: shouldHydrateFromPersistedState && data.nationality && nationalityOptions.has(data.nationality) ? (data.nationality as RegistrationData["nationality"]) : undefined,
-      countryOfResidence: shouldHydrateFromPersistedState && data.countryOfResidence && residenceOptions.has(data.countryOfResidence) ? (data.countryOfResidence as RegistrationData["countryOfResidence"]) : undefined,
+      nationality: shouldHydrateFromPersistedState ? data.nationality || "" : "",
+      countryOfResidence: shouldHydrateFromPersistedState ? data.countryOfResidence || "" : "",
       purposeOfVisit: shouldHydrateFromPersistedState && data.purposeOfVisit && purposeOptions.has(data.purposeOfVisit) ? (data.purposeOfVisit as RegistrationData["purposeOfVisit"]) : undefined,
       consent: shouldHydrateFromPersistedState && data.consentAccepted ? true : undefined,
     }
   });
+
+  const phoneValue = watch("phone");
+  const didAutoStripRef = useRef(false);
+
+  useEffect(() => {
+    if (!phoneValue?.startsWith("+")) {
+      didAutoStripRef.current = false;
+      return;
+    }
+
+    if (didAutoStripRef.current) return;
+    if (countryOptions.length === 0) return;
+
+    const spaceIdx = phoneValue.indexOf(" ");
+    if (spaceIdx === -1) return;
+
+    const typedCode = phoneValue.slice(0, spaceIdx);
+    const afterSpace = phoneValue.slice(spaceIdx + 1);
+
+    const matched = countryOptions.find((country) => country.dialCode === typedCode);
+    if (!matched) return;
+
+    didAutoStripRef.current = true;
+
+    if (watch("countryCode") !== matched.dialCode) {
+      setValue("countryCode", matched.dialCode, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
+    }
+    setValue("phone", afterSpace, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
+  }, [phoneValue, countryOptions]);
+
+  useEffect(() => {
+    if (!defaultDialCode || countryOptions.length === 0) {
+      return;
+    }
+
+    const currentCountryCode = watch("countryCode");
+    if (!currentCountryCode) {
+      setValue("countryCode", defaultDialCode, { shouldDirty: false, shouldTouch: false, shouldValidate: true });
+    }
+  }, [countryOptions, defaultDialCode, setValue, watch]);
 
  useEffect(() => {
   if (typeof window === "undefined") return;
@@ -255,7 +602,7 @@ export default function RegistrationPage() {
     reset({
       visaDuration: undefined,
       email: "",
-      countryCode: "+44",
+      countryCode: defaultDialCode,
       phone: "",
       fullName: "",
       nationality: undefined,
@@ -343,14 +690,14 @@ export default function RegistrationPage() {
       return;
     }
 
-    const nationality = nationalityOptions.has(data.nationality || "") ? (data.nationality as RegistrationData["nationality"]) : undefined;
-    const countryOfResidence = residenceOptions.has(data.countryOfResidence || "") ? (data.countryOfResidence as RegistrationData["countryOfResidence"]) : undefined;
+    const nationality = data.nationality || undefined;
+    const countryOfResidence = data.countryOfResidence || undefined;
     const purposeOfVisit = purposeOptions.has(data.purposeOfVisit || "") ? (data.purposeOfVisit as RegistrationData["purposeOfVisit"]) : undefined;
 
     reset({
       visaDuration: data.visaDuration || undefined,
       email: data.email || "",
-      countryCode: data.countryCode || "+44",
+      countryCode: data.countryCode || defaultDialCode,
       phone: data.phone || "",
       fullName: data.fullName || "",
       nationality,
@@ -380,7 +727,7 @@ export default function RegistrationPage() {
 
       setValue("visaDuration", visaDuration);
       setValue("email", email);
-      setValue("countryCode", "+44");
+      setValue("countryCode", defaultDialCode);
       setValue("phone", "");
       setValue("fullName", fullName);
       resetField("nationality");
@@ -393,7 +740,7 @@ export default function RegistrationPage() {
         visaDuration,
         email,
         phone: "",
-        countryCode: "+44",
+        countryCode: defaultDialCode,
         fullName,
         nationality: "",
         countryOfResidence: "",
@@ -407,14 +754,14 @@ export default function RegistrationPage() {
     }
 
     const visaDuration = prefill?.visaDuration === "5-Year" ? "5-Year" : "1-Year";
-    const nationality = nationalityOptions.has(prefill?.nationality || "") ? (prefill?.nationality as RegistrationData["nationality"]) : undefined;
-    const countryOfResidence = residenceOptions.has(prefill?.countryOfResidence || "") ? (prefill?.countryOfResidence as RegistrationData["countryOfResidence"]) : undefined;
+    const nationality = prefill?.nationality || undefined;
+    const countryOfResidence = prefill?.countryOfResidence || undefined;
     const purposeOfVisit = purposeOptions.has(prefill?.purposeOfVisit || "") ? (prefill?.purposeOfVisit as RegistrationData["purposeOfVisit"]) : "Tourism";
     const rawCombined = (prefill as any)?.phone_number || "";
-    const splitCombined = rawCombined && !prefill?.phone ? splitPhoneNumber(rawCombined) : null;
+    const splitCombined = rawCombined && !prefill?.phone ? splitPhoneNumber(rawCombined, countryOptions.map((option) => option.dialCode), defaultDialCode) : null;
     const resolvedCountryCode = rawCombined && !prefill?.phone
-      ? splitCombined?.countryCode || "+44"
-      : (prefill?.countryCode || watch("countryCode") || data.countryCode || "+44");
+      ? splitCombined?.countryCode || defaultDialCode
+      : (prefill?.countryCode || watch("countryCode") || data.countryCode || defaultDialCode);
     const resolvedPhone = rawCombined && !prefill?.phone
       ? splitCombined?.phone || ""
       : ((prefill?.phone && prefill.phone.trim()) || watch("phone") || data.phone || "");
@@ -422,7 +769,7 @@ export default function RegistrationPage() {
     console.log("[applyRegistrationPrefill] prefill data:", prefill);
     console.log("[applyRegistrationPrefill] parsed values:", { visaDuration, nationality, countryOfResidence, purposeOfVisit });
     if (rawCombined) {
-      const split = splitPhoneNumber(rawCombined);
+      const split = splitPhoneNumber(rawCombined, countryOptions.map((option) => option.dialCode), defaultDialCode);
       console.log("[applyRegistrationPrefill] rawCombined phone:", rawCombined, "split:", split);
     }
 
@@ -537,7 +884,7 @@ export default function RegistrationPage() {
           reset({
             visaDuration: undefined,
             email: "",
-            countryCode: "+44",
+            countryCode: defaultDialCode,
             phone: "",
             fullName: "",
             nationality: undefined,
@@ -1124,7 +1471,7 @@ if (profileRes.ok) {
  if (coreUser) {
   if (coreUser.phone_number) {
     setValue("phone", coreUser.phone_number, { shouldDirty: true, shouldValidate: true, shouldTouch: true });
-    updateData({ phone: coreUser.phone_number, countryCode: "+44" });
+    updateData({ phone: coreUser.phone_number, countryCode: defaultDialCode });
   }
 
     if (coreUser.nationality && !watch("nationality")) {
@@ -1805,29 +2152,41 @@ if (profileRes.ok) {
                 {(detailsMode || shouldShowField(detailsSnapshot.countryOfResidence || data.countryOfResidence)) && (
                   <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
                     <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Country of residence</label>
-                    <select {...register("countryOfResidence")} disabled={isFormLocked} className={`mt-2 ${inputClasses()}`}>
-                      <option value="">Select country</option>
-                      <option value="United Kingdom">United Kingdom</option>
-                      <option value="United States">United States</option>
-                      <option value="Canada">Canada</option>
-                      <option value="Australia">Australia</option>
-                      <option value="UAE">UAE</option>
-                      <option value="Singapore">Singapore</option>
-                      <option value="Other">Other</option>
-                    </select>
+                    <Controller
+                      name="countryOfResidence"
+                      control={control}
+                      render={({ field }) => (
+                        <SearchableSelectField
+                          value={field.value}
+                          options={residenceOptions}
+                          placeholder="Search and select country"
+                          loading={isCountryOptionsLoading}
+                          disabled={isFormLocked}
+                          className={`mt-2 ${inputClasses()}`}
+                          onChange={field.onChange}
+                        />
+                      )}
+                    />
                   </div>
                 )}
                 {(detailsMode || shouldShowField(detailsSnapshot.nationality || data.nationality)) && (
                   <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
                     <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Nationality</label>
-                    <select {...register("nationality")} disabled={isFormLocked} className={`mt-2 ${inputClasses()}`}>
-                      <option value="">Select nationality</option>
-                      <option value="British">British</option>
-                      <option value="American">American</option>
-                      <option value="Canadian">Canadian</option>
-                      <option value="Indian">Indian</option>
-                      <option value="Other">Other</option>
-                    </select>
+                    <Controller
+                      name="nationality"
+                      control={control}
+                      render={({ field }) => (
+                        <SearchableSelectField
+                          value={field.value}
+                          options={nationalityOptions}
+                          placeholder="Search and select nationality"
+                          loading={isCountryOptionsLoading}
+                          disabled={isFormLocked}
+                          className={`mt-2 ${inputClasses()}`}
+                          onChange={field.onChange}
+                        />
+                      )}
+                    />
                   </div>
                 )}
                 <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 shadow-[0_8px_24px_rgba(22,62,120,0.04)]">
@@ -2133,6 +2492,7 @@ if (profileRes.ok) {
 
               {/* Email */}
              <div className="grid sm:grid-cols-1 gap-4">
+ <div className="grid sm:grid-cols-1 gap-4">
   <div>
     <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>
       Email address *
@@ -2144,25 +2504,43 @@ if (profileRes.ok) {
       readOnly={isReadOnlyApplication}
       placeholder="your@email.com"
       className={inputClasses() + " " + fieldDisabledClass}
+      onBlur={async (e) => {
+        const typedEmail = e.target.value.trim();
+        if (!typedEmail || !authService.isLoggedIn()) return;
+        try {
+          const res = await authenticatedFetch(`${API_BASE_URL}/auth/me/`, { method: "GET" });
+          if (!res.ok) return;
+          const json = await res.json().catch(() => ({}));
+          const accountEmail = (json as any)?.data?.core_user?.email || "";
+          if (accountEmail && typedEmail.toLowerCase() !== accountEmail.toLowerCase()) {
+            toast.error(`Please use your registered email: ${accountEmail}`);
+          }
+        } catch {
+          // silent
+        }
+      }}
     />
   </div>
+</div>
 </div>
               {/* Field 4: Mobile */}
               <div>
                 <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Mobile number *</label>
                 <div className="flex gap-2.5">
-                  <select
-                    {...register("countryCode")}
-                    disabled={isSubmitting || isReadOnlyApplication}
-                    className={`${detailsMode ? "w-[160px] px-3 py-3 border border-[#d7dbe8] rounded-[14px] font-body text-[13px] bg-[#f1f2f6] outline-none focus:border-[#7f86a5] focus:shadow-[0_0_0_3px_rgba(127,134,165,0.2)] transition-all duration-200" : "w-[140px] px-3 py-2.5 border border-[#d7e3f2] rounded-lg font-body text-[12px] bg-[#f8fafd] outline-none focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.16)] transition-all duration-200"} ${fieldDisabledClass}`}
-                  >
-                    <option value="+44">+44 🇬🇧 UK</option>
-                    <option value="+1">+1 🇺🇸 US</option>
-                    <option value="+91">+91 🇮🇳 IN</option>
-                    <option value="+971">+971 🇦🇪 UAE</option>
-                    <option value="+65">+65 🇸🇬 SG</option>
-                    <option value="+61">+61 🇦🇺 AU</option>
-                  </select>
+                  <Controller
+                    name="countryCode"
+                    control={control}
+                    render={({ field }) => (
+                      <SearchableDialCode
+                        value={field.value}
+                        options={countryOptions}
+                        loading={isCountryOptionsLoading}
+                        disabled={isSubmitting || isReadOnlyApplication}
+                        className={`${detailsMode ? "w-[160px] px-3 py-3 border border-[#d7dbe8] rounded-[14px] font-body text-[13px] bg-[#f1f2f6] outline-none focus:border-[#7f86a5] focus:shadow-[0_0_0_3px_rgba(127,134,165,0.2)] transition-all duration-200" : "w-[140px] px-3 py-2.5 border border-[#d7e3f2] rounded-lg font-body text-[12px] bg-[#f8fafd] outline-none focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.16)] transition-all duration-200"} ${fieldDisabledClass}`}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
                   <div className="flex-1 min-w-0">
                     <input
                       {...register("phone")}
@@ -2200,35 +2578,39 @@ if (profileRes.ok) {
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Nationality *</label>
-                  <select
-                    {...register("nationality")}
-                    disabled={isSubmitting || isReadOnlyApplication}
-                    className={inputClasses() + " bg-white " + fieldDisabledClass}
-                  >
-                    <option value="">Select...</option>
-                    <option value="British">British</option>
-                    <option value="American">American</option>
-                    <option value="Canadian">Canadian</option>
-                    <option value="Indian">Indian</option>
-                    <option value="Other">Other</option>
-                  </select>
+                  <Controller
+                    name="nationality"
+                    control={control}
+                    render={({ field }) => (
+                      <SearchableSelectField
+                        value={field.value}
+                        options={nationalityOptions}
+                        placeholder="Search and select nationality"
+                        loading={isCountryOptionsLoading}
+                        disabled={isSubmitting || isReadOnlyApplication}
+                        className={inputClasses() + " bg-white " + fieldDisabledClass}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
                 </div>
                 <div>
                   <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Country of residence *</label>
-                  <select
-                    {...register("countryOfResidence")}
-                    disabled={isSubmitting || isReadOnlyApplication}
-                    className={inputClasses() + " bg-white " + fieldDisabledClass}
-                  >
-                    <option value="">Select...</option>
-                    <option value="United Kingdom">United Kingdom</option>
-                    <option value="United States">United States</option>
-                    <option value="Canada">Canada</option>
-                    <option value="Australia">Australia</option>
-                    <option value="UAE">UAE</option>
-                    <option value="Singapore">Singapore</option>
-                    <option value="Other">Other</option>
-                  </select>
+                  <Controller
+                    name="countryOfResidence"
+                    control={control}
+                    render={({ field }) => (
+                      <SearchableSelectField
+                        value={field.value}
+                        options={residenceOptions}
+                        placeholder="Search and select country"
+                        loading={isCountryOptionsLoading}
+                        disabled={isSubmitting || isReadOnlyApplication}
+                        className={inputClasses() + " bg-white " + fieldDisabledClass}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
                 </div>
               </div>
 

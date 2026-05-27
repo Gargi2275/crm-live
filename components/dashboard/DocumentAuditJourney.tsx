@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 import { ApplicationTracker, ApplicationTrackerStep } from "@/components/dashboard/ApplicationTracker";
 import toast from "react-hot-toast";
 import {
@@ -551,6 +552,8 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [caseSummaryOpen, setCaseSummaryOpen] = useState(false);
+  const [paymentConsentsAccepted, setPaymentConsentsAccepted] = useState(false);
+  const [uploadConsentsAccepted, setUploadConsentsAccepted] = useState(false);
 
   useEffect(() => {
     stageRef.current = stage;
@@ -2122,6 +2125,10 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
   const proceedToSummary = () => {
     if (!requiredComplete) return;
+    if (!uploadConsentsAccepted) {
+      toast.error("Please accept the upload consent before continuing.");
+      return;
+    }
     setMessageRequestedDocIds([]);
     setStage("summary");
     setBannerMessage("Review your upload summary and audit fee.");
@@ -2136,6 +2143,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   };
 
   const submitAuditPayment = async () => {
+    if (!uploadConsentsAccepted || !paymentConsentsAccepted) {
+      toast.error("Please accept the upload and payment consents before continuing.");
+      return;
+    }
+
      const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
   const refNum = app?.reference_number;
   if (!refNum) {
@@ -2189,6 +2201,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   };
 
   const submitPassportRequestForQuote = async () => {
+    if (!uploadConsentsAccepted) {
+      toast.error("Please accept the upload consents before continuing.");
+      return;
+    }
+
     const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
     const refNum = app?.reference_number;
     if (!refNum) {
@@ -2216,6 +2233,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     const refNum = String(app?.reference_number || referenceNumber || "").trim();
     if (!refNum) {
       toast.error("Application reference not found.");
+      return;
+    }
+
+    if (!paymentConsentsAccepted) {
+      toast.error("Please accept the payment consents before continuing.");
       return;
     }
 
@@ -2533,6 +2555,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   };
 
   const skipAuditAndProceedToPayment = async () => {
+    if (!uploadConsentsAccepted || !paymentConsentsAccepted) {
+      toast.error("Please accept the upload and payment consents before continuing.");
+      return;
+    }
+
     const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
     const refNum = app?.reference_number;
     if (!refNum) {
@@ -2557,6 +2584,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   const confirmFullPayment = async () => {
     if (!paymentSummary || paymentSummaryLoading || paymentSummaryError) {
       toast.error("Unable to load payment details. Please refresh or contact support.");
+      return;
+    }
+
+    if (!paymentConsentsAccepted) {
+      toast.error("Please accept the payment consents before continuing.");
       return;
     }
 
@@ -2998,6 +3030,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 </div>
               ))}
             </div>
+            <div className="mt-5">
+              <ConsentCheckboxes
+                mode="upload"
+                showMinorConsent={answers.ageGroup === "Child (under 18)"}
+                onAcceptanceChange={setUploadConsentsAccepted}
+              />
+            </div>
             <div className="mt-4">
               <label className="block text-sm font-semibold text-primary mb-2">Notes to FlyOCI team</label>
               <textarea
@@ -3016,7 +3055,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
             </div>
             <div className="flex flex-wrap gap-3">
               <Button variant="outline" onClick={() => setStage("checklist")}>Back to checklist</Button>
-              <Button isLoading={apiLoading} onClick={proceedToSummary} disabled={!requiredComplete}>Review & Proceed to Payment</Button>
+              <Button isLoading={apiLoading} onClick={proceedToSummary} disabled={!requiredComplete || !uploadConsentsAccepted}>Review & Proceed to Payment</Button>
             </div>
           </div>
         </div>
@@ -3067,6 +3106,10 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                   <span>I acknowledge the audit fee and understand it is credited against my final service fee if I proceed.</span>
                 </label>
 
+                <div className="mt-5">
+                  <ConsentCheckboxes mode="payment" onAcceptanceChange={setPaymentConsentsAccepted} />
+                </div>
+
                 <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
                   <p className="font-semibold">Skip audit? You can, but it is not recommended.</p>
                   <p className="mt-1">
@@ -3083,13 +3126,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     <span>I understand that skipping audit can cause delays and extra correction rounds after payment.</span>
                   </label>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="outline" isLoading={apiLoading} onClick={() => void submitAuditPayment()}>
+                    <Button variant="outline" isLoading={apiLoading} onClick={() => void submitAuditPayment()} disabled={!uploadConsentsAccepted || !paymentConsentsAccepted}>
                       Take the Audit (Recommended)
                     </Button>
                     <Button
                       variant="outline"
                       isLoading={apiLoading}
-                      disabled={!skipAuditDisclaimerAccepted || apiLoading}
+                      disabled={!skipAuditDisclaimerAccepted || apiLoading || !uploadConsentsAccepted || !paymentConsentsAccepted}
                       onClick={() => void skipAuditAndProceedToPayment()}
                     >
                       Skip & Pay Full Fee
@@ -3107,9 +3150,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               setStage("checklist");
             }}>Back to uploads</Button>
             {selectedService === "passport-renewal" ? (
-              <Button isLoading={apiLoading} onClick={() => void submitPassportRequestForQuote()}>Submit Passport Renewal Request</Button>
+              <Button isLoading={apiLoading} onClick={() => void submitPassportRequestForQuote()} disabled={!uploadConsentsAccepted}>Submit Passport Renewal Request</Button>
             ) : (
-              <Button isLoading={apiLoading} onClick={() => void submitAuditPayment()}>Pay £{auditFee} & Submit for Audit</Button>
+              <Button isLoading={apiLoading} onClick={() => void submitAuditPayment()} disabled={!uploadConsentsAccepted || !paymentConsentsAccepted}>Pay £{auditFee} & Submit for Audit</Button>
             )}
           </div>
         </div>
@@ -3516,12 +3559,15 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 <input type="checkbox" className="mt-1" />
                 <span>I confirm I want FlyOCI to begin processing my application.</span>
               </label>
+              <div className="mt-5">
+                <ConsentCheckboxes mode="payment" onAcceptanceChange={setPaymentConsentsAccepted} />
+              </div>
             </div>
           </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <Button variant="outline" onClick={() => setStage("audit-result")}>Back to audit result</Button>
-            <Button isLoading={apiLoading} onClick={() => void confirmFullPayment()} disabled={paymentSummaryLoading || !!paymentSummaryError || !paymentSummary}>Pay & Confirm My Application</Button>
+            <Button isLoading={apiLoading} onClick={() => void confirmFullPayment()} disabled={paymentSummaryLoading || !!paymentSummaryError || !paymentSummary || !paymentConsentsAccepted}>Pay & Confirm My Application</Button>
           </div>
         </div>
       )}

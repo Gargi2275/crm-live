@@ -32,8 +32,9 @@ const links = {
     { name: "Contact", href: "/contact" },
   ],
   legal: [
-    { name: "Terms", href: "/terms" },
-    { name: "Privacy", href: "/privacy" },
+    { name: "Terms & Conditions", href: "/terms-and-conditions" },
+    { name: "Privacy Policy", href: "/privacy-policy" },
+    { name: "Refund Policy", href: "/refund-policy" },
     { name: "Cookies", href: "/cookies" },
     { name: "Disclaimer", href: "/disclaimer" },
   ],

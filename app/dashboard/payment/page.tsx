@@ -10,6 +10,7 @@ import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { CookieBanner } from "@/components/CookieBanner";
 import PageTransition from "@/components/PageTransition";
+import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 import { Button } from "@/components/ui/Button";
 import {
   createFullPaymentOrder,
@@ -59,7 +60,7 @@ export default function DashboardPaymentPage() {
   const [application, setApplication] = useState<ApplicationDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [consentsAccepted, setConsentsAccepted] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -109,6 +110,10 @@ export default function DashboardPaymentPage() {
     if (!referenceNumber || isAlreadyPaid) return;
     if (isRejected) {
       setError("This application has been rejected and cannot proceed to payment. Please contact support.");
+      return;
+    }
+    if (!consentsAccepted) {
+      setError("Please accept all required consents before continuing.");
       return;
     }
 
@@ -202,15 +207,9 @@ export default function DashboardPaymentPage() {
                       Full payment is already confirmed for this application.
                     </div>
                   ) : (
-                    <label className="mt-6 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={acknowledged}
-                        onChange={(event) => setAcknowledged(event.target.checked)}
-                        className="mt-1"
-                      />
-                      <span>I confirm FlyOCI can proceed with full-service processing after payment.</span>
-                    </label>
+                    <div className="mt-6">
+                      <ConsentCheckboxes mode="payment" onAcceptanceChange={setConsentsAccepted} />
+                    </div>
                   )}
 
                   {error ? (
@@ -230,7 +229,7 @@ export default function DashboardPaymentPage() {
                         Go to Processing Tracker
                       </Button>
                     ) : (
-                      <Button onClick={() => void handlePayment()} isLoading={paying} disabled={!acknowledged || !referenceNumber}>
+                      <Button onClick={() => void handlePayment()} isLoading={paying} disabled={!consentsAccepted || !referenceNumber}>
                         Pay & Continue
                       </Button>
                     )}

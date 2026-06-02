@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Clock, FileText, MessageSquare, MoveRight, Send, CheckCircle, AlertTriangle, Download } from "lucide-react";
+import { Clock, FileText, MessageSquare, MoveRight, Send, CheckCircle, AlertTriangle, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type PipelineCase } from "@/lib/kanban";
 import {
@@ -94,6 +94,42 @@ const toStageLabel = (stage: PipelineCase["stage"] | string) =>
     .trim()
     .replaceAll("_", " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getNextActionLabel = (stage: PipelineCase["stage"]): string => {
+  const map: Partial<Record<PipelineCase["stage"], string>> = {
+    NEW_LEAD: "Open lead and assign service",
+    PASSPORT_QUOTE_PENDING: "Send passport quote to customer",
+    AUDIT_PENDING: "Review uploaded documents",
+    AUDIT_COMPLETED: "Send payment link to customer",
+    DOCUMENTS_REQUIRED: "Request missing documents from customer",
+    PAYMENT_PENDING: "Follow up on payment confirmation",
+    DOCUMENT_UPLOAD_PENDING: "Wait for customer document upload",
+    FORM_FILLING: "Complete government application form",
+    REVIEW_PENDING: "Admin review of completed form",
+    READY_FOR_SUBMISSION: "Submit application and enter reference number",
+    SUBMITTED: "Monitor and update application result",
+    DELIVERED: "Confirm delivery and close case",
+  };
+  return map[stage] || "No action defined";
+};
+
+const getAllowedActions = (stage: PipelineCase["stage"]): string[] => {
+  const map: Partial<Record<PipelineCase["stage"], string[]>> = {
+    NEW_LEAD: ["Open lead", "Assign service", "Send quote", "Reject duplicate"],
+    PASSPORT_QUOTE_PENDING: ["Set passport quote", "Send to customer"],
+    AUDIT_PENDING: ["Review documents", "Accept / reject each document", "Request missing document", "Escalate document issue"],
+    AUDIT_COMPLETED: ["Send payment link", "Move to form filling after payment confirmed"],
+    DOCUMENTS_REQUIRED: ["Request missing documents", "Review corrected uploads", "Escalate to admin"],
+    PAYMENT_PENDING: ["Send payment reminder", "Confirm payment received"],
+    DOCUMENT_UPLOAD_PENDING: ["Send upload reminder", "Wait for customer upload"],
+    FORM_FILLING: ["Complete form", "Save draft", "Request customer confirmation", "Send to review"],
+    REVIEW_PENDING: ["Approve for submission", "Send back to form filling", "Request correction"],
+    READY_FOR_SUBMISSION: ["Submit application", "Enter government reference", "Upload submission proof"],
+    SUBMITTED: ["Update result", "Mark approved", "Mark rejected", "Send delivery email"],
+    DELIVERED: ["Mark delivered", "Confirm customer notified", "Close case"],
+  };
+  return map[stage] || ["No actions defined for this stage"];
+};
 
 const resolveDisplayPaymentStatus = (
   details: AdminApplication | null | undefined,
@@ -297,6 +333,7 @@ export function SlideOverPanel({
   onStageResolved,
 }: SlideOverPanelProps) {
   const autoMovedCorrectionRef = useRef<string | null>(null);
+  const previousCaseIdRef = useRef<string | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "messages" | "audit" | "documents">("overview");
   const [auditResult, setAuditResult] = useState<"green" | "amber" | "red">("green");
   const [auditorNotes, setAuditorNotes] = useState("");
@@ -346,6 +383,16 @@ export function SlideOverPanel({
   }, [documents]);
 
   useEffect(() => {
+    const currentCaseId = caseData?.id ?? null;
+    if (!currentCaseId) {
+      previousCaseIdRef.current = null;
+      return;
+    }
+    if (previousCaseIdRef.current === currentCaseId) {
+      return;
+    }
+    previousCaseIdRef.current = currentCaseId;
+
     setActiveTab("overview");
     setAuditResult("green");
     setAuditorNotes(details?.auditor_notes || "");
@@ -726,6 +773,12 @@ export function SlideOverPanel({
     requestedDocumentStatuses.length > 0
       && requestedDocumentStatuses.every((item) => item.reuploaded === true)
   );
+
+  const warnings: string[] = [];
+  if (caseData?.slaBreached) warnings.push("SLA breached — case is overdue");
+  if (isRejected) warnings.push("Application rejected — review required");
+  if (isDocumentsRequired && !allFlaggedReuploaded) warnings.push("Waiting for customer to reupload documents");
+  if (effectiveStage === "REVIEW_PENDING") warnings.push("Awaiting admin/senior review before submission");
 
   const correctedDocumentIds = useMemo(() => {
     if (requestedDocumentStatuses.length === 0 || correctionRequestedAt <= 0) {
@@ -1273,36 +1326,40 @@ export function SlideOverPanel({
   if (!isOpen || !caseData) return null;
 
   return (
-    <>
-      <div
+    <div
         className={cn(
-          "fixed inset-0 bg-gray-900/30 backdrop-blur-sm z-40 transition-opacity",
-          isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-        )}
-        onClick={onClose}
-      />
-
-      <div
-        className={cn(
-          "fixed inset-y-0 right-0 w-full md:w-[620px] bg-[#F0F4FF] shadow-2xl z-50 transform transition-transform duration-300 ease-in-out border-l border-blue-200 flex flex-col",
-          isOpen ? "translate-x-0" : "translate-x-full"
+          "absolute inset-0 z-50 bg-white overflow-y-auto flex flex-col transform transition-transform duration-300 ease-in-out",
+          isOpen ? "translate-y-0" : "translate-y-full"
         )}
       >
-        <div className="flex items-center justify-between p-5 border-b border-blue-200 bg-white">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">{caseData.id}</h2>
-            <p className="text-sm text-slate-500">{caseData.customer} • {caseData.serviceType}</p>
+        <div className="flex items-center justify-between px-6 py-3 border-b border-[#D9E1EA] bg-white gap-6 flex-wrap shrink-0">
+          <div className="flex items-center gap-3 flex-wrap flex-1 min-w-0">
+            <button
+              onClick={onClose}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] border border-[#D9E1EA] text-sm font-semibold text-[#486581] hover:text-[#102A43] shrink-0"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              Back
+            </button>
+
+            <div className="h-5 w-px bg-[#E5EAF0] shrink-0" />
+            <p className="text-sm font-bold text-[#102A43] shrink-0">{caseData.id}</p>
+            <span className="text-[#D9E1EA]">·</span>
+            <p className="text-sm text-[#486581] truncate">{caseData.customer}</p>
+            <span className="text-[#D9E1EA]">·</span>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#33A1FD]/10 text-[#0B69B7] shrink-0">{caseData.serviceType}</span>
+            <span className="text-[#D9E1EA]">·</span>
+            <span className="text-xs font-semibold text-[#486581] shrink-0">{toStageLabel(effectiveStage)}</span>
+            <span className={cn("text-xs font-semibold shrink-0", caseData.slaBreached ? "text-[#B42318]" : "text-[#006F57]")}>
+              SLA {caseData.slaTimer}
+            </span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-blue-50 text-slate-600 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
-        <div className="px-5 pt-3 bg-white border-b border-blue-200">
-          <div className="inline-flex rounded-lg border border-[#D9E1EA] p-1 bg-[#F8FAFC]">
+        <div className="shrink-0 border-b border-[#E5EAF0] bg-white px-6 py-2">
+          <div className="inline-flex rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-1">
             {(["overview", "messages", "audit", "documents"] as const).map((tab) => (
               <button
                 key={tab}
@@ -1318,38 +1375,105 @@ export function SlideOverPanel({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {actionBanner && (
-            <div className="rounded-lg border border-[#B7D7F7] bg-[#EFF7FF] px-3 py-2 text-sm text-[#0B69B7]">{actionBanner}</div>
-          )}
-
-          {activeTab === "messages" && (
-            <div className="space-y-4">
-              <div className="bg-white p-4 rounded-xl border border-blue-200">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Customer Note to FlyOCI Team</h3>
-                {String(details?.notes || "").trim() ? (
-                  <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-semibold text-[#102A43]">Customer note to FlyOCI Team</p>
-                        <p className="text-[10px] text-[#627D98] mt-1">
-                          {details?.updated_at ? new Date(details.updated_at).toLocaleString() : details?.application_date ? new Date(details.application_date).toLocaleString() : "Date unknown"}
-                        </p>
+        <div>
+          <div className="flex flex-col w-full">
+            <div className="px-5 pb-3 space-y-4">
+              {activeTab === "overview" && (
+                <>
+                  <div className="bg-white rounded-[12px] border border-[#E5EAF0] p-4 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Case Details</h3>
+                    {detailsLoading && <p className="text-sm text-[#486581]">Loading full details...</p>}
+                    {!detailsLoading && detailsError && <p className="text-sm text-[#B42318]">{detailsError}</p>}
+                    {!detailsLoading && !detailsError && (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        {[
+                          ["Reference", details?.reference_number || caseData.id],
+                          ["Customer", details?.customer_name || caseData.customer],
+                          ["Service", details?.service_name || details?.service_type || caseData.serviceType],
+                          ["Stage", processStatusLabel],
+                          ["Payment status", paymentStatusLabel],
+                          ["SLA timer", caseData.slaTimer],
+                          ["Assigned staff", caseData.assignedTo || "Unassigned"],
+                          ["Created date", details?.created_at ? new Date(details.created_at).toLocaleString() : "-"],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-lg border border-[#E5EAF0] bg-[#F8FAFC] p-2.5">
+                            <p className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide">{label}</p>
+                            <p className="text-sm text-[#102A43] font-medium mt-0.5">{value}</p>
+                          </div>
+                        ))}
                       </div>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-[#ECFDF3] text-[#006F57] border-[#A7E3C8]">
-                        Customer
-                      </span>
-                    </div>
-                    <p className="text-sm text-[#334E68] whitespace-pre-wrap">{String(details?.notes || "").trim()}</p>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-sm text-[#627D98]">No customer note yet.</p>
-                )}
-              </div>
-            </div>
-          )}
 
-          {activeTab === "audit" && (isAuditPending || (isDocumentsRequired && isAmberCorrection)) && (
+                  <div className="bg-white rounded-[12px] border border-[#E5EAF0] p-4 space-y-3">
+                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Internal Notes</h3>
+                    <textarea
+                      value={auditorNotes}
+                      onChange={(event) => setAuditorNotes(event.target.value)}
+                      onBlur={() => { void handleSaveNotes(); }}
+                      placeholder="Internal notes"
+                      className="w-full min-h-[100px] rounded border border-[#D9E1EA] px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between py-2 mb-1">
+                    <div>
+                      <p className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide">Current Task</p>
+                      <p className="text-base font-semibold text-[#102A43]">{getNextActionLabel(effectiveStage)}</p>
+                    </div>
+                    <span className={cn(
+                      "text-[11px] font-semibold px-3 py-1 rounded-full",
+                      caseData.slaBreached ? "bg-[#FEF2F2] text-[#B42318]" : "bg-[#ECFDF5] text-[#006F57]"
+                    )}>
+                      {caseData.slaBreached ? "Overdue" : "On track"}
+                    </span>
+                  </div>
+
+                  {warnings.length > 0 && (
+                    <div className="rounded-[12px] border border-[#B42318]/30 bg-[#FEF2F2] p-4">
+                      <p className="text-[11px] font-semibold text-[#B42318] uppercase tracking-wide mb-2">Warnings</p>
+                      <ul className="space-y-1.5">
+                        {warnings.map((warning) => (
+                          <li key={warning} className="text-xs text-[#B42318] flex items-center gap-1.5">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            {warning}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {actionBanner && (
+                    <div className="rounded-lg border border-[#B7D7F7] bg-[#EFF7FF] px-3 py-2 text-sm text-[#0B69B7]">{actionBanner}</div>
+                  )}
+                </>
+              )}
+
+              {activeTab === "messages" && (
+                <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Customer Messages</h3>
+                  {customerMessageTimeline.length > 0 ? (
+                    customerMessageTimeline.map((message, index) => (
+                      <div key={`${message.createdAt}-${message.subject}-main-${index}`} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold text-[#102A43]">{message.subject}</p>
+                            <p className="text-[10px] text-[#627D98] mt-1">{message.createdAt ? new Date(message.createdAt).toLocaleString() : "Date unknown"}</p>
+                          </div>
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-white text-[#486581] border-[#D9E1EA]">
+                            {message.sender === "customer" ? "Customer" : "Team"}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm text-[#334E68] whitespace-pre-wrap">{message.message}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-[#9AA5B4]">No messages yet.</p>
+                  )}
+                </div>
+              )}
+
+              {activeTab === "audit" && (isAuditPending || (isDocumentsRequired && isAmberCorrection)) && (
             <div className="space-y-4">
               <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Audit Review</h3>
@@ -1462,8 +1586,8 @@ export function SlideOverPanel({
             </div>
           )}
 
-          {activeTab === "documents" && (
-            <div className="bg-white p-4 rounded-xl border border-blue-200">
+              {activeTab === "documents" && (
+              <div className="bg-white p-4 rounded-xl border border-blue-200">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Documents</h3>
               {documentsLoading && <p className="text-sm text-[#486581]">Loading documents...</p>}
               {!documentsLoading && documentsError && !(isApostilleCase && apostilleDocuments.length > 0) && <p className="text-sm text-[#B42318]">{documentsError}</p>}
@@ -1573,10 +1697,10 @@ export function SlideOverPanel({
                 );
               })()}
             </div>
-          )}
+              )}
 
-          {activeTab === "overview" && (
-            <>
+              {activeTab === "overview" && (
+              <div className="space-y-4">
               <div className="bg-white p-4 rounded-xl border border-blue-200">
                 <h3 className="text-xs font-bold text-[#33A1FD] uppercase tracking-wider mb-2">Current Status</h3>
                 <div className="flex justify-between items-center">
@@ -2067,8 +2191,21 @@ export function SlideOverPanel({
                 </div>
               )}
 
-              <div className="bg-white p-4 rounded-xl border border-blue-200">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Quick Actions</h3>
+              <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-[12px] border border-[#E5EAF0] bg-[#F8FAFC] p-4">
+                <p className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide mb-3">Allowed Actions</p>
+                <ul className="space-y-2">
+                  {getAllowedActions(effectiveStage).map((action) => (
+                    <li key={action} className="text-xs text-[#486581] flex items-start gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#009877] shrink-0 mt-1" />
+                      {action}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="rounded-[12px] border border-[#E5EAF0] bg-white p-4 space-y-2">
+                <p className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide mb-3">Quick Actions</p>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <button onClick={() => setShowRequestDocs((prev) => !prev)} className="flex items-center justify-center gap-2 bg-white border border-blue-200 text-slate-700 py-2 px-3 rounded-lg text-xs font-medium">
                     <FileText className="w-4 h-4 text-[#33A1FD]" /> Request Documents
@@ -2182,6 +2319,7 @@ export function SlideOverPanel({
 
                 {showMoveStage && (
                   <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">
+                    <p className="text-[11px] text-[#9AA5B4]">Admin: Manual stage move</p>
                     <select value={targetStage} onChange={(event) => setTargetStage(event.target.value as PipelineCase["stage"])} className="w-full rounded border border-[#D9E1EA] px-2 py-1.5 text-xs">
                       {KANBAN_STAGE_OPTIONS.map((stage) => (
                         <option key={stage} value={stage}>{stage.replaceAll("_", " ")}</option>
@@ -2192,38 +2330,22 @@ export function SlideOverPanel({
                     </button>
                   </div>
                 )}
+                <button
+                  onClick={() => {
+                    toast("Escalate to admin feature coming soon.", { icon: "🔔" });
+                  }}
+                  className="w-full rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-xs font-semibold text-[#486581] hover:border-[#B42318]/40 hover:text-[#B42318] transition-colors"
+                >
+                  Escalate to Admin
+                </button>
               </div>
-
-              <div className="bg-white p-4 rounded-xl border border-blue-200">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Application Details</h3>
-                {detailsLoading && <p className="text-sm text-[#486581]">Loading full details...</p>}
-                {!detailsLoading && detailsError && <p className="text-sm text-[#B42318]">{detailsError}</p>}
-                {!detailsLoading && !detailsError && details && (
-                  <div className="space-y-1 text-sm text-[#334E68]">
-                    <p><span className="font-semibold text-[#102A43]">Reference:</span> {details.reference_number}</p>
-                    <p><span className="font-semibold text-[#102A43]">Service:</span> {details.service_name || details.service_type || "-"}</p>
-                    <p><span className="font-semibold text-[#102A43]">Status:</span> {processStatusLabel}</p>
-                    <p><span className="font-semibold text-[#102A43]">Backend status:</span> {details.application_status || "-"}</p>
-                    <p><span className="font-semibold text-[#102A43]">Created:</span> {details.created_at ? new Date(details.created_at).toLocaleString() : "-"}</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-white p-4 rounded-xl border border-blue-200">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Case Notes</h3>
-                <textarea
-                  value={auditorNotes}
-                  onChange={(event) => setAuditorNotes(event.target.value)}
-                  onBlur={() => { void handleSaveNotes(); }}
-                  placeholder="Internal notes"
-                  className="w-full min-h-[88px] rounded border border-[#D9E1EA] px-3 py-2 text-sm"
-                />
-              </div>
-            </>
-          )}
+            </div>
+            </div>
+              )}
+          </div>
 
         </div>
       </div>
-    </>
+    </div>
   );
 }

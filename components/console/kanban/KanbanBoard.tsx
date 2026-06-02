@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, DragOverlay, closestCorners, useSensor, useSensors, PointerSensor, DragStartEvent, DragEndEvent } from "@dnd-kit/core";
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanCard } from "./KanbanCard";
 import { SlideOverPanel } from "./SlideOverPanel";
 import { KANBAN_COLUMNS, type PipelineCase } from "@/lib/kanban";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   getAdminApostilleDetail,
   getAdminApplicationDetails,
@@ -23,7 +24,33 @@ type KanbanCase = PipelineCase & {
   updatedAt: string;
   applicationStatus: string;
   auditResult: string;
+  nextAction?: string;
 };
+
+export type KanbanQuickFilter =
+  | "sla_health"
+  | "evisa_total"
+  | "evisa_pending"
+  | "evisa_approved"
+  | "evisa_rejected"
+  | "evisa_action_required"
+  | "evisa_reupload_pending_review"
+  | "sla_at_risk"
+  | "sla_breached"
+  | "escalations"
+  | "open_cases"
+  | "documents_requested"
+  | "live_stages";
+
+export type KanbanViewMode = "pipeline" | "list";
+
+interface KanbanBoardProps {
+  quickFilter?: KanbanQuickFilter | null;
+  serviceFilter?: string;
+  staffFilter?: string;
+  ageingFilter?: string;
+  viewMode?: KanbanViewMode;
+}
 
 const STAGE_ALIAS: Record<string, PipelineCase["stage"]> = {
   NEW_LEAD: "NEW_LEAD",
@@ -41,6 +68,8 @@ const STAGE_ALIAS: Record<string, PipelineCase["stage"]> = {
   DELIVERED: "DELIVERED",
 };
 
+const STAGE_MOVE_ROLES = ["admin", "founder"];
+
 const toStage = (rawStage?: string): PipelineCase["stage"] => {
   const normalized = (rawStage || "").trim().toUpperCase().replace(/\s+/g, "_");
   return STAGE_ALIAS[normalized] || "NEW_LEAD";
@@ -54,6 +83,37 @@ const normalizeServiceType = (serviceType?: string, caseType?: string): Pipeline
   if (normalized.includes("passport")) return "Passport Renewal";
   if (normalized.includes("visa")) return "E-Visa";
   return "OCI";
+};
+
+const getStageBadgeClass = (stage: PipelineCase["stage"]) => {
+  switch (stage) {
+    case "NEW_LEAD":
+      return "bg-[#E0F2FE] text-[#0B69B7] border-[#B7D7F7]";
+    case "PASSPORT_QUOTE_PENDING":
+      return "bg-[#EEF2FF] text-[#4338CA] border-[#C7D2FE]";
+    case "AUDIT_PENDING":
+      return "bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]";
+    case "AUDIT_COMPLETED":
+      return "bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]";
+    case "DOCUMENTS_REQUIRED":
+      return "bg-[#FFEDD5] text-[#9A3412] border-[#FED7AA]";
+    case "PAYMENT_PENDING":
+      return "bg-[#FCE7F3] text-[#9D174D] border-[#FBCFE8]";
+    case "DOCUMENT_UPLOAD_PENDING":
+      return "bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]";
+    case "FORM_FILLING":
+      return "bg-[#ECFEFF] text-[#155E75] border-[#A5F3FC]";
+    case "REVIEW_PENDING":
+      return "bg-[#FEF9C3] text-[#854D0E] border-[#FDE047]";
+    case "READY_FOR_SUBMISSION":
+      return "bg-[#DBEAFE] text-[#1D4ED8] border-[#BFDBFE]";
+    case "SUBMITTED":
+      return "bg-[#EDE9FE] text-[#5B21B6] border-[#DDD6FE]";
+    case "DELIVERED":
+      return "bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]";
+    default:
+      return "bg-[#F1F5F9] text-[#334155] border-[#CBD5E1]";
+  }
 };
 
 const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
@@ -184,6 +244,24 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
   return (STAGE_ALIAS[rawStage] || "NEW_LEAD") as PipelineCase["stage"];
 };
 
+const getNextAction = (stage: PipelineCase["stage"]): string => {
+  const map: Partial<Record<PipelineCase["stage"], string>> = {
+    NEW_LEAD: "Open lead and assign service",
+    PASSPORT_QUOTE_PENDING: "Send passport quote to customer",
+    AUDIT_PENDING: "Review uploaded documents",
+    AUDIT_COMPLETED: "Send payment link to customer",
+    DOCUMENTS_REQUIRED: "Request missing documents from customer",
+    PAYMENT_PENDING: "Follow up on payment confirmation",
+    DOCUMENT_UPLOAD_PENDING: "Wait for customer document upload",
+    FORM_FILLING: "Complete government application form",
+    REVIEW_PENDING: "Admin review of completed form",
+    READY_FOR_SUBMISSION: "Submit application and enter reference number",
+    SUBMITTED: "Monitor and update application result",
+    DELIVERED: "Confirm delivery and close case",
+  };
+  return map[stage] || "No action defined";
+};
+
 const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"] => {
   if (item.full_payment_status === "paid" || item.audit_payment_status === "paid") {
     return "Paid";
@@ -204,6 +282,7 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
     isApostille && (item.file_number || "").trim()
       ? String(item.file_number).trim()
       : item.reference_number || `APP-${item.id}`;
+  const stage = resolveStage(item);
   return {
     applicationId: item.id,
     createdAt,
@@ -217,7 +296,8 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
     flag: "",
     amount: 0,
     paymentStatus: getPaymentStatus(item),
-    stage: resolveStage(item),
+    stage,
+    nextAction: getNextAction(stage),
     assignedTo: item.assigned_staff ? String(item.assigned_staff) : null,
     slaTimer: `${ageHours}h`,
     slaBreached: ageHours >= 24 * 7,
@@ -240,7 +320,60 @@ const ageInDays = (createdAt: string): number => {
   return Math.max(0, Math.floor((Date.now() - created) / (1000 * 60 * 60 * 24)));
 };
 
-export function KanbanBoard() {
+interface DraggableKanbanAreaProps {
+  children: ReactNode;
+  activeId: string | null;
+  cases: KanbanCase[];
+  onDragStart: (event: DragStartEvent) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+}
+
+function DraggableKanbanArea({ children, activeId, cases, onDragStart, onDragEnd }: DraggableKanbanAreaProps) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    })
+  );
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
+      {children}
+
+      <DragOverlay dropAnimation={{
+        duration: 250,
+        easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)",
+      }}>
+        {activeId && cases.find((c) => c.id === activeId) ? (() => {
+          const activeCase = cases.find((c) => c.id === activeId)!;
+          return (
+            <div className="opacity-90 shadow-2xl scale-105 border-2 border-[#009877] rotate-2 z-50 rounded-[12px]">
+              <KanbanCard
+                {...activeCase}
+                onClick={() => {}}
+              />
+            </div>
+          );
+        })() : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+export function KanbanBoard({
+  quickFilter = null,
+  serviceFilter = "All",
+  staffFilter = "All",
+  ageingFilter = "Any",
+  viewMode = "pipeline",
+}: KanbanBoardProps) {
+  const { adminUser } = useAdminAuth();
   const [cases, setCases] = useState<KanbanCase[]>([]);
   const [pendingCases, setPendingCases] = useState<KanbanCase[] | null>(null);
   const [hasNewUpdates, setHasNewUpdates] = useState(false);
@@ -253,11 +386,10 @@ export function KanbanBoard() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
-  const [serviceFilter, setServiceFilter] = useState("All");
-  const [staffFilter, setStaffFilter] = useState("All");
-  const [ageingFilter, setAgeingFilter] = useState("Any");
+  const detailsRequestRef = useRef(0);
   const [columnLoading, setColumnLoading] = useState<Record<PipelineCase["stage"], boolean>>(() => makeColumnMap(() => true));
   const [columnErrors, setColumnErrors] = useState<Record<PipelineCase["stage"], string | null>>(() => makeColumnMap(() => null));
+  const isStaff = !STAGE_MOVE_ROLES.includes(String(adminUser?.role || ""));
 
   const fetchAndMapApplications = async () => {
     const applications = await listAdminApplications();
@@ -351,26 +483,9 @@ export function KanbanBoard() {
     };
   }, [cases]);
 
-  const serviceOptions = useMemo(() => {
-    return ["All", ...Array.from(new Set(cases.map((item) => item.serviceType)))];
-  }, [cases]);
-
-  const staffOptions = useMemo(() => {
-    const values = Array.from(new Set(cases.map((item) => item.assignedTo).filter(Boolean))) as string[];
-    return ["All", ...values, "Unassigned"];
-  }, [cases]);
-
   const moveCase = (caseId: string, stage: PipelineCase["stage"]) => {
     setCases((prev) => prev.map((item) => (item.id === caseId ? { ...item, stage } : item)));
   };
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 5,
-      },
-    })
-  );
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
@@ -415,6 +530,7 @@ export function KanbanBoard() {
   };
 
   const handleCardClick = async (caseItem: KanbanCase) => {
+    const requestId = ++detailsRequestRef.current;
     const isApostilleCase = caseItem.serviceType === "Apostille";
     setSelectedCase(caseItem);
     setSelectedCaseDetails(null);
@@ -430,6 +546,9 @@ export function KanbanBoard() {
           getAdminApplicationDetails(caseItem.applicationId),
           getAdminApostilleDetail(caseItem.id),
         ]);
+        if (detailsRequestRef.current !== requestId) {
+          return;
+        }
 
         let mergedDetails: AdminApplication | null = null;
         if (detailsResult.status === "fulfilled") {
@@ -468,27 +587,45 @@ export function KanbanBoard() {
         return;
       }
 
-      const [detailsResult, documentsResult] = await Promise.allSettled([
+      const detailsResult = await Promise.allSettled([
         getAdminApplicationDetails(caseItem.applicationId),
-        getAdminApplicationDocuments(caseItem.id),
       ]);
-
-      if (detailsResult.status === "fulfilled") {
-        setSelectedCaseDetails(detailsResult.value);
-      } else {
-        setDetailsError(detailsResult.reason instanceof Error ? detailsResult.reason.message : "Failed to load application details.");
+      if (detailsRequestRef.current !== requestId) {
+        return;
       }
 
-      if (documentsResult.status === "fulfilled") {
-        setSelectedCaseDocuments(documentsResult.value);
+      if (detailsResult[0].status === "fulfilled") {
+        setSelectedCaseDetails(detailsResult[0].value);
       } else {
-        setDocumentsError(documentsResult.reason instanceof Error ? documentsResult.reason.message : "Failed to load documents.");
+        setDetailsError(detailsResult[0].reason instanceof Error ? detailsResult[0].reason.message : "Failed to load application details.");
+      }
+
+      const referenceNumber = (
+        detailsResult[0].status === "fulfilled"
+          ? String(detailsResult[0].value.reference_number || caseItem.id)
+          : String(caseItem.id)
+      ).trim();
+      const documentsResult = await Promise.allSettled([
+        getAdminApplicationDocuments(referenceNumber),
+      ]);
+      if (detailsRequestRef.current !== requestId) {
+        return;
+      }
+      if (documentsResult[0].status === "fulfilled") {
+        setSelectedCaseDocuments(documentsResult[0].value);
+      } else {
+        setDocumentsError(documentsResult[0].reason instanceof Error ? documentsResult[0].reason.message : "Failed to load documents.");
       }
     } catch (error) {
+      if (detailsRequestRef.current !== requestId) {
+        return;
+      }
       setDetailsError(error instanceof Error ? error.message : "Failed to load application details.");
     } finally {
-      setDetailsLoading(false);
-      setDocumentsLoading(false);
+      if (detailsRequestRef.current === requestId) {
+        setDetailsLoading(false);
+        setDocumentsLoading(false);
+      }
     }
   };
 
@@ -497,35 +634,158 @@ export function KanbanBoard() {
     const byStaff = staffFilter === "All" || (staffFilter === "Unassigned" ? !item.assignedTo : item.assignedTo === staffFilter);
     const ageDays = ageInDays(item.createdAt);
     const byAgeing = ageingFilter === "Any" || (ageingFilter === "3d+" && ageDays >= 3) || (ageingFilter === "5d+" && ageDays >= 5) || (ageingFilter === "7d+" && ageDays >= 7);
-    return byService && byStaff && byAgeing;
+
+    const status = String(item.applicationStatus || "").toLowerCase();
+    const stage = item.stage;
+    const isClosed = stage === "SUBMITTED" || stage === "DELIVERED";
+    const isEVisa = item.serviceType === "E-Visa";
+    const isReuploadPendingReview = status === "reuploaded_pending_review";
+    const isActionRequired = status === "correction_requested" || stage === "DOCUMENTS_REQUIRED";
+    const isApproved = status === "approved" || stage === "DELIVERED";
+    const isRejected = status === "rejected" || item.auditResult === "red";
+    const isPending = isEVisa && !isApproved && !isRejected && !isActionRequired && !isReuploadPendingReview;
+
+    const byQuickFilter = !quickFilter || (() => {
+      switch (quickFilter) {
+        case "evisa_total":
+          return isEVisa;
+        case "sla_health":
+          return !isClosed && ageDays >= 3;
+        case "evisa_pending":
+          return isPending;
+        case "evisa_approved":
+          return isEVisa && isApproved;
+        case "evisa_rejected":
+          return isEVisa && isRejected;
+        case "evisa_action_required":
+          return isEVisa && isActionRequired;
+        case "evisa_reupload_pending_review":
+          return isEVisa && isReuploadPendingReview;
+        case "sla_at_risk":
+          return !isClosed && ageDays >= 3;
+        case "sla_breached":
+          return !isClosed && ageDays >= 7;
+        case "escalations":
+          return stage === "REVIEW_PENDING" || stage === "DOCUMENTS_REQUIRED" || ageDays >= 7;
+        case "open_cases":
+          return !isClosed;
+        case "documents_requested":
+          return stage === "DOCUMENTS_REQUIRED" || stage === "DOCUMENT_UPLOAD_PENDING";
+        case "live_stages":
+          return stage === "PASSPORT_QUOTE_PENDING" || stage === "DOCUMENTS_REQUIRED" || stage === "PAYMENT_PENDING" || stage === "REVIEW_PENDING";
+        default:
+          return true;
+      }
+    })();
+
+    return byService && byStaff && byAgeing && byQuickFilter;
   });
+
+  const renderColumns = (staffView: boolean) => (
+    <div className="flex gap-4 h-[560px] max-h-[64vh] min-h-[420px] overflow-x-auto pb-2 custom-scrollbar">
+      {(quickFilter
+        ? KANBAN_COLUMNS.filter((column) => filteredCases.some((c) => c.stage === column.id))
+        : KANBAN_COLUMNS
+      ).map((column) => {
+        const columnCases = filteredCases.filter((c) => c.stage === column.id);
+        return (
+          <KanbanColumn
+            key={column.id}
+            id={column.id}
+            title={column.title}
+            color={column.color}
+            count={columnCases.length}
+            droppable={!staffView}
+          >
+            {columnLoading[column.id] && (
+              <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[10px] p-3 text-xs text-[#627D98]">
+                Loading applications...
+              </div>
+            )}
+            {!columnLoading[column.id] && columnErrors[column.id] && (
+              <div className="bg-white border-[0.5px] border-[#B42318]/40 rounded-[10px] p-3 text-xs text-[#B42318]">
+                {columnErrors[column.id]}
+              </div>
+            )}
+            {!columnLoading[column.id] && !columnErrors[column.id] && columnCases.map((c) => (
+              <KanbanCard
+                key={c.id}
+                {...c}
+                draggable={!staffView}
+                nextAction={c.nextAction}
+                onClick={() => handleCardClick(c)}
+              />
+            ))}
+          </KanbanColumn>
+        );
+      })}
+    </div>
+  );
+
+  const renderListView = () => (
+    <div className="overflow-hidden rounded-[12px] border border-[#D9E1EA] bg-white">
+      <div className="max-h-[64vh] min-h-[420px] overflow-auto custom-scrollbar">
+        <table className="w-full min-w-[980px] table-auto border-collapse">
+          <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+            <tr className="border-b border-[#D9E1EA]">
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">Case ID</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">Customer</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">Service</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">Stage</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">Next Action</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">Assigned</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">Payment</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-[#627D98]">SLA</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-[#627D98]">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredCases.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-4 py-8 text-center text-sm text-[#627D98]">
+                  No cases found for current filters.
+                </td>
+              </tr>
+            ) : (
+              filteredCases.map((item) => {
+                const stageLabel = KANBAN_COLUMNS.find((column) => column.id === item.stage)?.title || item.stage;
+                return (
+                  <tr key={item.id} className="border-b border-[#EEF2F6] hover:bg-[#FAFCFF]">
+                    <td className="px-3 py-2 text-xs font-semibold text-[#102A43]">{item.id}</td>
+                    <td className="px-3 py-2 text-sm text-[#334E68]">{item.customer}</td>
+                    <td className="px-3 py-2 text-xs text-[#486581]">{item.serviceType}</td>
+                    <td className="px-3 py-2 text-xs">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 font-semibold ${getStageBadgeClass(item.stage)}`}>
+                        {stageLabel}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-[#486581]">{item.nextAction || "-"}</td>
+                    <td className="px-3 py-2 text-xs text-[#486581]">{item.assignedTo || "Unassigned"}</td>
+                    <td className="px-3 py-2 text-xs text-[#486581]">{item.paymentStatus}</td>
+                    <td className={`px-3 py-2 text-xs font-semibold ${item.slaBreached ? "text-[#B42318]" : "text-[#006F57]"}`}>
+                      {item.slaTimer}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => { void handleCardClick(item); }}
+                        className="rounded-md border border-[#B7D7F7] bg-[#EFF7FF] px-2.5 py-1 text-xs font-semibold text-[#0B69B7] hover:bg-[#E5F2FF]"
+                      >
+                        Open
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-xs text-[#627D98]">
-          Last refreshed: {lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString() : "-"}
-        </p>
-        {hasNewUpdates && (
-          <div className="inline-flex items-center gap-2 rounded-lg border border-[#B7D7F7] bg-[#EFF7FF] px-3 py-1.5 text-xs text-[#0B69B7]">
-            New updates available
-            <button
-              onClick={() => {
-                if (pendingCases) {
-                  setCases(pendingCases);
-                }
-                setPendingCases(null);
-                setHasNewUpdates(false);
-                setLastRefreshedAt(new Date());
-              }}
-              className="rounded border border-[#B7D7F7] bg-white px-2 py-0.5 font-semibold"
-            >
-              Refresh
-            </button>
-          </div>
-        )}
-      </div>
-
       <SlideOverPanel 
         isOpen={!!selectedCase} 
         onClose={() => {
@@ -564,78 +824,20 @@ export function KanbanBoard() {
         }}
       />
 
-      <div className="flex flex-wrap gap-3 mb-4">
-        {[
-          ["Service Type", serviceOptions, serviceFilter, setServiceFilter],
-          ["Assigned Staff", staffOptions, staffFilter, setStaffFilter],
-          ["Ageing", ["Any", "3d+", "5d+", "7d+"], ageingFilter, setAgeingFilter],
-        ].map(([label, options, value, setter]) => (
-          <select
-            key={label as string}
-            value={value as string}
-            onChange={(e) => (setter as (value: string) => void)(e.target.value)}
-            className="bg-white border-[0.5px] border-[#D9E1EA] text-sm rounded-[10px] px-3 py-2 text-[#102A43] focus:outline-none focus:ring-2 focus:ring-[#009877]/25 focus:border-[#009877] min-w-[150px]"
-            aria-label={label as string}
-          >
-            {(options as string[]).map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        ))}
-      </div>
-
-      <DndContext 
-        sensors={sensors}
-        collisionDetection={closestCorners} 
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="flex gap-4 h-[560px] max-h-[64vh] min-h-[420px] overflow-x-auto pb-2 custom-scrollbar">
-          {KANBAN_COLUMNS.map((column) => {
-            const columnCases = filteredCases.filter((c) => c.stage === column.id);
-            return (
-              <KanbanColumn key={column.id} id={column.id} title={column.title} color={column.color} count={columnCases.length}>
-                {columnLoading[column.id] && (
-                  <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[10px] p-3 text-xs text-[#627D98]">
-                    Loading applications...
-                  </div>
-                )}
-                {!columnLoading[column.id] && columnErrors[column.id] && (
-                  <div className="bg-white border-[0.5px] border-[#B42318]/40 rounded-[10px] p-3 text-xs text-[#B42318]">
-                    {columnErrors[column.id]}
-                  </div>
-                )}
-                {!columnLoading[column.id] && !columnErrors[column.id] && columnCases.map((c) => (
-                  <KanbanCard 
-                    key={c.id} 
-                    {...c} 
-                    onClick={() => handleCardClick(c)}
-                  />
-                ))}
-              </KanbanColumn>
-            );
-          })}
-        </div>
-
-        <DragOverlay dropAnimation={{
-          duration: 250,
-          easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
-        }}>
-          {activeId && cases.find((c) => c.id === activeId) ? (() => {
-            const activeCase = cases.find((c) => c.id === activeId)!;
-            return (
-              <div className="opacity-90 shadow-2xl scale-105 border-2 border-[#009877] rotate-2 z-50 rounded-[12px]">
-                <KanbanCard 
-                  {...activeCase}
-                  onClick={() => {}}
-                />
-              </div>
-            );
-          })() : null}
-        </DragOverlay>
-      </DndContext>
+      {viewMode === "list" ? (
+        renderListView()
+      ) : isStaff ? (
+        renderColumns(true)
+      ) : (
+        <DraggableKanbanArea
+          activeId={activeId}
+          cases={cases}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          {renderColumns(false)}
+        </DraggableKanbanArea>
+      )}
     </>
   );
 }

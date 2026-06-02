@@ -89,24 +89,6 @@ export default function TrackPage() {
 
   const isDashboardVisible = !!summary;
 
-  useEffect(() => {
-    if (!summary || !authService.isLoggedIn()) {
-      return;
-    }
-
-    const resolvedCase = (summary.file_number || caseNumber || "").trim();
-    if (!resolvedCase) {
-      return;
-    }
-
-    const nextUrl = `/indian-e-visa?case=${encodeURIComponent(resolvedCase)}&view=details`;
-    const timeoutId = window.setTimeout(() => {
-      router.replace(nextUrl);
-    }, 300);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [summary, caseNumber, router]);
-
   const hasMissingDocuments = useMemo(() => {
     if (!documents.length) {
       return false;

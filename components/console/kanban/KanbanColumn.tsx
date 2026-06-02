@@ -9,12 +9,16 @@ interface KanbanColumnProps {
   count: number;
   color: string;
   children: React.ReactNode;
+  droppable?: boolean;
 }
 
-export function KanbanColumn({ id, title, children, count, color }: KanbanColumnProps) {
-  const { isOver, setNodeRef } = useDroppable({
-    id,
-  });
+type KanbanColumnContentProps = KanbanColumnProps & {
+  isOver?: boolean;
+  setNodeRef?: (element: HTMLDivElement | null) => void;
+};
+
+function KanbanColumnContent({ title, children, count, color, droppable = true, isOver = false, setNodeRef }: KanbanColumnContentProps) {
+  const showDropHighlight = droppable && isOver;
 
   return (
     <div className="flex flex-col flex-shrink-0 w-80 bg-[#F8FAFC] rounded-[12px] border-[0.5px] border-[#D9E1EA] overflow-hidden h-full">
@@ -24,23 +28,39 @@ export function KanbanColumn({ id, title, children, count, color }: KanbanColumn
           {count}
         </span>
       </div>
-      
-      <div 
+
+      <div
         ref={setNodeRef}
         className={cn(
           "flex-1 p-2.5 overflow-y-auto min-h-[150px] transition-colors space-y-2",
-          isOver ? "bg-[#009877]/10" : ""
+          showDropHighlight ? "bg-[#009877]/10" : ""
         )}
       >
         {children}
-        
+
         {/* Empty state or padding at bottom */}
-        {count === 0 && !isOver && (
+        {count === 0 && !showDropHighlight && (
           <div className="h-full flex items-center justify-center text-[#627D98] text-sm border border-dashed border-[#D9E1EA] rounded-[10px] m-2 bg-white">
-            Drop cards here
+            {droppable ? "Drop cards here" : "No cases in this stage"}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function DroppableKanbanColumn(props: KanbanColumnProps) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: props.id,
+  });
+
+  return <KanbanColumnContent {...props} isOver={isOver} setNodeRef={setNodeRef} />;
+}
+
+export function KanbanColumn({ droppable = true, ...props }: KanbanColumnProps) {
+  if (!droppable) {
+    return <KanbanColumnContent droppable={false} {...props} />;
+  }
+
+  return <DroppableKanbanColumn droppable={droppable} {...props} />;
 }

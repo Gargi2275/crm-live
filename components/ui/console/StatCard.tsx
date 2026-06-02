@@ -21,18 +21,18 @@ export function StatCard({ title, value, trend, isPositive, colorClass, bgClass,
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
       whileHover={{ y: -3 }}
-      className="relative overflow-hidden bg-white rounded-[12px] shadow-sm border-[0.5px] border-[#D9E1EA] p-5 hover:border-[#009877]/35 transition-all duration-300"
+      className="relative overflow-hidden bg-white rounded-[12px] shadow-sm border-[0.5px] border-[#D9E1EA] p-4 sm:p-5 hover:border-[#009877]/35 transition-all duration-300"
     >
       <span aria-hidden className="pointer-events-none absolute -right-8 -top-8 h-20 w-20 rounded-full bg-[#33A1FD]/8 blur-2xl" />
-      <div className="flex justify-between items-start">
-        <div className="space-y-3">
-          <p className="text-sm font-heading font-medium text-[#486581]">{title}</p>
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-2xl font-heading font-semibold text-[#102A43]">{value}</h3>
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
+        <div className="space-y-2 min-w-0">
+          <p className="text-xs sm:text-sm font-heading font-medium text-[#486581] leading-tight">{title}</p>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h3 className="text-xl sm:text-2xl font-heading font-semibold text-[#102A43] leading-none">{value}</h3>
             {trend && (
               <span 
                 className={cn(
-                  "text-xs font-heading font-semibold px-2 py-0.5 rounded-full",
+                  "text-[10px] sm:text-xs font-heading font-semibold px-2 py-0.5 rounded-full whitespace-nowrap",
                   isPositive ? "bg-[#009877]/12 text-[#006F57]" : "bg-[#B42318]/12 text-[#B42318]"
                 )}
               >
@@ -41,8 +41,8 @@ export function StatCard({ title, value, trend, isPositive, colorClass, bgClass,
             )}
           </div>
         </div>
-        <div className={cn("p-3 rounded-lg flex items-center justify-center", bgClass, colorClass)}>
-          <Icon className="w-6 h-6" />
+        <div className={cn("p-2.5 sm:p-3 rounded-lg flex items-center justify-center self-start", bgClass, colorClass)}>
+          <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
         </div>
       </div>
     </motion.div>

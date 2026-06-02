@@ -24,6 +24,13 @@ import {
   List,
   CalendarClock,
   TrendingUp,
+  ShieldCheck,
+  KeyRound,
+  Logs,
+  Bell,
+  Mail,
+  Activity,
+  UserCog,
 } from "lucide-react";
 
 
@@ -60,10 +67,17 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
 
   const baseMenuItems = [
     { name: "Dashboard", href: "/admin", icon: BarChart3 },
+    { name: "Workload", href: "/admin/workload", icon: UserCog },
     { name: "Staff Management", href: "/admin/staff", icon: Briefcase },
+    { name: "Roles", href: "/admin/roles", icon: ShieldCheck },
+    { name: "Permissions", href: "/admin/permissions", icon: KeyRound },
     { name: "Kanban Pipeline", href: "/admin/kanban", icon: KanbanSquare },
     { name: "Reports", href: "/admin/reports", icon: PieChart },
-     { name: "EasyFly Bookings", href: "/admin/easyfly", icon: Plane },
+    { name: "EasyFly Bookings", href: "/admin/easyfly", icon: Plane },
+    { name: "Logs Module", href: "/admin/logs", icon: Logs },
+    { name: "Notifications", href: "/admin/notifications", icon: Bell },
+    { name: "Email Module", href: "/admin/email", icon: Mail },
+    { name: "Team Performance", href: "/admin/team-performance", icon: Activity },
     { name: "NDR / SLA Alerts", href: "/admin/alerts", icon: TriangleAlert },
     { name: "Team Management", href: "/admin/team", icon: Users },
     { name: "Remittance / Revenue", href: "/admin/revenue", icon: Landmark },

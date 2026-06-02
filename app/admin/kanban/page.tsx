@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { KanbanBoard } from "@/components/console/kanban/KanbanBoard";
+import { KanbanBoard, type KanbanQuickFilter, type KanbanViewMode } from "@/components/console/kanban/KanbanBoard";
 import { AlertTriangle, CheckCircle2, RotateCcw, ShieldAlert, TimerReset, CheckCircle, XCircle, Clock3, FileWarning } from "lucide-react";
 import { listAdminApplications, type AdminApplication } from "@/lib/admin-auth";
 import { KANBAN_COLUMNS, type KanbanStage } from "@/lib/kanban";
@@ -31,9 +31,28 @@ const simplifyNote = (value?: string) => {
   return clean.length > 140 ? `${clean.slice(0, 140)}...` : clean;
 };
 
+const toServiceBucket = (application: AdminApplication): string => {
+  const serviceType = String(application.service_type || "").toLowerCase();
+  const caseType = String(application.case_type || "").toLowerCase();
+  if (caseType.includes("apostille") || serviceType.includes("apostille")) return "Apostille";
+  if (serviceType.includes("passport")) return "Passport Renewal";
+  if (serviceType.includes("evisa") || serviceType.includes("e-visa") || serviceType.includes("e visa") || serviceType.includes("visa")) return "E-Visa";
+  return "OCI";
+};
+
 export default function OperationsKanbanPage() {
   const [applications, setApplications] = useState<AdminApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeQuickFilter, setActiveQuickFilter] = useState<KanbanQuickFilter | null>(null);
+  const [activeStatsTab, setActiveStatsTab] = useState<"evisa" | "health" | "volume" | null>(null);
+  const [serviceFilter, setServiceFilter] = useState("All");
+  const [staffFilter, setStaffFilter] = useState("All");
+  const [ageingFilter, setAgeingFilter] = useState("Any");
+  const [viewMode, setViewMode] = useState<KanbanViewMode>("pipeline");
+
+  const toggleQuickFilter = (key: KanbanQuickFilter) => {
+    setActiveQuickFilter((prev) => (prev === key ? null : key));
+  };
 
   const loadApplications = async () => {
     setIsLoading(true);
@@ -145,13 +164,26 @@ export default function OperationsKanbanPage() {
     };
   }, [applications]);
 
+  const serviceOptions = useMemo(() => {
+    return ["All", ...Array.from(new Set(applications.map((application) => toServiceBucket(application))))];
+  }, [applications]);
+
+  const staffOptions = useMemo(() => {
+    const values = Array.from(
+      new Set(
+        applications
+          .map((application) => (application.assigned_staff ? String(application.assigned_staff) : ""))
+          .filter(Boolean)
+      )
+    );
+    return ["All", ...values, "Unassigned"];
+  }, [applications]);
+
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 space-y-4 font-body max-w-[1500px] mx-auto">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-2 shrink-0">
         <div>
-          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Operations Kanban Pipeline</h1>
-          <p className="text-[#486581] text-sm mt-1">Drag and drop live applications across all processing stages</p>
-          <p className="text-xs text-[#627D98] mt-1">{isLoading ? "Loading live data..." : `${applications.length} applications loaded from the API`}</p>
+          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Operations Queue</h1>
         </div>
         <button onClick={() => void loadApplications()} className="inline-flex items-center gap-2 bg-[#009877] hover:bg-[#007B61] text-white px-4 py-2 rounded-[10px] font-heading font-semibold shadow-sm">
           <RotateCcw className="w-4 h-4" />
@@ -159,78 +191,166 @@ export default function OperationsKanbanPage() {
         </button>
       </div>
 
-      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-[18px] font-heading font-semibold text-[#102A43]">EVisa Dashboard</h2>
-            <p className="text-xs text-[#627D98]">Live EVisa application summary</p>
+      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4 space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="overflow-x-auto">
+            <div className="inline-flex min-w-max rounded-xl border border-[#D9E1EA] bg-[#F8FAFC] p-1">
+              <button
+                type="button"
+                onClick={() => setActiveStatsTab((prev) => (prev === "evisa" ? null : "evisa"))}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeStatsTab === "evisa" ? "bg-white text-[#102A43] shadow-sm" : "text-[#627D98] hover:text-[#334E68]"}`}
+              >
+                EVisa Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveStatsTab((prev) => (prev === "health" ? null : "health"))}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeStatsTab === "health" ? "bg-white text-[#102A43] shadow-sm" : "text-[#627D98] hover:text-[#334E68]"}`}
+              >
+                SLA & Risk
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveStatsTab((prev) => (prev === "volume" ? null : "volume"))}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeStatsTab === "volume" ? "bg-white text-[#102A43] shadow-sm" : "text-[#627D98] hover:text-[#334E68]"}`}
+              >
+                Open & Volume
+              </button>
+            </div>
           </div>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/30">Dynamic API data</span>
+
+          {[
+            ["Service Type", serviceOptions, serviceFilter, setServiceFilter],
+            ["Assigned Staff", staffOptions, staffFilter, setStaffFilter],
+            ["Ageing", ["Any", "3d+", "5d+", "7d+"], ageingFilter, setAgeingFilter],
+          ].map(([label, options, value, setter]) => (
+            <select
+              key={label as string}
+              value={value as string}
+              onChange={(e) => (setter as (value: string) => void)(e.target.value)}
+              className="bg-white border-[0.5px] border-[#D9E1EA] text-sm rounded-[10px] px-3 py-2 text-[#102A43] focus:outline-none focus:ring-2 focus:ring-[#009877]/25 focus:border-[#009877] min-w-[130px]"
+              aria-label={label as string}
+            >
+              {(options as string[]).map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          ))}
+
+          <div className="inline-flex rounded-xl border border-[#D9E1EA] bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setViewMode("pipeline")}
+              className={`rounded-lg px-4 py-2 text-xs font-semibold transition-colors ${viewMode === "pipeline" ? "bg-[#102A43] text-white" : "text-[#486581] hover:bg-[#F5F7FA]"}`}
+            >
+              Pipeline
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`rounded-lg px-4 py-2 text-xs font-semibold transition-colors ${viewMode === "list" ? "bg-[#102A43] text-white" : "text-[#486581] hover:bg-[#F5F7FA]"}`}
+            >
+              List
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+
+        {activeStatsTab === "evisa" && (
+          <>
+            <div className="flex items-center justify-between mb-1">
+              <div>
+                <h2 className="text-[18px] font-heading font-semibold text-[#102A43]">EVisa Dashboard</h2>
+                <p className="text-xs text-[#627D98]">Live EVisa application summary</p>
+              </div>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/30">Dynamic API data</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <button onClick={() => toggleQuickFilter("evisa_total")} className={`rounded-[10px] border p-3 text-left ${activeQuickFilter === "evisa_total" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
             <p className="text-xs text-[#627D98]">Total Applications</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#009877]" />{evisaStats.total}</p>
-          </div>
-          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+          </button>
+          <button onClick={() => toggleQuickFilter("evisa_pending")} className={`rounded-[10px] border p-3 text-left ${activeQuickFilter === "evisa_pending" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
             <p className="text-xs text-[#627D98]">Pending</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><Clock3 className="w-4 h-4 text-[#B87333]" />{evisaStats.pending}</p>
-          </div>
-          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+          </button>
+          <button onClick={() => toggleQuickFilter("evisa_approved")} className={`rounded-[10px] border p-3 text-left ${activeQuickFilter === "evisa_approved" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
             <p className="text-xs text-[#627D98]">Approved</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><CheckCircle className="w-4 h-4 text-[#009877]" />{evisaStats.approved}</p>
-          </div>
-          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+          </button>
+          <button onClick={() => toggleQuickFilter("evisa_rejected")} className={`rounded-[10px] border p-3 text-left ${activeQuickFilter === "evisa_rejected" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
             <p className="text-xs text-[#627D98]">Rejected</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><XCircle className="w-4 h-4 text-[#B42318]" />{evisaStats.rejected}</p>
-          </div>
-          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+          </button>
+          <button onClick={() => toggleQuickFilter("evisa_action_required")} className={`rounded-[10px] border p-3 text-left ${activeQuickFilter === "evisa_action_required" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
             <p className="text-xs text-[#627D98]">Action Required</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><FileWarning className="w-4 h-4 text-[#B45309]" />{evisaStats.actionRequired}</p>
-          </div>
-          <div className="rounded-[10px] border border-[#D9E1EA] p-3">
+          </button>
+          <button onClick={() => toggleQuickFilter("evisa_reupload_pending_review")} className={`rounded-[10px] border p-3 text-left ${activeQuickFilter === "evisa_reupload_pending_review" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
             <p className="text-xs text-[#627D98]">Reupload Pending Review</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><Clock3 className="w-4 h-4 text-[#0B69B7]" />{evisaStats.reuploadPendingReview}</p>
-          </div>
+          </button>
         </div>
-      </div>
+          </>
+        )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        {activeStatsTab === "health" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <button onClick={() => toggleQuickFilter("sla_health")} className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left ${activeQuickFilter === "sla_health" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
           <p className="text-xs text-[#627D98] mb-1">SLA Health</p>
           <p className="text-[#102A43] font-heading font-semibold text-lg inline-flex items-center gap-2"><CheckCircle2 className={`w-4 h-4 ${liveStats.breachedCases === 0 ? "text-[#009877]" : "text-[#B42318]"}`} /> {liveStats.breachedCases === 0 ? "Stable" : "Needs attention"}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        </button>
+        <button onClick={() => toggleQuickFilter("sla_at_risk")} className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left ${activeQuickFilter === "sla_at_risk" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
           <p className="text-xs text-[#627D98] mb-1">At Risk Cases</p>
           <p className="text-[#102A43] font-heading font-semibold text-lg inline-flex items-center gap-2"><TimerReset className="w-4 h-4 text-[#B87333]" /> {liveStats.atRiskCases}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        </button>
+        <button onClick={() => toggleQuickFilter("sla_breached")} className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left ${activeQuickFilter === "sla_breached" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
           <p className="text-xs text-[#627D98] mb-1">Breached Cases</p>
           <p className="text-[#102A43] font-heading font-semibold text-lg inline-flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-[#B42318]" /> {liveStats.breachedCases}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        </button>
+        <button onClick={() => toggleQuickFilter("escalations")} className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left ${activeQuickFilter === "escalations" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
           <p className="text-xs text-[#627D98] mb-1">Escalations</p>
           <p className="text-[#102A43] font-heading font-semibold text-lg inline-flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-[#33A1FD]" /> {liveStats.escalations} open</p>
-        </div>
+        </button>
       </div>
+        )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        {activeStatsTab === "volume" && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <button onClick={() => toggleQuickFilter("open_cases")} className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left ${activeQuickFilter === "open_cases" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
           <p className="text-xs text-[#627D98]">Open cases</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{liveStats.openCases}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        </button>
+        <button onClick={() => toggleQuickFilter("documents_requested")} className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left ${activeQuickFilter === "documents_requested" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
           <p className="text-xs text-[#627D98]">Documents requested</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{liveStats.documentsRequested}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        </button>
+        <button onClick={() => toggleQuickFilter("live_stages")} className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left ${activeQuickFilter === "live_stages" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
           <p className="text-xs text-[#627D98]">Live stages with cases</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{Object.values(liveStats.stageCounts).filter((count) => count > 0).length}</p>
-        </div>
+        </button>
+      </div>
+        )}
       </div>
 
+      {activeQuickFilter && (
+        <div className="flex items-center justify-between rounded-[10px] border border-[#B7D7F7] bg-[#EFF7FF] px-3 py-2">
+          <p className="text-xs font-medium text-[#0B69B7]">Quick filter active: {activeQuickFilter.replaceAll("_", " ")}</p>
+          <button onClick={() => setActiveQuickFilter(null)} className="rounded border border-[#B7D7F7] bg-white px-2 py-0.5 text-xs font-semibold text-[#0B69B7]">
+            Clear
+          </button>
+        </div>
+      )}
+
       <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4 shadow-sm">
-        <KanbanBoard />
+        <KanbanBoard
+          quickFilter={activeQuickFilter}
+          serviceFilter={serviceFilter}
+          staffFilter={staffFilter}
+          ageingFilter={ageingFilter}
+          viewMode={viewMode}
+        />
       </div>
 
       <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">

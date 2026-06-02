@@ -57,7 +57,7 @@ export function resolveCanonicalEVisaRoute(resume: ResumeLike | null | undefined
     const status = String(app.application_status || "").toLowerCase();
 
     if (!app.email_confirmed) {
-      return buildCaseUrl("/indian-e-visa", safeCase);
+      return buildCaseUrl("/indian-e-visa/confirm-email", safeCase);
     }
     if (!app.payment_confirmed) {
       return buildCaseUrl("/indian-e-visa/payment", safeCase);

@@ -737,6 +737,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
   const flaggedDocumentsLookup = useMemo(() => {
     const lookup = new Map<string, {
+      document_type?: string;
       document_name?: string;
       issue_reason?: string;
       required_action?: string;
@@ -754,6 +755,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       }
 
       lookup.set(sourceKey, {
+        document_type: String(item?.document_type || item?.doc_id || "").trim(),
         document_name: String(item?.document_name || item?.doc_name || "").trim(),
         issue_reason: String(item?.issue_reason || item?.issue || item?.finding_description || "").trim(),
         required_action: String(item?.required_action || item?.action_required || "").trim(),
@@ -780,7 +782,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
           (doc) => normalize(doc.id) === normalize(item?.doc_id) || normalize(doc.title) === normalize(item?.doc_name || item?.document_name)
         );
         const resolvedDocId = String(matchedDoc?.id || item?.doc_id || item?.document_type || "");
-        const backendDocumentName = String(item?.doc_name || item?.document_name || "").trim();
+        const backendDocumentName = String(item?.document_type || item?.doc_name || item?.document_name || "").trim();
         const requiredDocumentName = String(matchedDoc?.title || backendDocumentName || "Document");
         const statusFromBackend = normalize(item?.status);
         const backendMarkedUploaded = Boolean(item?.reuploaded) || statusFromBackend === "reuploaded";
@@ -789,7 +791,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
           key: `${resolvedDocId || item?.doc_name || item?.document_name || "flag"}-${index}`,
           documentId: resolvedDocId,
           documentName: requiredDocumentName,
-          uploadedDocumentName: backendDocumentName,
           reason: String(item?.issue || item?.issue_reason || "Issue details not provided."),
           actionRequired: (item?.action_required || item?.required_action || "re-upload") as "re-upload" | "obtain" | "apostille" | "affidavit",
           canUploadInline: Boolean(resolvedDocId),
@@ -902,6 +903,11 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       return "audit-result";
     }
 
+    // Rejected/red-audit cases must never render as completed.
+    if (applicationStatus === "rejected" || auditResult === "red") {
+      return "audit-result";
+    }
+
     const hasTerminalDate = Boolean(String(record.approval_date || "").trim() || String(record.completion_date || "").trim());
     const isTerminalStage = ["decision_received", "closed", "delivered", "dispatched", "collected"].includes(currentStage);
     const isTerminalStatus = ["approved", "completed", "closed", "delivered", "dispatched", "collected", "decision_received"].includes(applicationStatus);
@@ -923,10 +929,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
     if (isPassportService && ["QUOTE_ACCEPTED", "PAID"].includes(quoteStatus)) {
       return "processing";
-    }
-
-    if (applicationStatus === "rejected" || auditResult === "red") {
-      return "audit-result";
     }
 
     if (["registered", "draft"].includes(currentStage) || ["draft", "registered"].includes(applicationStatus)) {
@@ -1773,6 +1775,14 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
         const app = await syncApplicationFromBackend(referenceNumber);
         const stageValue = String(app.current_stage || "registered").toLowerCase();
+        const applicationStatusValue = String(app.application_status || "").toLowerCase();
+        const auditResultValue = String((app as any).audit_result || "").toLowerCase();
+
+        const isRejected = applicationStatusValue === "rejected" || auditResultValue === "red";
+        const isCorrectionLoop =
+          ["correction_requested", "reuploaded_pending_review"].includes(applicationStatusValue) ||
+          auditResultValue === "amber";
+
         const stageToStep: Record<string, 1 | 2 | 3 | 4 | 5> = {
           registered: 1,
           email_confirmed: 1,
@@ -1784,9 +1794,16 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
           closed: 5,
           correction_requested: 1,
         };
-        const nextCurrent = stageToStep[stageValue] || 1;
+        // If audit needs corrections (amber) or is rejected (red), keep the user in step 1.
+        const nextCurrent = (isRejected || isCorrectionLoop) ? 1 : (stageToStep[stageValue] || 1);
+        const step1Label = isRejected
+          ? "Audit rejected (case closed)"
+          : isCorrectionLoop
+            ? "Corrections required"
+            : "Documents audited";
+
         const nextSteps: ApplicationTrackerStep[] = [
-          { number: 1, label: "Documents audited", note: null, completed: nextCurrent > 1, active: nextCurrent === 1 },
+          { number: 1, label: step1Label, note: null, completed: nextCurrent > 1, active: nextCurrent === 1 },
           { number: 2, label: "Form filling in progress", note: null, completed: nextCurrent > 2, active: nextCurrent === 2 },
           { number: 3, label: "Submitted to Embassy / VFS", note: null, completed: nextCurrent > 3, active: nextCurrent === 3 },
           { number: 4, label: "Under process", note: null, completed: nextCurrent > 4, active: nextCurrent === 4 },
@@ -2882,13 +2899,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
           <div className="mt-6 grid gap-4">
             {uploadChecklist.map((doc) => {
-              const normalizedDocId = doc.id; // Use the raw doc.id (e.g., "photo")
+              const normalizedDocId = normalizeChecklistKey(doc.id);
               const flaggedMatch = flaggedDocumentsLookup.get(normalizedDocId);
               const applicationStatus = String(applicationRecord?.application_status || "").trim().toLowerCase();
               const isSubmittedUnderReview = Boolean(flaggedMatch && applicationStatus === "reuploaded_pending_review");
               const isAdminCorrectionRequested = applicationStatus === "correction_requested";
-              const uploadedFileName = documents[doc.id]?.fileName || "";
-              const isUploaded = Boolean(uploadedFileName);
+              const uploadedFileName = documents[doc.id]?.fileName || flaggedMatch?.document_name || "";
+              const isUploaded = Boolean(documents[doc.id]?.fileName) || Boolean(flaggedMatch?.document_name);
               const state: DocumentStatus = isUploaded ? "uploaded" : (flaggedMatch ? "pending_reupload" : (documents[doc.id]?.status || "not_uploaded"));
               const mistakeItems = Array.isArray(doc.commonMistakes) ? doc.commonMistakes : [];
               const specialLabel =
@@ -2975,11 +2992,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                   <div className="mt-4 flex flex-wrap items-center gap-3">
                     {isSubmittedUnderReview ? (
                       <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
-                        <CheckCircle2 className="mr-2 h-4 w-4" /> {uploadedFileName || "Uploaded"}
+                        <CheckCircle2 className="mr-2 h-4 w-4" /> {(flaggedMatch as any)?.document_type || uploadedFileName || "Uploaded"}
                       </div>
                     ) : isUploaded ? (
                       <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
-                        <CheckCircle2 className="mr-2 h-4 w-4" /> {uploadedFileName || "Uploaded"}
+                        <CheckCircle2 className="mr-2 h-4 w-4" /> {(flaggedMatch as any)?.document_type || uploadedFileName || "Uploaded"}
                       </div>
                     ) : (
                       <label className={`inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold ${flaggedMatch ? "cursor-pointer border-primary/20 bg-white text-primary hover:bg-bg-blue" : "cursor-pointer border-primary/20 bg-white text-primary hover:bg-bg-blue"}`}>
@@ -3309,8 +3326,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                             {item.actionRequired}
                           </span>
                         </div>
-                        {item.uploadedDocumentName && item.uploadedDocumentName !== item.documentName ? (
-                          <p className="mt-1 text-xs text-slate-500">Flagged file: {item.uploadedDocumentName}</p>
+                        {item.uploadedFileName ? (
+                          <p className="mt-1 text-xs text-slate-500">Uploaded file: {item.uploadedFileName}</p>
                         ) : null}
                         <p className="mt-2 text-slate-700">Auditor Note: {item.reason}</p>
                         {(() => {

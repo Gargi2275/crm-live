@@ -2,6 +2,7 @@
 
 import { CookieBanner } from "@/components/CookieBanner";
 import { Footer } from "@/components/Footer";
+import { PageVisitTracker } from "@/components/PageVisitTracker";
 import { motion } from "framer-motion";
 
 export default function MinimalLayout({
@@ -16,6 +17,7 @@ export default function MinimalLayout({
       transition={{ duration: 0.3 }}
       key={typeof window !== "undefined" ? window.location.pathname : ""}
     >
+      <PageVisitTracker />
       {children}
       <Footer compact />
       <CookieBanner />

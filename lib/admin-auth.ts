@@ -161,6 +161,45 @@ export interface AdminAlertsResponse {
   };
 }
 
+export interface AdminLogItem {
+  id: string;
+  record_id: number;
+  source: "staff_login_attempt" | "staff_audit_log" | "activity_log";
+  event_type: "login" | "failed_attempt" | "website_visit" | "event";
+  event: string;
+  name: string;
+  ip_address: string;
+  website_visit_page: string;
+  target: string;
+  timestamp: string | null;
+}
+
+export interface AdminLogsResponse {
+  results: AdminLogItem[];
+  summary: {
+    total: number;
+    login_count: number;
+    failed_attempt_count: number;
+    website_visit_count: number;
+    event_count: number;
+  };
+  pagination: {
+    limit: number;
+    offset: number;
+    total: number;
+    has_more: boolean;
+  };
+}
+
+export interface AdminLogsDeleteResponse {
+  deleted: {
+    staff_login_attempt: number;
+    staff_audit_log: number;
+    activity_log: number;
+  };
+  total_deleted: number;
+}
+
 export interface AdminApplication {
   id: number;
   reference_number: string;
@@ -687,6 +726,55 @@ export const updateAdminAlertStatus = async (
   const payload = await parseApiResponse<AdminAlert>(response);
   if (!payload.data) {
     throw new Error("Missing updated alert payload.");
+  }
+  return payload.data;
+};
+
+export const getAdminLogs = async (params?: {
+  search?: string;
+  eventType?: "all" | "login" | "failed_attempt" | "website_visit" | "event";
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+  offset?: number;
+}) => {
+  const query = new URLSearchParams();
+  if (params?.search?.trim()) {
+    query.set("search", params.search.trim());
+  }
+  if (params?.eventType && params.eventType !== "all") {
+    query.set("event_type", params.eventType);
+  }
+  if (params?.dateFrom) {
+    query.set("date_from", params.dateFrom);
+  }
+  if (params?.dateTo) {
+    query.set("date_to", params.dateTo);
+  }
+  if (typeof params?.limit === "number") {
+    query.set("limit", String(params.limit));
+  }
+  if (typeof params?.offset === "number") {
+    query.set("offset", String(params.offset));
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await adminAuthenticatedFetch(`/admin/logs/${suffix}`, { method: "GET" });
+  const payload = await parseApiResponse<AdminLogsResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing admin logs payload.");
+  }
+  return payload.data;
+};
+
+export const deleteAdminLogs = async (items: Array<{ source: AdminLogItem["source"]; record_id: number }>) => {
+  const response = await adminAuthenticatedFetch("/admin/logs/", {
+    method: "DELETE",
+    body: JSON.stringify({ items }),
+  });
+  const payload = await parseApiResponse<AdminLogsDeleteResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing delete logs payload.");
   }
   return payload.data;
 };

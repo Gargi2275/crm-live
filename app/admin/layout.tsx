@@ -208,7 +208,20 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
     }
 
     const roleAccess: Record<string, string[]> = {
-      ops_manager: ["/admin", "/admin/kanban", "/admin/reports", "/admin/alerts", "/admin/team", "/admin/settings", "/admin/easyfly"],
+      ops_manager: [
+        "/admin",
+        "/admin/kanban",
+        "/admin/reports",
+        "/admin/alerts",
+        "/admin/notifications",
+        "/admin/logs",
+        "/admin/roles",
+        "/admin/permissions",
+        "/admin/workload",
+        "/admin/team",
+        "/admin/settings",
+        "/admin/easyfly",
+      ],
       case_processor: ["/admin", "/admin/kanban", "/admin/easyfly"],
       reviewer: ["/admin", "/admin/kanban", "/admin/reports", "/admin/easyfly"],
       support_agent: ["/admin"],
@@ -274,13 +287,13 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
 
   return (
     <ConsoleProvider>
-      <div className="flex h-screen bg-[#F5F7FA] overflow-hidden text-slate-900">
+      <div className="flex min-h-screen w-full bg-[#F5F7FA] overflow-hidden text-slate-900">
         <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div className="flex-1 min-w-0 h-screen overflow-y-auto flex flex-col">
           <TopHeader />
 
-          <main className="relative flex-1 overflow-y-auto p-4 md:p-6 lg:p-7">
+          <main className="relative flex-1 p-4 md:p-6 lg:p-7">
             <motion.div
               aria-hidden
               className="pointer-events-none absolute -top-20 -right-16 h-52 w-52 rounded-full bg-[#33A1FD]/10 blur-3xl"

@@ -95,7 +95,7 @@ export default async function Home() {
 
       <DocumentAuditSection />
       {/* SECTION 3: How It Works */}
-  <section className="py-20 lg:py-24 relative overflow-hidden" style={{background: 'linear-gradient(160deg, #f0f6ff 0%, #fafcff 50%, #eef5ff 100%)'}}>
+  <section className="py-0 lg:py-0 relative overflow-hidden" style={{background: 'linear-gradient(160deg, #f0f6ff 0%, #fafcff 50%, #eef5ff 100%)'}}>
   {/* bg blobs */}
   <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full pointer-events-none">
     <div style={{background: 'radial-gradient(circle, rgba(21,95,196,0.08) 0%, transparent 70%)'}} className="w-full h-full rounded-full" />
@@ -212,7 +212,7 @@ export default async function Home() {
 </section>
 
       {/* SECTION 4: Pricing */}
-      <div className="py-14 lg:py-16 bg-white">
+      <div className="py-14 lg:py-16 bg-transparent">
         <div className="mx-auto px-4 sm:px-6 lg:px-8">
           <div className="rounded-3xl border border-[#dbeaff] bg-[linear-gradient(180deg,#fbfdff_0%,#f3f8ff_100%)] p-2.5 sm:p-3.5 md:p-5 shadow-[0_10px_30px_rgba(30,74,135,0.07)]">
             <ServiceFees />

@@ -62,7 +62,7 @@ export function DocumentAuditSection() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden bg-[linear-gradient(180deg,#f5f9ff_0%,#eef5ff_50%,#f8fbff_100%)] py-20 lg:py-24">
+    <section className="relative overflow-hidden bg-[linear-gradient(180deg,#f5f9ff_0%,#eef5ff_50%,#f8fbff_100%)] py-5 lg:py-8">
       <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-[#dcecff] blur-3xl motion-safe:animate-pulse" />
       <div className="pointer-events-none absolute -right-16 bottom-0 h-80 w-80 rounded-full bg-[#e8f1ff] blur-3xl" />
       <div

@@ -21,7 +21,7 @@ export default function MainLayout({
       <PageTransition>{children}</PageTransition>
       <Footer />
       <SiteFloatingMenu />
-      <CookieBanner />
+      {/* <CookieBanner /> */}
     </div>
   );
 }

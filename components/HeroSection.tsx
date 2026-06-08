@@ -148,19 +148,9 @@ export default function HeroSection() {
   const goToSlide = (next: number) => {
     if (isTransitioningRef.current || next === activeImageRef.current) return;
     isTransitioningRef.current = true;
-    setTopImageIndex(next);
-    setTopImageVisible(false);
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => setTopImageVisible(true));
-    });
-
-    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-    fadeTimerRef.current = setTimeout(() => {
-      activeImageRef.current = next;
-      setActiveImageIndex(next);
-      setTopImageIndex(null);
-      setTopImageVisible(false);
+    activeImageRef.current = next;
+    setActiveImageIndex(next);
+    setTimeout(() => {
       isTransitioningRef.current = false;
     }, BG_FADE_MS);
   };
@@ -219,38 +209,24 @@ export default function HeroSection() {
     >
       {/* ── Travel / passport image background ── */}
       <div className="pointer-events-none absolute inset-0 z-0">
-        <div className="absolute inset-0 overflow-hidden bg-[#1a2f4a]">
-           <div className="absolute inset-0 overflow-hidden bg-[#1a2f4a]">
-  <img
-    src={BACKGROUND_IMAGES[activeImageIndex]}
-    alt=""
-    aria-hidden
-    className={slideImageClass(activeImageIndex, "duration-[1500ms]")}
-    style={{
-      objectPosition: HERO_SLIDES[activeImageIndex]?.objectPosition ?? "center",
-      opacity: 0.3,
-      transition: `opacity ${BG_FADE_MS}ms ease-in-out, transform ${BG_FADE_MS}ms ease-in-out`,
-      transform: topImageVisible ? "scale(1.04)" : "scale(1)",
-    }}
-    decoding="sync"
-  />
-  {topImageIndex !== null && (
+      <div className="absolute inset-0 overflow-hidden bg-[#1a2f4a]">
+  {HERO_SLIDES.map((slide, index) => (
     <img
-      src={BACKGROUND_IMAGES[topImageIndex]}
+      key={slide.src}
+      src={slide.src}
       alt=""
       aria-hidden
-      className={slideImageClass(topImageIndex)}
+      className="absolute inset-0 h-full w-full object-cover"
       style={{
-        objectPosition: HERO_SLIDES[topImageIndex]?.objectPosition ?? "center",
-        opacity: topImageVisible ? 0.3 : 0,
-        transform: topImageVisible ? "scale(1)" : "scale(1.06)",
-        transition: `opacity ${BG_FADE_MS}ms ease-in-out, transform ${BG_FADE_MS}ms ease-in-out`,
+        objectPosition: slide.objectPosition ?? "center",
+        opacity: index === activeImageIndex ? 0.3 : 0,
+        transition: `opacity ${BG_FADE_MS}ms ease-in-out`,
+        willChange: "opacity",
       }}
-      decoding="sync"
+      decoding="async"
     />
-  )}
+  ))}
 </div>
- </div>
 
         <div
           className={`absolute inset-0 transition-all duration-[1500ms] ${
@@ -385,15 +361,15 @@ export default function HeroSection() {
                     style={{ background: stat.color, boxShadow: `0 0 10px ${stat.color}66` }}
                   />
                   <div
-                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em]"
+                    className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.14em]"
                     style={{ color: stat.color }}
                   >
                     <Icon className="h-4 w-4" />
                     {stat.label}
                   </div>
-                  <p className="mt-2.5 font-heading text-[16px] font-black leading-snug text-[#041020] sm:text-[17px]">
-                    {stat.value}
-                  </p>
+                  <p className="mt-2.5 font-heading text-[16px] font-normal leading-snug text-[#041020] text-black sm:text-[17px]">
+  {stat.value}
+</p>
                 </motion.div>
               );
             })}

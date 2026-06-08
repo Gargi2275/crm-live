@@ -147,7 +147,7 @@ export default function WhatWeDo() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] py-16 sm:py-20 lg:py-24">
+    <section className="relative overflow-hidden bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] py-12 sm:py-14 lg:py-16">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(51,120,213,0.10),transparent_34%),radial-gradient(circle_at_85%_80%,rgba(124,58,237,0.06),transparent_30%)]" />
       <div className="pointer-events-none absolute left-[-6rem] top-10 h-56 w-56 rounded-full bg-[#dcecff] blur-3xl motion-safe:animate-pulse" />
       <div className="pointer-events-none absolute right-[-5rem] bottom-8 h-64 w-64 rounded-full bg-[#e6f1ff] blur-3xl" />

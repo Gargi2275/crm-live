@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
-import { requestStaffForgotPassword } from "@/lib/admin-auth";
+import { getPostLoginPath, requestStaffForgotPassword } from "@/lib/admin-auth";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -20,9 +20,9 @@ export default function AdminLoginPage() {
     event.preventDefault();
     setLoading(true);
     try {
-      await login(username.trim().toLowerCase(), password);
+      const user = await login(username.trim().toLowerCase(), password);
       toast.success("Admin login successful.");
-      router.replace("/admin");
+      router.replace(getPostLoginPath(user.role, user.access_scope));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Login failed.");
     } finally {

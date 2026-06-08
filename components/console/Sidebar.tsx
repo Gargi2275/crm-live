@@ -41,6 +41,7 @@ import {
   Activity,
   UserCog,
   ClipboardList,
+  FolderArchive,
 } from "lucide-react";
 
 const STAFF_CONSOLE_ROLES = new Set(["case_processor", "reviewer", "support_agent"]);
@@ -78,11 +79,23 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
     };
   }, []);
 
+  const ACTION_ROLES = new Set(["ops_manager", "reviewer", "case_processor", "support_agent"]);
+  const isActionDashboardRole = ACTION_ROLES.has(role ?? "");
+
   const easyFlySubItems = [
+    ...(isActionDashboardRole
+      ? [{ name: "Action Dashboard", href: "/admin/easyfly/action", icon: ClipboardList }]
+      : []),
     { name: "Bookings", href: "/admin/easyfly", icon: List },
     { name: "Schedule Changes", href: "/admin/easyfly/schedule", icon: CalendarClock },
     { name: "Travel", href: "/admin/easyfly/travel", icon: Plane },
-    ...(role === "admin" ? [{ name: "Revenue", href: "/admin/easyfly/revenue", icon: TrendingUp }] : []),
+    ...(role === "admin" ||
+    role === "ops_manager" ||
+    role === "case_processor" ||
+    role === "support_agent" ||
+    role === "reviewer"
+      ? [{ name: "Revenue", href: "/admin/easyfly/revenue", icon: TrendingUp }]
+      : []),
   ];
 
   const isStaffConsoleRole = STAFF_CONSOLE_ROLES.has(role || "");
@@ -102,6 +115,7 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
     { name: "Reports", href: "/admin/reports", icon: PieChart },
     { name: "EasyFly Bookings", href: "/admin/easyfly", icon: Plane },
     { name: "Logs Module", href: "/admin/logs", icon: Logs },
+    ...(role === "admin" ? [{ name: "Document Storage", href: "/admin/docs", icon: FolderArchive }] : []),
     { name: "Notifications", href: "/admin/notifications", icon: Bell },
     { name: "Email Module", href: "/admin/email", icon: Mail },
     { name: "NDR / SLA Alerts", href: "/admin/alerts", icon: TriangleAlert },
@@ -134,6 +148,7 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
     if (item.href === "/admin/my-cases") {
       return canViewMyCases && canAccessAdminRoute(item.href, modulePermissions, role);
     }
+    if (item.href === "/admin/easyfly" && hasEasyFlyConsoleAccess(accessScope)) return true;
     return canAccessAdminRoute(item.href, modulePermissions, role);
   });
 

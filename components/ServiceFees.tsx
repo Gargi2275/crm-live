@@ -12,7 +12,7 @@ export function ServiceFees() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-5">
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-4 sm:p-4 flex flex-col">
+          <article className="border border-gray-200 bg-white rounded-2xl p-4 sm:p-4 flex flex-col transition-all duration-300 hover:-translate-y-2 hover:border-[#1c69dd]/40 hover:shadow-[0_16px_40px_rgba(28,105,221,0.12)]">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">OCI Update</h3>
             <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Gratis service on govt portal</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
@@ -29,7 +29,7 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border-2 border-[#1a7f5a] bg-[#f4fbf7] rounded-2xl p-3 sm:p-4 flex flex-col relative">
+          <article className="border-2 border-[#1a7f5a] bg-[#f4fbf7] rounded-2xl p-3 sm:p-4 flex flex-col relative transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_16px_40px_rgba(26,127,90,0.18)]">
             <span className="absolute top-3 right-3 bg-[#1a7f5a] text-white text-[10px] px-2 sm:px-3 py-1 rounded-full font-semibold">Popular</span>
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary pr-12 sm:pr-16 leading-snug">New OCI Application</h3>
             <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[34px] sm:min-h-[40px]">Most selected by applicants</p>
@@ -47,7 +47,7 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-3 sm:p-4 flex flex-col">
+          <article className="border border-gray-200 bg-white rounded-2xl p-3 sm:p-4 flex flex-col transition-all duration-300 hover:-translate-y-2 hover:border-[#1c69dd]/40 hover:shadow-[0_16px_40px_rgba(28,105,221,0.12)]">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">OCI Renewal / Transfer</h3>
             <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Transfer to new passport</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
@@ -64,7 +64,7 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-3 sm:p-4 flex flex-col">
+          <article className="border border-gray-200 bg-white rounded-2xl p-3 sm:p-4 flex flex-col transition-all duration-300 hover:-translate-y-2 hover:border-[#1c69dd]/40 hover:shadow-[0_16px_40px_rgba(28,105,221,0.12)]">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">Indian e-Visa 1 Year</h3>
             <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Includes government fee of approx. £32</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
@@ -81,7 +81,7 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-gray-200 bg-white rounded-2xl hover:border-gray-400 p-3 sm:p-4 flex flex-col lg:col-start-2">
+          <article className="border border-gray-200 bg-white rounded-2xl p-3 sm:p-4 flex flex-col lg:col-start-2 transition-all duration-300 hover:-translate-y-2 hover:border-[#1c69dd]/40 hover:shadow-[0_16px_40px_rgba(28,105,221,0.12)]">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">Indian e-Visa 5 Year</h3>
             <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">Includes government fee of approx. £70</p>
             <div className="border-t border-gray-200 mt-4 pt-4" />
@@ -98,7 +98,7 @@ export function ServiceFees() {
             </div>
           </article>
 
-          <article className="border border-dashed border-gray-300 bg-gray-50 rounded-2xl p-3 sm:p-4 flex flex-col lg:col-start-3">
+          <article className="border border-dashed border-gray-300 bg-gray-50 rounded-2xl p-3 sm:p-4 flex flex-col lg:col-start-3 transition-all duration-300 hover:-translate-y-2 hover:border-gray-400 hover:shadow-[0_16px_40px_rgba(0,0,0,0.08)]">
             <h3 className="text-base sm:text-lg font-heading font-bold text-primary leading-snug">Indian Passport Renewal</h3>
             <p className="text-xs sm:text-sm text-textMuted mt-1 min-h-[28px] sm:min-h-[40px]">UK/US applicants, depends on category and courier options</p>
             <div className="border-t border-gray-300 mt-4 pt-4" />

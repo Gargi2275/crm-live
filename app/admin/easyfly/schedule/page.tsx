@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useAdminAuth } from "@/context/AdminAuthContext";
 import { listEasyFlyBookings, type EasyFlyBooking } from "@/lib/easyfly";
 import { CalendarClock, Search, Eye } from "lucide-react";
 
@@ -98,8 +97,6 @@ function SectionTable({
 }
 
 export default function EasyFlySchedulePage() {
-  const { adminUser } = useAdminAuth();
-
   const [search, setSearch] = useState("");
   const [changeFilter, setChangeFilter] = useState<"all" | "minor" | "major">("all");
   const [supplierFilter, setSupplierFilter] = useState("all");
@@ -112,9 +109,9 @@ export default function EasyFlySchedulePage() {
     const loadBookings = async () => {
       setLoading(true);
       try {
-        const data = await listEasyFlyBookings();
+        const result = await listEasyFlyBookings();
         if (!isMounted) return;
-        setBookings(data);
+        setBookings(result.bookings);
       } catch {
         if (!isMounted) return;
         setBookings([]);
@@ -128,19 +125,11 @@ export default function EasyFlySchedulePage() {
     return () => {
       isMounted = false;
     };
-  }, [adminUser?.role]);
-
-  const roleFiltered = useMemo(() => {
-    const isAdmin = adminUser?.role === "admin";
-    if (isAdmin) return bookings;
-    const isStaff = ["case_processor", "reviewer"].includes(adminUser?.role || "");
-    if (!isStaff) return bookings;
-    return bookings.filter((booking) => booking.createdBy === adminUser?.id);
-  }, [adminUser?.id, adminUser?.role, bookings]);
+  }, []);
 
   const scheduleRows = useMemo(
-    () => roleFiltered.filter((booking) => booking.scheduleChange !== "none"),
-    [roleFiltered],
+    () => bookings.filter((booking) => booking.scheduleChange !== "none"),
+    [bookings],
   );
 
   const supplierOptions = useMemo(
@@ -223,12 +212,6 @@ export default function EasyFlySchedulePage() {
           <p className="mt-1 text-lg font-heading font-semibold text-[#B42318]">{majorCount}</p>
         </div>
       </div>
-
-      {loading ? (
-        <div className="rounded-[12px] border border-dashed border-[#B8C7D9] bg-white px-4 py-8 text-sm text-[#627D98]">
-          Loading EasyFly schedule changes...
-        </div>
-      ) : null}
 
       <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

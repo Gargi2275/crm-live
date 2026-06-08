@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useAdminAuth } from "@/context/AdminAuthContext";
 import { listEasyFlyBookings, type EasyFlyBooking } from "@/lib/easyfly";
 import { Eye, Plane } from "lucide-react";
 
@@ -105,7 +104,6 @@ function ActionButton({ href, label, icon }: { href: string; label: string; icon
 }
 
 export default function EasyFlyTravelPage() {
-  const { adminUser } = useAdminAuth();
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [departureFilter, setDepartureFilter] = useState<DepartureFilter>("72h");
@@ -114,6 +112,8 @@ export default function EasyFlyTravelPage() {
   const [customTo, setCustomTo] = useState("");
   const [airlineFilter, setAirlineFilter] = useState("all");
   const [supplierFilter, setSupplierFilter] = useState("all");
+  const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
+  const [staffFilter, setStaffFilter] = useState<"all" | "assigned" | "unassigned">("all");
 
   useEffect(() => {
     let isMounted = true;
@@ -121,9 +121,9 @@ export default function EasyFlyTravelPage() {
     const loadBookings = async () => {
       setLoading(true);
       try {
-        const data = await listEasyFlyBookings();
+        const result = await listEasyFlyBookings();
         if (!isMounted) return;
-        setBookings(data);
+        setBookings(result.bookings);
       } catch {
         if (!isMounted) return;
         setBookings([]);
@@ -137,7 +137,7 @@ export default function EasyFlyTravelPage() {
     return () => {
       isMounted = false;
     };
-  }, [adminUser?.role]);
+  }, []);
 
   const airlineOptions = useMemo(
     () => Array.from(new Set(bookings.map((booking) => booking.airlineCode))).filter(Boolean),
@@ -154,9 +154,17 @@ export default function EasyFlyTravelPage() {
       const matchesDate = matchesTravelFilters(booking, departureFilter, returnFilter, customFrom, customTo);
       const matchesAirline = airlineFilter === "all" || booking.airlineCode === airlineFilter;
       const matchesSupplier = supplierFilter === "all" || booking.supplier === supplierFilter;
-      return matchesDate && matchesAirline && matchesSupplier;
+      const matchesPayment =
+        paymentFilter === "all" ||
+        (paymentFilter === "paid" && getPaymentPending(booking) === 0) ||
+        (paymentFilter === "pending" && getPaymentPending(booking) > 0);
+      const matchesStaff =
+        staffFilter === "all" ||
+        (staffFilter === "assigned" && booking.createdBy !== null) ||
+        (staffFilter === "unassigned" && booking.createdBy === null);
+      return matchesDate && matchesAirline && matchesSupplier && matchesPayment && matchesStaff;
     });
-  }, [airlineFilter, bookings, customFrom, customTo, departureFilter, returnFilter, supplierFilter]);
+  }, [airlineFilter, bookings, customFrom, customTo, departureFilter, paymentFilter, returnFilter, staffFilter, supplierFilter]);
 
   const stats = useMemo(() => {
     const totalUpcoming = filteredRows.length;
@@ -236,7 +244,7 @@ export default function EasyFlyTravelPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
             <select
               value={airlineFilter}
               onChange={(event) => setAirlineFilter(event.target.value)}
@@ -262,11 +270,31 @@ export default function EasyFlyTravelPage() {
                 </option>
               ))}
             </select>
+
+            <select
+              value={paymentFilter}
+              onChange={(event) => setPaymentFilter(event.target.value as "all" | "paid" | "pending")}
+              className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+            >
+              <option value="all">All Payments</option>
+              <option value="paid">Paid</option>
+              <option value="pending">Payment Pending</option>
+            </select>
+
+            <select
+              value={staffFilter}
+              onChange={(event) => setStaffFilter(event.target.value as "all" | "assigned" | "unassigned")}
+              className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+            >
+              <option value="all">All Staff</option>
+              <option value="assigned">Assigned</option>
+              <option value="unassigned">Unassigned</option>
+            </select>
           </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1280px] text-sm">
+          <table className="w-full min-w-[1480px] text-sm">
             <thead className="bg-[#F5F7FA] text-[#486581]">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Customer Name</th>
@@ -278,6 +306,8 @@ export default function EasyFlyTravelPage() {
                 <th className="px-4 py-3 text-left font-semibold">Payment Status</th>
                 <th className="px-4 py-3 text-left font-semibold">Ticket Uploaded</th>
                 <th className="px-4 py-3 text-left font-semibold">Passport Uploaded</th>
+                <th className="px-4 py-3 text-left font-semibold">Schedule Change</th>
+                <th className="px-4 py-3 text-left font-semibold">Last Contact</th>
                 <th className="px-4 py-3 text-left font-semibold">Staff Assigned</th>
                 <th className="px-4 py-3 text-right font-semibold">View</th>
               </tr>
@@ -285,7 +315,7 @@ export default function EasyFlyTravelPage() {
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
               {filteredRows.map((booking) => {
                 const paymentPending = getPaymentPending(booking);
-                const assignedTo = (booking as BookingRow & { assignedTo?: number | null }).assignedTo;
+                const assignedTo = booking.createdBy;
                 const ticketUploaded = booking.docs.invoice;
 
                 return (
@@ -317,6 +347,26 @@ export default function EasyFlyTravelPage() {
                         {booking.docs.passport ? "Yes" : "No"}
                       </span>
                     </td>
+                    <td className="px-4 py-4">
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
+                          booking.scheduleChange === "none"
+                            ? "bg-[#F5F7FA] text-[#486581] border-[#D9E1EA]"
+                            : booking.scheduleChange === "minor"
+                              ? "bg-[#F9DBAF]/35 text-[#8D5E12] border-[#D4A84F]/40"
+                              : "bg-[#FDECEC] text-[#B42318] border-[#F1A7A0]/45"
+                        }`}
+                      >
+                        {booking.scheduleChange === "none"
+                          ? "None"
+                          : booking.scheduleChange === "minor"
+                            ? "Minor"
+                            : "Major"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-xs text-[#486581]">
+                      {formatDate(booking.updatedAt)}
+                    </td>
                     <td className="px-4 py-4 text-xs text-[#486581]">
                       {assignedTo ? `Staff #${assignedTo}` : "Unassigned"}
                     </td>
@@ -331,7 +381,7 @@ export default function EasyFlyTravelPage() {
 
               {!loading && filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-sm text-[#7B8794]">
+                  <td colSpan={13} className="px-4 py-10 text-center text-sm text-[#7B8794]">
                     No bookings match the selected travel filters.
                   </td>
                 </tr>

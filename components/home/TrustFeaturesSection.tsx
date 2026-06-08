@@ -117,9 +117,9 @@ function TrustCard({ feature, index }: { feature: TrustFeature; index: number })
         <motion.article
           whileHover={reduceMotion ? undefined : { y: -10 }}
           transition={{ type: "spring", stiffness: 280, damping: 20 }}
-          className="relative h-full overflow-hidden rounded-2xl border border-[#dbeafe] bg-white p-6 shadow-[0_8px_28px_rgba(30,74,135,0.07)] transition-all duration-300 group-hover:border-[#1c69dd]/30 group-hover:shadow-[0_24px_56px_rgba(28,105,221,0.14)]"
+          className="relative h-full rounded-2xl border border-[#dbeafe] bg-white p-6 shadow-[0_8px_28px_rgba(30,74,135,0.07)] transition-all duration-300 group-hover:border-[#1c69dd]/30 group-hover:shadow-[0_24px_56px_rgba(28,105,221,0.14)]"
         >
-          <div className="absolute inset-x-0 top-0 h-1 scale-x-0 bg-gradient-to-r from-[#1c69dd] via-[#60a5fa] to-[#1c69dd] transition-transform duration-500 group-hover:scale-x-100" />
+          <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl scale-x-0 bg-gradient-to-r from-[#1c69dd] via-[#60a5fa] to-[#1c69dd] transition-transform duration-500 group-hover:scale-x-100" />
 
           <div className="flex items-start justify-between gap-3">
             <motion.div
@@ -168,7 +168,7 @@ export function TrustFeaturesSection() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden bg-[#f8fbff] py-20 lg:py-24">
+    <section className="relative overflow-hidden bg-[#f8fbff] py-12 lg:py-16">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(28,105,221,0.06),transparent_50%)]" />
 
       <div className="relative mx-auto px-4 sm:px-6 lg:px-8">

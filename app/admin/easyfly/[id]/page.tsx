@@ -5,12 +5,20 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
+  createEasyFlyPaymentLedgerEntry,
   createEasyFlyPaymentOrder,
   deleteEasyFlyBooking,
+  deleteEasyFlyPaymentLedgerEntry,
   getEasyFlyBooking,
+  listEasyFlyPaymentLedger,
+  runEasyFlyAIVerify,
   updateEasyFlyBooking,
+  updateEasyFlyPaymentLedgerEntry,
   uploadEasyFlyBookingDocuments,
+  uploadEasyFlyPaymentProof,
+  verifyEasyFlyPaymentLedgerEntry,
   type EasyFlyBooking,
+  type EasyFlyPaymentLedgerEntry,
 } from "@/lib/easyfly";
 import { adminAuthenticatedFetch } from "@/lib/admin-auth";
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -27,8 +35,27 @@ import {
 
 type RefundStatus = "none" | "pending" | "credit_note";
 type ScheduleChange = "none" | "minor" | "major";
+type PaymentMode = "card" | "bank_transfer" | "cash";
+
+type BookingFormState = {
+  srNo: string;
+  supplier: string;
+  invoiceNumber: string;
+  pnr: string;
+  paxName: string;
+  airlineCode: string;
+  depDate: string;
+  returnDate: string;
+  amountPaid: string;
+  amountReceived: string;
+  paymentDueDate: string;
+  paymentMode: PaymentMode;
+  depositType: "office" | "home";
+  receiptReceived: boolean;
+};
 type PaymentLedgerEntry = {
   id: string;
+  backendId: number | null;
   date: string;
   amount: string;
   method: "cash" | "card" | "bank_transfer" | "payment_link" | "other";
@@ -101,8 +128,59 @@ const mapPassengersFromBooking = (data: BookingRow): PassengerEntry[] => {
 const passengerFieldClassName =
   "w-full rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]";
 
+const mapBookingToForm = (data: BookingRow): BookingFormState => ({
+  srNo: data.srNo,
+  supplier: data.supplier,
+  invoiceNumber: data.invoiceNumber,
+  pnr: data.pnr,
+  paxName: data.paxName,
+  airlineCode: data.airlineCode,
+  depDate: data.depDate,
+  returnDate: data.returnDate,
+  amountPaid: String(data.amountPaid),
+  amountReceived: String(data.amountReceived),
+  paymentDueDate: data.paymentDueDate || "",
+  paymentMode: data.paymentMode,
+  depositType: data.depositType,
+  receiptReceived: data.receiptReceived,
+});
+
+const buildBookingUpdatePayload = (
+  form: BookingFormState,
+  extras: {
+    isYouthCategory: boolean;
+    isRefund: boolean;
+    refundReceivedFromSupplier: boolean;
+    givenToCustomer: boolean;
+    scheduleChange: ScheduleChange;
+    isReissued: boolean;
+  },
+) => ({
+  sr_no: form.srNo.trim(),
+  supplier: form.supplier.trim(),
+  invoice_number: form.invoiceNumber.trim(),
+  pnr: form.pnr.trim(),
+  pax_name: form.paxName.trim(),
+  airline_code: form.airlineCode.trim(),
+  dep_date: form.depDate,
+  return_date: form.returnDate,
+  amount_paid: Number.parseInt(form.amountPaid, 10) || 0,
+  amount_received: Number.parseInt(form.amountReceived, 10) || 0,
+  payment_due_date: form.paymentDueDate || null,
+  payment_mode: form.paymentMode,
+  deposit_type: form.depositType,
+  receipt_received: form.receiptReceived,
+  is_youth_category: extras.isYouthCategory,
+  refund_status: extras.isRefund ? "credit_note" : "none",
+  refund_received_from_supplier: extras.refundReceivedFromSupplier,
+  given_to_customer: extras.givenToCustomer,
+  schedule_change: extras.scheduleChange,
+  is_reissued: extras.isReissued,
+});
+
 const createBlankLedgerEntry = (bookingId: number, enteredBy = "Staff"): PaymentLedgerEntry => ({
   id: `${bookingId}-payment-${Date.now()}`,
+  backendId: null,
   date: new Date().toISOString().slice(0, 10),
   amount: "",
   method: "cash",
@@ -113,22 +191,28 @@ const createBlankLedgerEntry = (bookingId: number, enteredBy = "Staff"): Payment
   status: "unverified",
 });
 
-const mapPaymentLedgerFromBooking = (data: BookingRow, enteredBy = "Staff"): PaymentLedgerEntry[] => {
-  const rawLedger = (data as BookingRow & { paymentLedger?: PaymentLedgerEntry[] }).paymentLedger;
-  if (Array.isArray(rawLedger) && rawLedger.length > 0) {
-    return rawLedger.map((entry, index) => ({
-      id: entry.id || `${data.id}-payment-${index}`,
-      date: entry.date || "",
-      amount: entry.amount || "",
-      method: entry.method || "cash",
-      proof: null,
-      proofName: entry.proofName || "",
-      proofUrl: entry.proofUrl || "",
-      enteredBy: entry.enteredBy || enteredBy,
-      status: entry.status === "verified" ? "verified" : "unverified",
-    }));
+const ledgerEntryToLocal = (entry: EasyFlyPaymentLedgerEntry): PaymentLedgerEntry => ({
+  id: `${entry.booking}-payment-${entry.id}`,
+  backendId: entry.id,
+  date: entry.date,
+  amount: entry.amount,
+  method: entry.method,
+  proof: null,
+  proofName: entry.proofFileName,
+  proofUrl: entry.proofUrl,
+  enteredBy: entry.enteredBy,
+  status: entry.status,
+});
+
+const mapPaymentLedgerFromApi = (
+  entries: EasyFlyPaymentLedgerEntry[],
+  bookingId: number,
+  enteredBy = "Staff",
+): PaymentLedgerEntry[] => {
+  if (entries.length === 0) {
+    return [createBlankLedgerEntry(bookingId, enteredBy)];
   }
-  return [createBlankLedgerEntry(data.id, enteredBy)];
+  return entries.map(ledgerEntryToLocal);
 };
 
 const formatInr = (amount: number) => `INR ${amount.toLocaleString("en-IN")}`;
@@ -146,6 +230,15 @@ function LabelValue({ label, value, valueClassName }: { label: string; value: st
       <p className="text-xs text-[#627D98]">{label}</p>
       <p className={`mt-1 text-sm font-medium text-[#102A43] ${valueClassName || ""}`}>{value}</p>
     </div>
+  );
+}
+
+function FormField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block space-y-1 rounded-[10px] border border-[#D9E1EA] p-3 bg-white">
+      <span className="text-xs text-[#627D98]">{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -309,6 +402,22 @@ export default function EasyFlyBookingDetailPage() {
   const isAdmin = adminUser?.role === "admin";
 
   const [booking, setBooking] = useState<BookingRow | null>(null);
+  const [form, setForm] = useState<BookingFormState>({
+    srNo: "",
+    supplier: "",
+    invoiceNumber: "",
+    pnr: "",
+    paxName: "",
+    airlineCode: "",
+    depDate: "",
+    returnDate: "",
+    amountPaid: "0",
+    amountReceived: "0",
+    paymentDueDate: "",
+    paymentMode: "card",
+    depositType: "office",
+    receiptReceived: false,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -338,16 +447,14 @@ export default function EasyFlyBookingDetailPage() {
       setLoading(true);
       setError(null);
       try {
+        const enteredBy = adminUser?.full_name || adminUser?.username || "Staff";
         const data = await getEasyFlyBooking(bookingId);
+        const ledger = await listEasyFlyPaymentLedger(bookingId);
         if (!isMounted) return;
         setBooking(data);
+        setForm(mapBookingToForm(data));
         setPassengers(mapPassengersFromBooking(data));
-        setPaymentLedger(
-          mapPaymentLedgerFromBooking(
-            data,
-            adminUser?.full_name || adminUser?.username || "Staff",
-          ),
-        );
+        setPaymentLedger(mapPaymentLedgerFromApi(ledger, bookingId, enteredBy));
         setIsYouthCategory(data.isYouthCategory);
         setIsRefund(data.refundStatus !== "none");
         setRefundReceivedFromSupplier(data.refundReceivedFromSupplier);
@@ -397,12 +504,18 @@ export default function EasyFlyBookingDetailPage() {
     );
   }
 
-  const totalPayment = booking.amountPaid + booking.amountReceived;
-  const paymentPending = booking.amountPaid - booking.amountReceived;
-  const earnings = booking.amountReceived - booking.amountPaid;
+  const amountPaid = Number.parseInt(form.amountPaid, 10) || 0;
+  const amountReceived = Number.parseInt(form.amountReceived, 10) || 0;
+  const totalPayment = amountPaid + amountReceived;
+  const paymentPending = amountPaid - amountReceived;
+  const earnings = amountReceived - amountPaid;
+
+  const updateForm = (patch: Partial<BookingFormState>) => {
+    setForm((current) => ({ ...current, ...patch }));
+  };
   const pendingRazorpayAmount = Math.max(0, paymentPending);
   const totalLedgerReceived = paymentLedger.reduce((sum, entry) => sum + (Number.parseFloat(entry.amount) || 0), 0);
-  const balancePending = booking.amountPaid - totalLedgerReceived;
+  const balancePending = amountPaid - totalLedgerReceived;
   const isFullyPaid = balancePending <= 0;
 
   const handleDelete = async () => {
@@ -515,22 +628,20 @@ export default function EasyFlyBookingDetailPage() {
     }
   };
 
-  const handleRunAiCheck = () => {
-    setAiChecks([
-      { check: "Passport name vs ticket name", result: "pass" },
-      { check: "DOB vs passenger type", result: "pass" },
-      { check: "Passport expiry valid for travel", result: "warning" },
-      { check: "Departure date detected", result: "pass" },
-      { check: "Return date detected", result: "pass" },
-      { check: "Ticket uploaded for all passengers", result: "pass" },
-    ]);
-    setTicketRiskScore("amber");
-    toast.success("AI verification complete.");
+  const handleRunAiCheck = async () => {
+    try {
+      const result = await runEasyFlyAIVerify(booking.id);
+      setAiChecks(result.checks);
+      setTicketRiskScore(result.risk_score);
+      toast.success("AI verification complete.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "AI verification failed.");
+    }
   };
 
   const handleTicketUpload = async (file: File) => {
     await handleUpload("ticket_file", file);
-    handleRunAiCheck();
+    await handleRunAiCheck();
   };
 
   const handleCreatePaymentOrder = async () => {
@@ -551,15 +662,39 @@ export default function EasyFlyBookingDetailPage() {
     }
   };
 
-  const handleAddPayment = () => {
-    setPaymentLedger((current) => [
-      ...current,
-      createBlankLedgerEntry(booking.id, adminUser?.full_name || adminUser?.username || "Staff"),
-    ]);
+  const handleAddPayment = async () => {
+    try {
+      const created = await createEasyFlyPaymentLedgerEntry(booking.id, {
+        date: new Date().toISOString().slice(0, 10),
+        amount: "0",
+        method: "cash",
+      });
+      setPaymentLedger((current) => [...current, ledgerEntryToLocal(created)]);
+      toast.success("Payment entry added.");
+    } catch (addError) {
+      toast.error(addError instanceof Error ? addError.message : "Failed to add payment entry.");
+    }
   };
 
-  const handleRemovePayment = (entryId: string) => {
-    setPaymentLedger((current) => current.filter((entry) => entry.id !== entryId));
+  const handleRemovePayment = async (entryId: string) => {
+    const entry = paymentLedger.find((item) => item.id === entryId);
+    if (!entry) return;
+
+    try {
+      if (entry.backendId) {
+        await deleteEasyFlyPaymentLedgerEntry(booking.id, entry.backendId);
+      }
+      setPaymentLedger((current) => {
+        const next = current.filter((item) => item.id !== entryId);
+        if (next.length === 0) {
+          return [createBlankLedgerEntry(booking.id, adminUser?.full_name || adminUser?.username || "Staff")];
+        }
+        return next;
+      });
+      toast.success("Payment entry removed.");
+    } catch (removeError) {
+      toast.error(removeError instanceof Error ? removeError.message : "Failed to remove payment entry.");
+    }
   };
 
   const updatePaymentLedgerEntry = (entryId: string, patch: Partial<PaymentLedgerEntry>) => {
@@ -568,36 +703,115 @@ export default function EasyFlyBookingDetailPage() {
     );
   };
 
-  const handleLedgerProofUpload = (entryId: string, file: File) => {
+  const handleSaveLedgerEntry = async (entryId: string) => {
+    const entry = paymentLedger.find((item) => item.id === entryId);
+    if (!entry) return;
+
+    try {
+      if (entry.backendId) {
+        const updated = await updateEasyFlyPaymentLedgerEntry(booking.id, entry.backendId, {
+          date: entry.date,
+          amount: entry.amount || "0",
+          method: entry.method,
+        });
+        updatePaymentLedgerEntry(entryId, {
+          date: updated.date,
+          amount: updated.amount,
+          method: updated.method,
+          proofName: updated.proofFileName,
+          proofUrl: updated.proofUrl,
+          status: updated.status,
+          backendId: updated.id,
+        });
+      } else {
+        const created = await createEasyFlyPaymentLedgerEntry(booking.id, {
+          date: entry.date,
+          amount: entry.amount || "0",
+          method: entry.method,
+        });
+        updatePaymentLedgerEntry(entryId, ledgerEntryToLocal(created));
+      }
+      toast.success("Payment entry saved.");
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : "Failed to save payment entry.");
+    }
+  };
+
+  const handleLedgerProofUpload = async (entryId: string, file: File) => {
     updatePaymentLedgerEntry(entryId, {
       proof: file,
       proofName: file.name,
     });
-    toast.success("Receipt saved locally.");
+
+    const entry = paymentLedger.find((item) => item.id === entryId);
+    if (!entry?.backendId) {
+      toast.error("Save the payment entry before uploading proof.");
+      return;
+    }
+
+    try {
+      const updated = await uploadEasyFlyPaymentProof(booking.id, entry.backendId, file);
+      updatePaymentLedgerEntry(entryId, {
+        proof: null,
+        proofName: updated.proofFileName,
+        proofUrl: updated.proofUrl,
+      });
+      toast.success("Receipt uploaded.");
+    } catch (uploadError) {
+      toast.error(uploadError instanceof Error ? uploadError.message : "Failed to upload receipt.");
+    }
   };
 
-  const handleMarkPaymentVerified = (entryId: string) => {
-    updatePaymentLedgerEntry(entryId, { status: "verified" });
+  const handleMarkPaymentVerified = async (entryId: string) => {
+    const entry = paymentLedger.find((item) => item.id === entryId);
+    if (!entry?.backendId) return;
+
+    try {
+      const updated = await verifyEasyFlyPaymentLedgerEntry(booking.id, entry.backendId);
+      updatePaymentLedgerEntry(entryId, { status: updated.status });
+      toast.success("Payment marked as verified.");
+    } catch (verifyError) {
+      toast.error(verifyError instanceof Error ? verifyError.message : "Failed to verify payment.");
+    }
   };
 
-  const ticketAttachment = (
-    booking.attachments as (NonNullable<BookingRow["attachments"]> & { ticket?: { uploaded: boolean; url: string; name: string } }) | undefined
-  )?.ticket;
+  const ticketAttachment = booking.attachments?.ticket;
+
+  const bookingUpdatePayload = buildBookingUpdatePayload(form, {
+    isYouthCategory,
+    isRefund,
+    refundReceivedFromSupplier,
+    givenToCustomer,
+    scheduleChange,
+    isReissued,
+  });
 
   const handleSave = async () => {
+    if (ticketRiskScore === "red" && !isAdmin) {
+      toast.error("Cannot save — critical verification issues found. Contact admin to override.");
+      return;
+    }
+
     try {
-      const updated = await updateEasyFlyBooking(booking.id, {
-        is_youth_category: isYouthCategory,
-        payment_mode: booking.paymentMode,
-        deposit_type: booking.depositType,
-        receipt_received: booking.receiptReceived,
-        refund_status: isRefund ? "credit_note" : "none",
-        refund_received_from_supplier: refundReceivedFromSupplier,
-        given_to_customer: givenToCustomer,
-        schedule_change: scheduleChange,
-        is_reissued: isReissued,
-      });
+      if (ticketRiskScore === "red" && isAdmin) {
+        const reason = window.prompt("AI check has red issues. Enter override reason to proceed:");
+        if (!reason?.trim()) {
+          toast.error("Override reason is required to save with red issues.");
+          return;
+        }
+        const updated = await updateEasyFlyBooking(booking.id, {
+          ...bookingUpdatePayload,
+          ai_override_reason: reason.trim(),
+        });
+        setBooking(updated);
+        setForm(mapBookingToForm(updated));
+        toast.success("Booking saved with admin override.");
+        return;
+      }
+
+      const updated = await updateEasyFlyBooking(booking.id, bookingUpdatePayload);
       setBooking(updated);
+      setForm(mapBookingToForm(updated));
       toast.success("Booking details saved successfully.");
     } catch (saveError) {
       toast.error(saveError instanceof Error ? saveError.message : "Failed to save booking.");
@@ -618,7 +832,7 @@ export default function EasyFlyBookingDetailPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Booking Detail</h1>
             <span className="rounded-full bg-[#F5F7FA] border border-[#D9E1EA] px-3 py-1 text-xs text-[#486581] font-semibold">
-              {booking.pnr}
+              {form.pnr}
             </span>
           </div>
         </div>
@@ -630,7 +844,7 @@ export default function EasyFlyBookingDetailPage() {
             className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm font-semibold text-[#486581] hover:bg-[#F5F7FA]"
           >
             <Pencil className="h-4 w-4" />
-            Edit
+            Save
           </button>
           <button
             type="button"
@@ -643,20 +857,141 @@ export default function EasyFlyBookingDetailPage() {
         </div>
       </div>
 
-      <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
-        <h2 className="text-sm font-heading font-semibold text-[#102A43] mb-3">Booking Summary</h2>
+      <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-4">
+        <h2 className="text-sm font-heading font-semibold text-[#102A43]">Booking Summary</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <LabelValue label="Supplier" value={booking.supplier} />
-          <LabelValue label="Invoice Number" value={booking.invoiceNumber} />
-          <LabelValue label="PNR" value={booking.pnr} />
-          <LabelValue label="Pax Name" value={booking.paxName} />
-          <LabelValue label="Airline Code" value={booking.airlineCode} />
-          <LabelValue label="Dep Date" value={formatDate(booking.depDate)} />
-          <LabelValue label="Return Date" value={formatDate(booking.returnDate)} />
-          <LabelValue label="Amount Paid" value={formatInr(booking.amountPaid)} />
-          <LabelValue label="Amount Received" value={formatInr(booking.amountReceived)} />
+          <FormField label="SR No.">
+            <input
+              type="text"
+              value={form.srNo}
+              onChange={(event) => updateForm({ srNo: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Supplier">
+            <input
+              type="text"
+              value={form.supplier}
+              onChange={(event) => updateForm({ supplier: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Invoice Number">
+            <input
+              type="text"
+              value={form.invoiceNumber}
+              onChange={(event) => updateForm({ invoiceNumber: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="PNR">
+            <input
+              type="text"
+              value={form.pnr}
+              onChange={(event) => updateForm({ pnr: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Pax Name">
+            <input
+              type="text"
+              value={form.paxName}
+              onChange={(event) => updateForm({ paxName: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Airline Code">
+            <input
+              type="text"
+              value={form.airlineCode}
+              onChange={(event) => updateForm({ airlineCode: event.target.value.toUpperCase() })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Dep Date">
+            <input
+              type="date"
+              value={form.depDate}
+              onChange={(event) => updateForm({ depDate: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Return Date">
+            <input
+              type="date"
+              value={form.returnDate}
+              onChange={(event) => updateForm({ returnDate: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Amount Paid">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.amountPaid}
+              onChange={(event) => updateForm({ amountPaid: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Amount Received">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.amountReceived}
+              onChange={(event) => updateForm({ amountReceived: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Payment Due Date">
+            <input
+              type="date"
+              value={form.paymentDueDate}
+              onChange={(event) => updateForm({ paymentDueDate: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Payment Mode">
+            <select
+              value={form.paymentMode}
+              onChange={(event) => updateForm({ paymentMode: event.target.value as PaymentMode })}
+              className={passengerFieldClassName}
+            >
+              <option value="card">Card</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="cash">Cash</option>
+            </select>
+          </FormField>
+          <FormField label="Deposit Type">
+            <select
+              value={form.depositType}
+              onChange={(event) => updateForm({ depositType: event.target.value as BookingFormState["depositType"] })}
+              className={passengerFieldClassName}
+            >
+              <option value="office">Office</option>
+              <option value="home">Home Deposit</option>
+            </select>
+          </FormField>
+          <FormField label="Receipt Received">
+            <select
+              value={form.receiptReceived ? "yes" : "no"}
+              onChange={(event) => updateForm({ receiptReceived: event.target.value === "yes" })}
+              className={passengerFieldClassName}
+            >
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </FormField>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <LabelValue label="Total Payment" value={formatInr(totalPayment)} />
-          <LabelValue label="Payment Pending" value={formatInr(Math.max(0, paymentPending))} valueClassName="text-[#8D5E12]" />
+          <LabelValue
+            label="Payment Pending"
+            value={formatInr(Math.max(0, paymentPending))}
+            valueClassName="text-[#8D5E12]"
+          />
           <LabelValue
             label="Earnings"
             value={formatInr(earnings)}
@@ -821,7 +1156,7 @@ export default function EasyFlyBookingDetailPage() {
           </div>
           <button
             type="button"
-            onClick={handleRunAiCheck}
+            onClick={() => void handleRunAiCheck()}
             className="inline-flex items-center gap-2 rounded-[10px] border border-[#33A1FD]/35 bg-[#33A1FD]/10 px-3 py-1.5 text-xs font-semibold text-[#0B69B7] hover:bg-[#33A1FD]/18"
           >
             Run AI Verification
@@ -920,7 +1255,7 @@ export default function EasyFlyBookingDetailPage() {
           <h2 className="text-sm font-heading font-semibold text-[#102A43]">Payment Ledger</h2>
           <button
             type="button"
-            onClick={handleAddPayment}
+            onClick={() => void handleAddPayment()}
             className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -1010,7 +1345,7 @@ export default function EasyFlyBookingDetailPage() {
                   accept=".pdf,image/*"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
-                    if (file) handleLedgerProofUpload(entry.id, file);
+                    if (file) void handleLedgerProofUpload(entry.id, file);
                     event.currentTarget.value = "";
                   }}
                 />
@@ -1035,18 +1370,25 @@ export default function EasyFlyBookingDetailPage() {
               {isAdmin && entry.status === "unverified" ? (
                 <button
                   type="button"
-                  onClick={() => handleMarkPaymentVerified(entry.id)}
+                  onClick={() => void handleMarkPaymentVerified(entry.id)}
                   className="text-xs bg-[#009877]/12 text-[#006F57] border border-[#009877]/35 px-2 py-1 rounded-full font-semibold hover:bg-[#009877]/18"
                 >
                   Mark Verified
                 </button>
               ) : null}
-            </div>
-
-            {paymentLedger.length >= 2 ? (
               <button
                 type="button"
-                onClick={() => handleRemovePayment(entry.id)}
+                onClick={() => void handleSaveLedgerEntry(entry.id)}
+                className="text-xs bg-[#33A1FD]/10 text-[#0B69B7] border border-[#33A1FD]/35 px-2 py-1 rounded-full font-semibold hover:bg-[#33A1FD]/18"
+              >
+                Save
+              </button>
+            </div>
+
+            {paymentLedger.length >= 2 && (isAdmin || entry.status !== "verified") ? (
+              <button
+                type="button"
+                onClick={() => void handleRemovePayment(entry.id)}
                 className="text-xs font-semibold text-[#B42318] hover:underline"
               >
                 Remove

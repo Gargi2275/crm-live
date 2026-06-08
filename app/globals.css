@@ -159,3 +159,7 @@ body::-webkit-scrollbar {
 .scrollbar-none::-webkit-scrollbar {
   display: none;                /* Chrome/Safari */
 }
+
+.swiper {
+	overflow: visible !important;
+  }

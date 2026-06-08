@@ -327,7 +327,7 @@ export default function HeroSection() {
             className="mt-8 flex w-full flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start"
           >
             <Link href="/auth/login?next=%2Findian-e-visa" className="w-full sm:w-auto">
-              <button className="group relative w-full overflow-hidden rounded-2xl bg-[#1c69dd] px-7 py-4 text-[15px] font-bold text-white shadow-[0_8px_32px_rgba(28,105,221,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_44px_rgba(28,105,221,0.5)] sm:w-auto">
+              <button className="group relative w-full overflow-hidden rounded-2xl bg-[#1c69dd] px-7 py-4 text-[15px] text-white shadow-[0_8px_32px_rgba(28,105,221,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_44px_rgba(28,105,221,0.5)] sm:w-auto">
                 <span className="relative z-10 flex items-center justify-center gap-2">
                   Start My Application
                   <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
@@ -336,7 +336,7 @@ export default function HeroSection() {
               </button>
             </Link>
             <Link href="/document-audit" className="w-full sm:w-auto">
-              <button className="w-full rounded-2xl border border-[#9bb8dc] bg-white px-7 py-4 text-[15px] font-bold text-[#041020] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#1c69dd]/35 hover:bg-white sm:w-auto">
+              <button className="w-full rounded-2xl border border-[#9bb8dc] bg-white px-7 py-4 text-[15px] text-[#041020] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#1c69dd]/35 hover:bg-white sm:w-auto">
                 Get My Documents Checked
               </button>
             </Link>
@@ -600,7 +600,7 @@ export default function HeroSection() {
           </motion.div>
 
           {/* Disclaimer below card */}
-          <p className="mt-3 text-center text-[12px] font-bold leading-relaxed text-[#334e68] lg:text-left">
+          <p className="mt-3 text-center text-[15px] text-semibold leading-relaxed text-black lg:text-left">
             Private independent service · Not affiliated with any government body or VFS Global
           </p>
         </motion.aside>
@@ -617,8 +617,8 @@ export default function HeroSection() {
             onClick={() => handleDotClick(index)}
             className={`cursor-pointer rounded-full transition-all duration-300 ${
               sliderIndex === index
-                ? "h-2.5 w-8 bg-[#1c69dd] shadow-[0_0_10px_rgba(28,105,221,0.45)]"
-                : "h-2.5 w-2.5 bg-[#1c69dd]/30 hover:bg-[#1c69dd]/55"
+                ? "h-1.5 w-5 bg-[#1c69dd] shadow-[0_0_8px_rgba(28,105,221,0.45)]"
+                : "h-1.5 w-1.5 bg-[#1c69dd]/30 hover:bg-[#1c69dd]/55"
             }`}
           />
         ))}

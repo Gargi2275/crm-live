@@ -18,6 +18,20 @@ export function getConsoleHomePath(scope: AccessScope = "all"): string {
   return scope === "easyfly_only" ? "/admin/easyfly" : "/admin";
 }
 
+const ACTION_DASHBOARD_ROLES = new Set<StaffRole>([
+  "ops_manager",
+  "reviewer",
+  "case_processor",
+  "support_agent",
+]);
+
+export function getPostLoginPath(role: StaffRole | string, scope: AccessScope): string {
+  if (ACTION_DASHBOARD_ROLES.has(role as StaffRole)) {
+    return "/admin/easyfly/action";
+  }
+  return getConsoleHomePath(scope);
+}
+
 export function getConsoleDashboardLabel(scope: AccessScope = "all"): string {
   return scope === "easyfly_only" ? "EasyFly Dashboard" : "Dashboard";
 }
@@ -1633,6 +1647,68 @@ export const patchAdminApostilleCase = async (fileNumber: string, body: Record<s
   });
   const payload = await parseApiResponse<Record<string, unknown>>(response);
   return (payload.data || {}) as Record<string, unknown>;
+};
+
+export type AdminDocumentStorageFile = {
+  id: number;
+  document_type: string;
+  display_name: string;
+  stored_filename: string;
+  uploaded_at: string | null;
+};
+
+export type AdminDocumentStorageApplication = {
+  application_id: string;
+  application_pk: number;
+  file_number: string;
+  reference_number: string;
+  customer_name: string;
+  customer_email: string;
+  service_name: string;
+  case_type: string;
+  application_status: string;
+  application_status_label: string;
+  current_stage: string;
+  current_stage_label: string;
+  created_at: string | null;
+  latest_upload_at: string | null;
+  document_count: number;
+  documents_deleted: boolean;
+  documents_deleted_at: string | null;
+  folder_ids: string[];
+  folder_exists: boolean;
+  documents: AdminDocumentStorageFile[];
+};
+
+export const listAdminDocumentStorageApplications = async (): Promise<AdminDocumentStorageApplication[]> => {
+  const response = await adminAuthenticatedFetch("/admin/docs/", { method: "GET" });
+  const payload = await parseApiResponse<AdminDocumentStorageApplication[]>(response);
+  return payload.data || [];
+};
+
+export const deleteAdminDocumentStorage = async (
+  applicationId: string,
+): Promise<{
+  application_id: string;
+  deleted_folders: string[];
+  removed_document_records: number;
+  documents_deleted: boolean;
+  documents_deleted_at: string;
+}> => {
+  const response = await adminAuthenticatedFetch(`/admin/docs/${encodeURIComponent(applicationId)}/`, {
+    method: "DELETE",
+  });
+  const payload = await parseApiResponse<{
+    application_id: string;
+    deleted_folders: string[];
+    removed_document_records: number;
+    documents_deleted: boolean;
+    documents_deleted_at: string;
+  }>(response);
+  if (!payload.data) {
+    throw new Error("Missing delete response.");
+  }
+  return payload.data;
 };
 
 export const downloadAdminApostilleDocumentBlob = async (docId: number): Promise<Blob> => {

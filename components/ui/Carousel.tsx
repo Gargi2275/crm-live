@@ -60,7 +60,7 @@ export function Carousel({ items }: CarouselProps) {
           </button>
         </div>
       </div>
-
+      <div className="overflow-visible py-2">
       <Swiper
         modules={[Autoplay]}
         loop={items.length > 3}
@@ -88,7 +88,7 @@ export function Carousel({ items }: CarouselProps) {
               viewport={{ once: true, amount: 0.25 }}
               whileHover={{ y: -4, boxShadow: "0 12px 24px rgba(27,64,121,0.12)" }}
               transition={{ duration: 0.35, ease: "easeOut", delay: index * 0.04 }}
-              className="h-full rounded-[14px] border border-[#d9e6f7] bg-white p-4 mb-2 md:p-4 shadow-[0_8px_18px_rgba(27,64,121,0.08)]"
+              className="h-full rounded-[14px] border border-[#d9e6f7] bg-white p-4 md:p-4 shadow-[0_8px_18px_rgba(27,64,121,0.08)]"
             >
               <h4 className="font-heading text-[#102c5a] text-[16px] md:text-[17px] leading-[1.25] mb-2 line-clamp-1">
                 {item.title || "Smooth and Easy OCI Service"}
@@ -130,7 +130,7 @@ export function Carousel({ items }: CarouselProps) {
             </SwiperSlide>
           ))}
       </Swiper>
-
+</div>
       <div className="md:hidden flex items-center justify-center gap-3 mt-5">
         <button
           onClick={() => swiperRef.current?.slidePrev()}

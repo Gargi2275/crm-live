@@ -157,6 +157,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { ConsoleProvider } from "@/components/console/ConsoleContext";
 import { Toaster } from "react-hot-toast";
 import { AdminAuthProvider, useAdminAuth } from "@/context/AdminAuthContext";
+import { getAdminMyPermissions, getConsoleHomePath } from "@/lib/admin-auth";
+import { canAccessAdminPathname } from "@/lib/admin-console-nav";
 
 export default function ConsoleLayout({
   children,
@@ -184,17 +186,12 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
       router.replace("/admin/login");
     }
     if (isAuthenticated && isPublicAdminAuthRoute) {
-      router.replace("/admin");
+      router.replace(getConsoleHomePath(adminUser?.access_scope ?? "all"));
     }
-  }, [isAuthenticated, isBootstrapped, isPublicAdminAuthRoute, router]);
+  }, [adminUser?.access_scope, isAuthenticated, isBootstrapped, isPublicAdminAuthRoute, router]);
 
   useEffect(() => {
     if (!adminUser || isPublicAdminAuthRoute) {
-      setAccessChecked(true);
-      return;
-    }
-
-    if (pathname === "/admin") {
       setAccessChecked(true);
       return;
     }
@@ -207,44 +204,38 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const roleAccess: Record<string, string[]> = {
-      ops_manager: [
-        "/admin",
-        "/admin/kanban",
-        "/admin/reports",
-        "/admin/alerts",
-        "/admin/notifications",
-        "/admin/logs",
-        "/admin/roles",
-        "/admin/permissions",
-        "/admin/workload",
-        "/admin/team",
-        "/admin/settings",
-        "/admin/easyfly",
-      ],
-      case_processor: ["/admin", "/admin/kanban", "/admin/easyfly"],
-      reviewer: ["/admin", "/admin/kanban", "/admin/reports", "/admin/easyfly"],
-      support_agent: ["/admin"],
+    setAccessChecked(false);
+
+    if (scope === "easyfly_only" && !pathname?.startsWith("/admin/easyfly")) {
+      router.replace("/admin/easyfly");
+      return;
+    }
+
+    if (scope === "exclude_easyfly" && pathname?.startsWith("/admin/easyfly")) {
+      router.replace(getConsoleHomePath(scope));
+      return;
+    }
+
+    let cancelled = false;
+    void getAdminMyPermissions()
+      .then((data) => {
+        if (cancelled) return;
+        const hasAccess = canAccessAdminPathname(pathname || "/admin", data.permissions, role);
+        if (!hasAccess) {
+          router.replace(getConsoleHomePath(scope));
+        } else {
+          setAccessChecked(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          router.replace(getConsoleHomePath(scope));
+        }
+      });
+
+    return () => {
+      cancelled = true;
     };
-
-    let allowedRoots = roleAccess[role] || ["/admin"];
-
-    if (scope === "easyfly_only") {
-      allowedRoots = ["/admin/easyfly"];
-    } else if (scope === "exclude_easyfly") {
-      allowedRoots = allowedRoots.filter((r) => !r.startsWith("/admin/easyfly"));
-    }
-
-    const hasAccess = allowedRoots.some(
-      (root) => pathname === root || (root !== "/admin" && pathname.startsWith(root))
-    );
-
-    if (!hasAccess) {
-      router.replace("/admin");
-      // don't set accessChecked — keep showing spinner until redirect completes
-    } else {
-      setAccessChecked(true);
-    }
   }, [adminUser, isPublicAdminAuthRoute, pathname, router]);
 
   if (!isBootstrapped) {

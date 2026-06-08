@@ -170,8 +170,13 @@ export function Navbar() {
 
             {/* Desktop Navigation */}
             {!isDashboardRoute && (
-            <div className="hidden flex-1 items-center justify-center lg:flex lg:space-x-1 xl:space-x-2">
-              {navLinks.map((link) => (
+            <div className="hidden min-w-0 flex-1 items-center justify-center lg:flex lg:gap-0.5 xl:gap-1">
+              {navLinks.map((link) => {
+                const isActive =
+                  pathname === link.href ||
+                  (link.dropdown?.some((sub) => pathname === sub.href) ?? false);
+
+                return (
                 <div
                   key={link.name}
                   className="relative group"
@@ -180,18 +185,15 @@ export function Navbar() {
                 >
                   <Link
                     href={link.href}
-                    className="relative group flex items-center rounded-md px-2 py-2 text-sm font-medium text-dark/90 transition-all duration-250 ease-out hover:text-primary xl:px-3"
+                    className={`relative flex items-center whitespace-nowrap rounded-md px-2 py-2 text-sm font-medium no-underline transition-colors duration-250 xl:px-3 ${
+                      isActive ? "text-primary" : "text-dark/90 hover:text-primary"
+                    } after:absolute after:bottom-0 after:left-2 after:right-2 after:h-[2px] after:rounded-full after:bg-primary after:transition-transform after:duration-250 after:content-[''] ${
+                      isActive ? "after:scale-x-100" : "after:scale-x-0 hover:after:scale-x-100"
+                    }`}
                   >
                     {link.name}
-                    {link.dropdown && <ChevronDown className="ml-1 w-4 h-4" />}
-                    <span className="absolute bottom-1 left-3 right-3 h-[2px] bg-primary origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-250 ease-out" />
+                    {link.dropdown && <ChevronDown className="ml-1 h-4 w-4 shrink-0" />}
                   </Link>
-                  {pathname === link.href && (
-                    <motion.div
-                      layoutId="activeNav"
-                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full"
-                    />
-                  )}
 
                   {/* Dropdown Menu */}
                   {link.dropdown && (
@@ -220,7 +222,8 @@ export function Navbar() {
                     </AnimatePresence>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
             )}
 

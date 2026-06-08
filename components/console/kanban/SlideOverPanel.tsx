@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Clock, FileText, MessageSquare, MoveRight, Send, CheckCircle, AlertTriangle, Download } from "lucide-react";
+import { ChevronDown, Clock, FileText, MessageSquare, MoveRight, Send, CheckCircle, AlertTriangle, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type PipelineCase } from "@/lib/kanban";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   adminAuthenticatedFetch,
   downloadAdminApostilleDocumentBlob,
@@ -15,12 +16,18 @@ import {
   sendAdminApplicationReminder,
   setAdminPassportRenewalQuote,
   sendAdminCustomerMessage,
+  getAdminApplicationInternalMessages,
+  sendAdminApplicationInternalMessage,
+  listStaffUsers,
+  sendAdminApostilleThreadMessage,
   submitAdminAuditResult,
   updateAdminApplicationStage,
   updateAdminApplicationNotes,
   type AdminApplication,
   type AdminApplicationDocument,
   type AdminAuditFindingInput,
+  type AdminStaffInternalMessage,
+  type AdminStaffUser,
 } from "@/lib/admin-auth";
 import toast from "react-hot-toast";
 
@@ -88,6 +95,23 @@ const toUploadedFileLabel = (document: AdminApplicationDocument) => {
 const normalizeDocValue = (value?: string) => (value || "").trim().toLowerCase();
 
 const toPounds = (pence?: number) => ((pence || 0) / 100).toFixed(2);
+
+const resolveApostilleAmountDue = (
+  details: AdminApplication | null | undefined,
+  apostilleQuotedFee: string,
+) => {
+  const localFee = apostilleQuotedFee.trim();
+  if (localFee) {
+    const parsed = Number.parseFloat(localFee);
+    if (Number.isFinite(parsed)) return parsed.toFixed(2);
+  }
+  const quoted = details?.quoted_fee;
+  if (quoted != null && String(quoted).trim()) {
+    const parsed = Number.parseFloat(String(quoted));
+    if (Number.isFinite(parsed)) return parsed.toFixed(2);
+  }
+  return toPounds(details?.amount_due_pence);
+};
 
 const toStageLabel = (stage: PipelineCase["stage"] | string) =>
   String(stage || "")
@@ -185,7 +209,54 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
   const serviceHint = String(details?.service_type || details?.service_name || caseData?.serviceType || "").toLowerCase();
   const isEVisaCase = serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
   const isPassportCase = serviceHint.includes("passport");
+  const isApostilleCase = serviceHint.includes("apostille");
   const hasDocuments = Number(details?.document_count || 0) > 0;
+  const quotedFee = Number.parseFloat(String(details?.quoted_fee ?? ""));
+  const hasQuotedFee = Number.isFinite(quotedFee) && quotedFee > 0;
+
+  if (isApostilleCase) {
+    const kanbanStage = String(details?.kanban_stage || details?.stage || stage || caseData?.stage || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "_");
+    const paymentConfirmed = Boolean(details?.payment_confirmed) || fullPaymentStatus === "paid";
+    const finalCompleted = Boolean(details?.final_submission_completed);
+
+    if (kanbanStage === "DELIVERED" || applicationStatus === "completed" || applicationStatus === "dispatched") {
+      return "DELIVERED";
+    }
+    if (kanbanStage === "SUBMITTED") {
+      return "SUBMITTED";
+    }
+    if (kanbanStage === "READY_FOR_SUBMISSION") {
+      return "READY_FOR_SUBMISSION";
+    }
+    if (kanbanStage === "FORM_FILLING") {
+      return "FORM_FILLING";
+    }
+    if (kanbanStage === "REVIEW_PENDING") {
+      return "REVIEW_PENDING";
+    }
+    if (applicationStatus === "submitted" || rawStage === "SUBMITTED") {
+      return "SUBMITTED";
+    }
+    if (applicationStatus === "processing" || finalCompleted) {
+      return "REVIEW_PENDING";
+    }
+    if (applicationStatus === "final_submission_pending" || (paymentConfirmed && !finalCompleted)) {
+      return "FORM_FILLING";
+    }
+    if ((applicationStatus === "payment_pending" || applicationStatus === "approved" || hasQuotedFee) && !paymentConfirmed) {
+      return "PAYMENT_PENDING";
+    }
+    if (applicationStatus === "rejected" || rawStage === "CORRECTION_REQUESTED") {
+      return "DOCUMENTS_REQUIRED";
+    }
+    if (applicationStatus === "under_review" || rawStage === "INITIAL_REVIEW" || rawStage === "AUDIT_PENDING") {
+      return "AUDIT_PENDING";
+    }
+    return (rawStage as PipelineCase["stage"]) || "AUDIT_PENDING";
+  }
 
   if (rawStage === "CORRECTION_REQUESTED" || applicationStatus === "correction_requested" || applicationStatus === "reuploaded_pending_review") {
     return "DOCUMENTS_REQUIRED";
@@ -307,6 +378,130 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
   return (rawStage as PipelineCase["stage"]) || "NEW_LEAD";
 };
 
+type InternalNoteRecipientOption = {
+  key: string;
+  label: string;
+  subtitle?: string;
+};
+
+function InternalNoteRecipientSearch({
+  staffRecipients,
+  allowAllTeam,
+  value,
+  onChange,
+}: {
+  staffRecipients: AdminStaffUser[];
+  allowAllTeam: boolean;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const selectedLabel = useMemo(() => {
+    if (value === "all") return "All team";
+    const staff = staffRecipients.find((member) => String(member.id) === value);
+    if (!staff) return "";
+    return `${staff.full_name || staff.username} · ${staff.role.replaceAll("_", " ")}`;
+  }, [staffRecipients, value]);
+
+  const options = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const items: InternalNoteRecipientOption[] = [];
+
+    if (allowAllTeam && (!q || "all team".includes(q) || q.includes("all") || q.includes("team"))) {
+      items.push({ key: "all", label: "All team", subtitle: "Notify everyone on staff" });
+    }
+
+    for (const staff of staffRecipients) {
+      const haystack = `${staff.full_name || ""} ${staff.username || ""} ${staff.role || ""} ${staff.email || ""}`.toLowerCase();
+      if (q && !haystack.includes(q)) continue;
+      items.push({
+        key: String(staff.id),
+        label: staff.full_name || staff.username,
+        subtitle: staff.role.replaceAll("_", " "),
+      });
+    }
+
+    return items;
+  }, [allowAllTeam, query, staffRecipients]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [open]);
+
+  const handleSelect = (key: string) => {
+    onChange(key);
+    setQuery("");
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <label className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide">Send to</label>
+      {value ? (
+        <div className="mt-1 flex items-center justify-between gap-2 rounded border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2">
+          <p className="text-sm font-medium text-[#102A43]">{selectedLabel}</p>
+          <button
+            type="button"
+            onClick={() => {
+              onChange("");
+              setQuery("");
+              setOpen(true);
+            }}
+            className="text-xs font-semibold text-[#0B69B7] hover:underline"
+          >
+            Change
+          </button>
+        </div>
+      ) : (
+        <div className="mt-1">
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={allowAllTeam ? "Search staff or all team..." : "Search staff by name..."}
+            className="w-full rounded border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
+            autoComplete="off"
+          />
+          {open && (
+            <div className="absolute z-30 mt-1 max-h-52 w-full overflow-y-auto rounded-lg border border-[#D9E1EA] bg-white shadow-[0_12px_28px_rgba(16,42,67,0.12)]">
+              {options.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-[#627D98]">No matching staff found.</p>
+              ) : (
+                options.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className="w-full border-b border-[#EEF2F6] px-3 py-2 text-left last:border-0 hover:bg-[#F8FAFC]"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleSelect(option.key)}
+                  >
+                    <p className="text-sm font-medium text-[#102A43]">{option.label}</p>
+                    {option.subtitle ? <p className="text-xs text-[#627D98] capitalize">{option.subtitle}</p> : null}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SlideOverPanelProps {
   isOpen: boolean;
   onClose: () => void;
@@ -332,6 +527,8 @@ export function SlideOverPanel({
   documentsError = null,
   onStageResolved,
 }: SlideOverPanelProps) {
+  const { adminUser } = useAdminAuth();
+  const canSendToAllTeam = adminUser?.role === "admin" || adminUser?.role === "ops_manager";
   const autoMovedCorrectionRef = useRef<string | null>(null);
   const previousCaseIdRef = useRef<string | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "messages" | "audit" | "documents">("overview");
@@ -342,9 +539,11 @@ export function SlideOverPanel({
   const [actionBanner, setActionBanner] = useState("");
   const [apostilleQuotedFee, setApostilleQuotedFee] = useState("");
   const [apostilleReviewNote, setApostilleReviewNote] = useState("");
-  const [apostilleInternalNotes, setApostilleInternalNotes] = useState("");
   const [isSavingApostille, setIsSavingApostille] = useState(false);
 
+  const [evisaDocOverviewOpen, setEvisaDocOverviewOpen] = useState(false);
+  const [internalNotesOpen, setInternalNotesOpen] = useState(false);
+  const [apostilleControlsOpen, setApostilleControlsOpen] = useState(false);
   const [showRequestDocs, setShowRequestDocs] = useState(false);
   const [showSendMessage, setShowSendMessage] = useState(false);
   const [showMoveStage, setShowMoveStage] = useState(false);
@@ -355,12 +554,19 @@ export function SlideOverPanel({
 
   const [requestDocType, setRequestDocType] = useState("passport");
   const [requestDocDescription, setRequestDocDescription] = useState("");
+  const [pendingDocRequests, setPendingDocRequests] = useState<Array<{ doc_type: string; description: string }>>([]);
   const [quoteAmountGbp, setQuoteAmountGbp] = useState("");
   const [quoteValidDays, setQuoteValidDays] = useState("7");
   const [quoteNotes, setQuoteNotes] = useState("");
   const [isSettingQuote, setIsSettingQuote] = useState(false);
 
   const [staffMessage, setStaffMessage] = useState("");
+  const [internalMessages, setInternalMessages] = useState<AdminStaffInternalMessage[]>([]);
+  const [internalNoteDraft, setInternalNoteDraft] = useState("");
+  const [internalNoteRecipientId, setInternalNoteRecipientId] = useState("");
+  const [staffRecipients, setStaffRecipients] = useState<AdminStaffUser[]>([]);
+  const [isLoadingInternalMessages, setIsLoadingInternalMessages] = useState(false);
+  const [isSendingInternalNote, setIsSendingInternalNote] = useState(false);
   const [targetStage, setTargetStage] = useState<PipelineCase["stage"]>(caseData?.stage || "NEW_LEAD");
 
   const [formChecklist, setFormChecklist] = useState<Record<string, boolean>>({
@@ -398,6 +604,9 @@ export function SlideOverPanel({
     setAuditorNotes(details?.auditor_notes || "");
     setFindings([]);
     setActionBanner("");
+    setEvisaDocOverviewOpen(false);
+    setInternalNotesOpen(false);
+    setApostilleControlsOpen(false);
     setShowRequestDocs(false);
     setShowSendMessage(false);
     setShowMoveStage(false);
@@ -406,15 +615,50 @@ export function SlideOverPanel({
     setQuoteValidDays("7");
     setQuoteNotes("");
     setIsSettingQuote(false);
+    setInternalMessages([]);
+    setInternalNoteDraft("");
+    setInternalNoteRecipientId("");
     autoMovedCorrectionRef.current = null;
     setTargetStage(((details?.stage || caseData?.stage) || "NEW_LEAD") as PipelineCase["stage"]);
   }, [caseData?.id, details?.auditor_notes, details?.stage, caseData?.stage]);
 
   useEffect(() => {
+    if (!details?.id) {
+      setInternalMessages([]);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingInternalMessages(true);
+    void (async () => {
+      try {
+        const [messages, staff] = await Promise.all([
+          getAdminApplicationInternalMessages(details.id),
+          listStaffUsers(),
+        ]);
+        if (cancelled) return;
+        setInternalMessages(messages);
+        setStaffRecipients(staff.filter((member) => member.is_active !== false));
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : "Failed to load internal notes.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingInternalMessages(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [details?.id]);
+
+  useEffect(() => {
     const detailRecord = (details || {}) as Record<string, unknown>;
     setApostilleQuotedFee(String(detailRecord.quoted_fee ?? ""));
     setApostilleReviewNote(String(detailRecord.review_note || ""));
-    setApostilleInternalNotes(String(detailRecord.internal_admin_notes || ""));
   }, [details, caseData?.id]);
 
   useEffect(() => {
@@ -445,6 +689,7 @@ export function SlideOverPanel({
   const effectiveStage = resolveEffectiveStage(details?.stage || caseData?.stage, details, caseData);
   const serviceHint = String(details?.service_type || details?.service_name || caseData?.serviceType || "").toLowerCase();
   const isApostilleCase = serviceHint.includes("apostille");
+  const apostilleAmountDue = resolveApostilleAmountDue(details, apostilleQuotedFee);
   const isEVisaCase = serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
   const paymentStatusLabel = resolveDisplayPaymentStatus(details, effectiveStage, isEVisaCase);
   const processStatusLabel = toStageLabel(effectiveStage);
@@ -487,6 +732,11 @@ export function SlideOverPanel({
   const hasFlaggedDocuments = flaggedDocuments.length > 0;
   const isAmberCorrection = isDocumentsRequired && details?.audit_result === "amber";
   const isEVisaCorrectionFlow = isDocumentsRequired && isEVisaCase && hasFlaggedDocuments;
+  const applicationStatusLower = String(details?.application_status || "").toLowerCase();
+  const isApostilleCorrectionFlow =
+    isApostilleCase &&
+    hasFlaggedDocuments &&
+    (applicationStatusLower === "rejected" || applicationStatusLower === "correction_requested" || isDocumentsRequired);
   const customerMessageTimeline = useMemo(() => {
     type TimelineMessage = {
       createdAt: string;
@@ -504,11 +754,17 @@ export function SlideOverPanel({
         }))
       : [];
 
+    const customerNote = String(details?.notes || "").trim();
+
     const fromThreadMessages: TimelineMessage[] = threadMessages
       .map((item) => {
         const sender: "team" | "customer" = item.sender === "customer" ? "customer" : "team";
         const message = String(item.message_body || "").trim();
         if (!message) return null;
+        // Notes field is shown separately — skip duplicate thread entry.
+        if (sender === "customer" && customerNote && message === customerNote) {
+          return null;
+        }
         return {
           createdAt: String(item.created_at || ""),
           sender,
@@ -518,7 +774,6 @@ export function SlideOverPanel({
       })
       .filter((item): item is TimelineMessage => Boolean(item));
 
-    const customerNote = String(details?.notes || "").trim();
     const fromCustomerNotes: TimelineMessage[] = customerNote
       ? [
           {
@@ -530,7 +785,11 @@ export function SlideOverPanel({
         ]
       : [];
 
-    const merged = [...fromAdminMessages, ...fromThreadMessages, ...fromCustomerNotes];
+    const merged = [
+      ...fromAdminMessages,
+      ...fromThreadMessages,
+      ...(isApostilleCase ? [] : fromCustomerNotes),
+    ];
     const deduped = merged.filter((item, index, list) => {
       return (
         list.findIndex((candidate) =>
@@ -550,6 +809,7 @@ export function SlideOverPanel({
     details?.updated_at,
     details?.application_date,
     details?.created_at,
+    isApostilleCase,
     threadMessages,
   ]);
 
@@ -677,8 +937,8 @@ export function SlideOverPanel({
     });
   }, [flaggedDocuments, latestdocuments, correctionRequestedAt]);
 
-  const evisaRequestedStatuses = useMemo(() => {
-    if (!isEVisaCase || overviewRequestedDocuments.length === 0) {
+  const overviewRequestedStatuses = useMemo(() => {
+    if (overviewRequestedDocuments.length === 0) {
       return flaggedDocumentStatuses;
     }
 
@@ -700,23 +960,6 @@ export function SlideOverPanel({
           return rightTs - leftTs;
         })[0];
 
-      const matchingLatestDocument = latestdocuments
-        .filter((doc) => {
-          const docType = normalizeDocValue(doc.document_type);
-          const docName = normalizeDocValue(doc.document_name);
-          const originalName = normalizeDocValue(doc.original_filename);
-          const storedName = normalizeDocValue(doc.stored_filename);
-          return (
-            (Boolean(requestedType) && docType === requestedType) ||
-            (Boolean(requestedName) && (docName === requestedName || originalName === requestedName || storedName === requestedName))
-          );
-        })
-        .sort((left, right) => {
-          const leftTs = new Date(left.upload_date || left.created_at || "").getTime();
-          const rightTs = new Date(right.upload_date || right.created_at || "").getTime();
-          return rightTs - leftTs;
-        })[0];
-
       const reuploaded = Boolean(matchingUpload?.is_reupload);
       return {
         document_type: requested.document_type || "",
@@ -725,29 +968,37 @@ export function SlideOverPanel({
         required_action: requested.required_action || "",
         reuploaded,
         reuploadedAt: matchingUpload?.uploaded_at || "",
-        uploadedDocumentName: matchingLatestDocument ? toUploadedFileLabel(matchingLatestDocument) : (matchingUpload?.document_name || ""),
+        uploadedDocumentName: matchingUpload?.document_name || "",
         uploadStatusLabel: reuploaded ? "Re-uploaded" : "Awaiting upload",
       };
     });
-  }, [isEVisaCase, overviewRequestedDocuments, overviewUploadedDocuments, flaggedDocumentStatuses, latestdocuments]);
+  }, [overviewRequestedDocuments, overviewUploadedDocuments, flaggedDocumentStatuses]);
 
-  const requestedDocumentStatuses = isEVisaCase && overviewRequestedDocuments.length > 0
-    ? evisaRequestedStatuses
-    : flaggedDocumentStatuses;
+  const requestedDocumentStatuses =
+    overviewRequestedDocuments.length > 0 ? overviewRequestedStatuses : flaggedDocumentStatuses;
 
   const evisaUploadedMetaById = useMemo(() => {
-    const meta = new Map<number, { isRequested: boolean; isReupload: boolean }>();
+    const meta = new Map<
+      number,
+      { isRequested: boolean; isReupload: boolean; displayType: string; displayName: string; originalFilename: string }
+    >();
     if (!isEVisaCase || overviewUploadedDocuments.length === 0) {
       return meta;
     }
 
     latestdocuments.forEach((doc) => {
       const docType = normalizeDocValue(doc.document_type);
+      const docUploadedAt = new Date((doc.upload_date || doc.created_at || "") as string).getTime();
       const docNames = [doc.document_name, doc.original_filename, doc.stored_filename]
         .map((value) => normalizeDocValue(value))
         .filter(Boolean);
 
       const match = overviewUploadedDocuments.find((uploaded) => {
+        const uploadedAt = uploaded.uploaded_at ? new Date(uploaded.uploaded_at).getTime() : NaN;
+        if (Number.isFinite(uploadedAt) && Number.isFinite(docUploadedAt) && uploadedAt === docUploadedAt) {
+          return true;
+        }
+
         const uploadedType = normalizeDocValue(uploaded.document_type);
         const uploadedName = normalizeDocValue(uploaded.document_name);
 
@@ -755,13 +1006,16 @@ export function SlideOverPanel({
           return true;
         }
 
-        return Boolean(docType) && uploadedType === docType;
+        return Boolean(docType) && docType !== "other" && uploadedType === docType;
       });
 
       if (match) {
         meta.set(doc.id, {
           isRequested: Boolean(match.is_requested),
           isReupload: Boolean(match.is_reupload),
+          displayType: match.document_type || doc.document_type,
+          displayName: match.document_name || doc.document_name || toDocumentTypeLabel(doc.document_type),
+          originalFilename: String((match as { original_filename?: string }).original_filename || doc.original_filename || doc.stored_filename || ""),
         });
       }
     });
@@ -816,10 +1070,44 @@ export function SlideOverPanel({
   }, [requestedDocumentStatuses, latestdocuments, correctionRequestedAt]);
 
   const isReuploadPendingReview = String(details?.application_status || "").toLowerCase() === "reuploaded_pending_review";
+  type ApostilleAdminDocument = {
+    id: number;
+    document_type?: string;
+    document_name?: string;
+    original_filename?: string;
+    verification_status?: string;
+    mime_type?: string;
+  };
+
+  const toApostilleDocumentLabel = (document: ApostilleAdminDocument) => {
+    const displayName = (document.document_name || document.original_filename || "").trim();
+    if (displayName) return displayName;
+    return toDocumentTypeLabel(document.document_type || "other");
+  };
+
   const apostilleDocuments = useMemo(
-    () => ((((details || {}) as Record<string, unknown>).documents as Array<{ id: number }> | undefined) || []),
-    [details]
+    () =>
+      (
+        ((details || {}) as Record<string, unknown>).documents as ApostilleAdminDocument[] | undefined
+      )?.filter((doc) => Number.isFinite(doc.id)) || [],
+    [details],
   );
+
+  const panelDocuments = useMemo(() => {
+    if (latestdocuments.length > 0) return latestdocuments;
+    if (!isApostilleCase || apostilleDocuments.length === 0) return latestdocuments;
+    return apostilleDocuments.map((doc) => ({
+      id: doc.id,
+      document_type: doc.document_type || "other",
+      document_name: doc.document_name || doc.original_filename || "",
+      original_filename: doc.original_filename || "",
+      stored_filename: doc.original_filename || "",
+      verification_status: doc.verification_status || "pending",
+      mime_type: doc.mime_type || "",
+      is_encrypted: Boolean(doc.is_encrypted),
+      encryption_algorithm: doc.encryption_algorithm || "",
+    })) as AdminApplicationDocument[];
+  }, [apostilleDocuments, isApostilleCase, latestdocuments]);
 
   useEffect(() => {
     if (!details?.id || !details?.reference_number) return;
@@ -998,16 +1286,37 @@ export function SlideOverPanel({
     }
   };
 
+  const handleAddDocRequest = () => {
+    if (!requestDocDescription.trim()) {
+      toast.error("Enter what is needed for this document.");
+      return;
+    }
+    setPendingDocRequests((prev) => [
+      ...prev,
+      { doc_type: requestDocType, description: requestDocDescription.trim() },
+    ]);
+    setRequestDocDescription("");
+  };
+
+  const handleRemoveDocRequest = (index: number) => {
+    setPendingDocRequests((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleRequestDocuments = async () => {
     if (isRequestingDocs) return;
-    if (!details?.reference_number || !requestDocDescription.trim()) {
-      toast.error("Select a document and enter what is required.");
+    const allRequests = [
+      ...pendingDocRequests,
+      ...(requestDocDescription.trim()
+        ? [{ doc_type: requestDocType, description: requestDocDescription.trim() }]
+        : []),
+    ];
+    if (!details?.reference_number || allRequests.length === 0) {
+      toast.error("Add at least one document request before sending.");
       return;
     }
 
     try {
       setIsRequestingDocs(true);
-      const requestLine = `${toDocumentTypeLabel(requestDocType)}: ${requestDocDescription.trim()}`;
 
       if (isEVisaCase) {
         if (!details?.id) {
@@ -1015,34 +1324,72 @@ export function SlideOverPanel({
           return;
         }
 
-        const nextRequestedDocument = {
-          document_type: requestDocType,
-          document_name: toDocumentTypeLabel(requestDocType),
-          issue_reason: requestDocDescription.trim(),
-          required_action: requestDocDescription.trim(),
+        const flaggedDocs = allRequests.map((r) => ({
+          document_type: r.doc_type,
+          document_name: toDocumentTypeLabel(r.doc_type),
+          issue_reason: r.description,
+          required_action: r.description,
           status: "needs_fix",
-        };
-        const latestRequestedDocuments = [nextRequestedDocument];
+        }));
+
+        const requestLines = allRequests.map((r) => `• ${toDocumentTypeLabel(r.doc_type)}: ${r.description}`).join("\n");
 
         await patchAdminApplication(details.id, {
           stage: "DOCUMENT_UPLOAD_PENDING",
           correction_cause: "customer_error",
-          notes: `Correction requested: ${requestLine}`,
-          flagged_documents: latestRequestedDocuments,
+          notes: `Correction requested:\n${requestLines}`,
+          flagged_documents: flaggedDocs,
         });
 
         await sendAdminCustomerMessage({
           application_id: details.id,
           reference_number: details.reference_number,
-          subject: `FlyOCI - Please re-upload document for ${details.reference_number}`,
-          description: `Please re-upload the following document:\n${requestLine}`,
+          subject: `FlyOCI - Please re-upload documents for ${details.reference_number}`,
+          description: `Please re-upload the following document(s):\n${requestLines}`,
         });
 
         setActionBanner("Correction requested. Customer asked to re-upload documents.");
         onStageResolved?.("DOCUMENT_UPLOAD_PENDING");
-        toast.success("Re-upload request sent to customer.");
+        toast.success(`Re-upload request sent for ${allRequests.length} document(s).`);
         setShowRequestDocs(false);
         setRequestDocDescription("");
+        setPendingDocRequests([]);
+        return;
+      }
+
+      if (isApostilleCase) {
+        const apostilleFileNumber = String(details?.file_number || caseData?.id || "").trim();
+        if (!apostilleFileNumber) {
+          toast.error("Apostille file number missing.");
+          return;
+        }
+
+        const flaggedDocs = allRequests.map((r) => ({
+          document_type: r.doc_type,
+          document_name: toDocumentTypeLabel(r.doc_type),
+          issue_reason: r.description,
+          required_action: r.description,
+          status: "needs_fix",
+        }));
+        const requestLines = allRequests
+          .map((r) => `• ${toDocumentTypeLabel(r.doc_type)}: ${r.description}`)
+          .join("\n");
+        const reviewNote = [apostilleReviewNote.trim(), `Correction requested:\n${requestLines}`]
+          .filter(Boolean)
+          .join("\n\n");
+
+        await patchAdminApostilleCase(apostilleFileNumber, {
+          application_status: "rejected",
+          review_note: reviewNote,
+          flagged_documents: flaggedDocs,
+        });
+
+        setActionBanner("Correction requested. Customer can re-upload from track-apostille.");
+        onStageResolved?.("DOCUMENTS_REQUIRED");
+        toast.success(`Document request sent for ${allRequests.length} item(s).`);
+        setShowRequestDocs(false);
+        setRequestDocDescription("");
+        setPendingDocRequests([]);
         return;
       }
 
@@ -1051,20 +1398,19 @@ export function SlideOverPanel({
         audit_result: "amber",
         overall_status: "needs_correction",
         auditor_notes: "",
-        findings: [
-          {
-            document_type: requestDocType,
-            finding_description: requestDocDescription.trim(),
-            required_action: requestDocDescription.trim(),
-            priority: "medium",
-          },
-        ],
+        findings: allRequests.map((r) => ({
+          document_type: r.doc_type,
+          finding_description: r.description,
+          required_action: r.description,
+          priority: "medium",
+        })),
       });
       setActionBanner("Request sent. Email dispatched to customer.");
       onStageResolved?.("DOCUMENTS_REQUIRED");
-      toast.success("Request sent to customer.");
+      toast.success(`Request sent for ${allRequests.length} document(s).`);
       setShowRequestDocs(false);
       setRequestDocDescription("");
+      setPendingDocRequests([]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to send request.");
     } finally {
@@ -1195,6 +1541,35 @@ export function SlideOverPanel({
     }
   };
 
+  const handleSendInternalNote = async () => {
+    if (!details?.id || isSendingInternalNote) return;
+    if (!internalNoteDraft.trim()) {
+      toast.error("Message text is required.");
+      return;
+    }
+    if (!internalNoteRecipientId) {
+      toast.error("Select who should receive this note.");
+      return;
+    }
+
+    try {
+      setIsSendingInternalNote(true);
+      const recipientStaffId =
+        internalNoteRecipientId === "all" ? "all" : Number(internalNoteRecipientId);
+      const created = await sendAdminApplicationInternalMessage(details.id, {
+        message_text: internalNoteDraft.trim(),
+        recipient_staff_id: recipientStaffId,
+      });
+      setInternalMessages((prev) => [created, ...prev]);
+      setInternalNoteDraft("");
+      toast.success("Internal note sent.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send internal note.");
+    } finally {
+      setIsSendingInternalNote(false);
+    }
+  };
+
   const handleSaveApostille = async () => {
     const fileNumber = String(caseData?.id || "").trim();
     if (!fileNumber) {
@@ -1206,14 +1581,24 @@ export function SlideOverPanel({
     try {
       const body: Record<string, unknown> = {
         review_note: apostilleReviewNote.trim(),
-        internal_admin_notes: apostilleInternalNotes.trim(),
       };
       if (apostilleQuotedFee.trim()) {
         body.quoted_fee = apostilleQuotedFee.trim();
       }
 
-      await patchAdminApostilleCase(fileNumber, body);
-      setActionBanner("Apostille details saved.");
+      const updated = await patchAdminApostilleCase(fileNumber, body);
+      if (updated.quoted_fee != null) {
+        setApostilleQuotedFee(String(updated.quoted_fee));
+      }
+      if (typeof updated.review_note === "string") {
+        setApostilleReviewNote(updated.review_note);
+      }
+      if (apostilleQuotedFee.trim() || updated.quoted_fee != null) {
+        onStageResolved?.("PAYMENT_PENDING");
+        setActionBanner("Quoted fee saved. Case moved to Payment Pending.");
+      } else {
+        setActionBanner("Apostille details saved.");
+      }
       toast.success("Apostille details updated.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save apostille details.");
@@ -1253,10 +1638,15 @@ export function SlideOverPanel({
 
   const handleApproveForSubmission = async () => {
     if (!details?.id) return;
+    if (effectiveStage === "READY_FOR_SUBMISSION") {
+      toast.success("Already approved. Use Mark as Submitted below.");
+      return;
+    }
     try {
       await patchAdminApplication(details.id, { stage: "READY_FOR_SUBMISSION" });
       onStageResolved?.("READY_FOR_SUBMISSION");
-      setActionBanner("Application approved for submission.");
+      setActionBanner("Application approved for submission. Enter government reference to mark submitted.");
+      toast.success("Approved for submission.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to approve for submission.");
     }
@@ -1323,7 +1713,7 @@ export function SlideOverPanel({
     }
   };
 
-  if (!isOpen || !caseData) return null;
+  if (!isOpen) return null;
 
   return (
     <div
@@ -1345,11 +1735,11 @@ export function SlideOverPanel({
             </button>
 
             <div className="h-5 w-px bg-[#E5EAF0] shrink-0" />
-            <p className="text-sm font-bold text-[#102A43] shrink-0">{caseData.id}</p>
+            <p className="text-sm font-bold text-[#102A43] shrink-0">{caseData?.id || "Case"}</p>
             <span className="text-[#D9E1EA]">·</span>
-            <p className="text-sm text-[#486581] truncate">{caseData.customer}</p>
+            <p className="text-sm text-[#486581] truncate">{caseData?.customer || "—"}</p>
             <span className="text-[#D9E1EA]">·</span>
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#33A1FD]/10 text-[#0B69B7] shrink-0">{caseData.serviceType}</span>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#33A1FD]/10 text-[#0B69B7] shrink-0">{caseData?.serviceType || "—"}</span>
             <span className="text-[#D9E1EA]">·</span>
             <span className="text-xs font-semibold text-[#486581] shrink-0">{toStageLabel(effectiveStage)}</span>
             <span className={cn("text-xs font-semibold shrink-0", caseData.slaBreached ? "text-[#B42318]" : "text-[#006F57]")}>
@@ -1405,15 +1795,79 @@ export function SlideOverPanel({
                     )}
                   </div>
 
-                  <div className="bg-white rounded-[12px] border border-[#E5EAF0] p-4 space-y-3">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Internal Notes</h3>
-                    <textarea
-                      value={auditorNotes}
-                      onChange={(event) => setAuditorNotes(event.target.value)}
-                      onBlur={() => { void handleSaveNotes(); }}
-                      placeholder="Internal notes"
-                      className="w-full min-h-[100px] rounded border border-[#D9E1EA] px-3 py-2 text-sm"
-                    />
+                  <div className="bg-white rounded-[12px] border border-[#E5EAF0] overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setInternalNotesOpen((prev) => !prev)}
+                      className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-[#F8FAFC] transition-colors"
+                      aria-expanded={internalNotesOpen}
+                    >
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Internal Notes</span>
+                      <span className="inline-flex items-center gap-1.5 shrink-0">
+                        {internalMessages.length > 0 ? (
+                          <span className="text-[10px] font-semibold text-[#627D98] normal-case">
+                            {internalMessages.length} note{internalMessages.length === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
+                        <ChevronDown
+                          className={cn(
+                            "w-4 h-4 text-[#627D98] transition-transform duration-200",
+                            internalNotesOpen ? "rotate-180" : "rotate-0",
+                          )}
+                        />
+                      </span>
+                    </button>
+
+                    {internalNotesOpen ? (
+                      <div className="px-4 pb-4 space-y-3 border-t border-[#E5EAF0]">
+                        {isLoadingInternalMessages ? (
+                          <p className="text-sm text-[#627D98]">Loading notes...</p>
+                        ) : internalMessages.length > 0 ? (
+                          <div className="max-h-48 overflow-y-auto space-y-2">
+                            {internalMessages.map((message) => (
+                              <div key={message.id} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="text-xs font-semibold text-[#102A43]">
+                                    {message.sender_name} → {message.recipient_name}
+                                  </p>
+                                  <p className="text-[10px] text-[#627D98] shrink-0">
+                                    {message.created_at ? new Date(message.created_at).toLocaleString() : ""}
+                                  </p>
+                                </div>
+                                <p className="mt-1.5 text-sm text-[#334E68] whitespace-pre-wrap">{message.message_text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-[#9AA5B4]">No internal notes yet.</p>
+                        )}
+                        <div className="space-y-2">
+                          <InternalNoteRecipientSearch
+                            staffRecipients={staffRecipients}
+                            allowAllTeam={canSendToAllTeam}
+                            value={internalNoteRecipientId}
+                            onChange={setInternalNoteRecipientId}
+                          />
+                          <textarea
+                            value={internalNoteDraft}
+                            onChange={(event) => setInternalNoteDraft(event.target.value)}
+                            placeholder="Write an internal note for your team..."
+                            className="w-full min-h-[88px] rounded border border-[#D9E1EA] px-3 py-2 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleSendInternalNote();
+                            }}
+                            disabled={isSendingInternalNote || !internalNoteDraft.trim() || !internalNoteRecipientId}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#102A43] text-white px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            {isSendingInternalNote ? "Sending..." : "Send"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="flex items-center justify-between py-2 mb-1">
@@ -1619,8 +2073,21 @@ export function SlideOverPanel({
                               </div>
                             );
                           })()}
-                          <p className="text-sm font-semibold text-[#102A43]">{toDocumentDisplayTitle(document)}</p>
-                          <p className="text-xs text-[#627D98]">Type: {toDocumentTypeLabel(document.document_type)}</p>
+                          {(() => {
+                            const evisaMeta = evisaUploadedMetaById.get(document.id);
+                            const typeLabel = toDocumentTypeLabel(evisaMeta?.displayType || document.document_type);
+                            const title = evisaMeta?.displayName || toDocumentDisplayTitle(document);
+                            const fileLabel = evisaMeta?.originalFilename || document.original_filename || document.stored_filename || "";
+                            return (
+                              <>
+                                <p className="text-sm font-semibold text-[#102A43]">{title}</p>
+                                <p className="text-xs text-[#627D98]">Type: {typeLabel}</p>
+                                {fileLabel && fileLabel !== title ? (
+                                  <p className="text-xs text-[#627D98]">File: {fileLabel}</p>
+                                ) : null}
+                              </>
+                            );
+                          })()}
                           <p className="text-xs text-[#627D98]">Uploaded: {document.upload_date ? new Date(document.upload_date).toLocaleString() : "-"}</p>
                           {correctedDocumentIds.has(document.id) ? (
                             <span className="mt-1 inline-flex text-[10px] px-2 py-0.5 rounded-full bg-[#ECFFF1] border border-[#B8E6C2] text-[#1F6B35] uppercase">
@@ -1660,12 +2127,19 @@ export function SlideOverPanel({
                 }
                 return (
                   <div className="space-y-2">
-                    {apostilleDocuments.map((document) => (
+                    {apostilleDocuments.map((document) => {
+                      const docLabel = toApostilleDocumentLabel(document);
+                      const typeLabel = toDocumentTypeLabel(document.document_type || "other");
+                      const statusLabel = (document.verification_status || "pending").replace(/_/g, " ");
+                      return (
                       <div key={`apostille-doc-${document.id}`} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3">
                         <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-[#102A43]">Uploaded Document #{document.id}</p>
-                            <p className="text-xs text-[#627D98]">User uploaded apostille document</p>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-[#102A43] truncate">{docLabel}</p>
+                            <p className="text-xs text-[#627D98]">
+                              {typeLabel !== docLabel ? `${typeLabel} · ` : ""}
+                              Status: {statusLabel}
+                            </p>
                           </div>
                           <button
                             type="button"
@@ -1675,7 +2149,7 @@ export function SlideOverPanel({
                                 const url = URL.createObjectURL(blob);
                                 const link = window.document.createElement("a");
                                 link.href = url;
-                                link.download = `apostille-document-${document.id}`;
+                                link.download = (document.original_filename || document.document_name || `apostille-document-${document.id}`).trim();
                                 link.style.display = "none";
                                 window.document.body.appendChild(link);
                                 link.click();
@@ -1692,7 +2166,8 @@ export function SlideOverPanel({
                           </button>
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 );
               })()}
@@ -1716,49 +2191,70 @@ export function SlideOverPanel({
                     <Clock className="w-4 h-4" /> SLA: {caseData.slaTimer}
                   </span>
                 </div>
+                {isApostilleCase ? (
+                  <p className="mt-2 text-sm text-[#334E68]">
+                    Quoted fee:{" "}
+                    <span className="font-semibold text-[#102A43]">
+                      {apostilleQuotedFee.trim()
+                        ? `GBP ${apostilleQuotedFee.trim()}`
+                        : details?.quoted_fee
+                          ? `${details.quote_currency || "GBP"} ${details.quoted_fee}`
+                          : "Not set"}
+                    </span>
+                  </p>
+                ) : null}
               </div>
 
               {isApostilleCase && (
-                <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Apostille Case Controls</h3>
-
-                  <label className="block text-xs font-semibold text-slate-600">Quoted fee (GBP)</label>
-                  <input
-                    type="text"
-                    value={apostilleQuotedFee}
-                    onChange={(event) => setApostilleQuotedFee(event.target.value)}
-                    className="w-full rounded-lg border border-[#D9E1EA] px-2 py-2 text-sm"
-                    placeholder="e.g. 85.00"
-                  />
-
-                  <label className="block text-xs font-semibold text-slate-600">Review note (customer-visible)</label>
-                  <textarea
-                    value={apostilleReviewNote}
-                    onChange={(event) => setApostilleReviewNote(event.target.value)}
-                    className="w-full rounded-lg border border-[#D9E1EA] px-2 py-2 text-sm"
-                    rows={3}
-                  />
-
-                  <label className="block text-xs font-semibold text-slate-600">Internal admin notes</label>
-                  <textarea
-                    value={apostilleInternalNotes}
-                    onChange={(event) => setApostilleInternalNotes(event.target.value)}
-                    className="w-full rounded-lg border border-[#D9E1EA] px-2 py-2 text-sm"
-                    rows={3}
-                  />
-
+                <div className="bg-white rounded-xl border border-blue-200 overflow-hidden">
                   <button
                     type="button"
-                    onClick={() => { void handleSaveApostille(); }}
-                    disabled={isSavingApostille}
-                    className="inline-flex items-center rounded-lg bg-[#102A43] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    onClick={() => setApostilleControlsOpen((prev) => !prev)}
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-[#F8FAFC] transition-colors"
+                    aria-expanded={apostilleControlsOpen}
                   >
-                    {isSavingApostille ? "Saving..." : "Save Apostille Changes"}
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Apostille Case Controls</span>
+                    <ChevronDown
+                      className={cn(
+                        "w-4 h-4 text-[#627D98] transition-transform duration-200",
+                        apostilleControlsOpen ? "rotate-180" : "rotate-0",
+                      )}
+                    />
                   </button>
+
+                  {apostilleControlsOpen ? (
+                    <div className="px-4 pb-4 space-y-3 border-t border-[#E5EAF0]">
+                      <label className="block text-xs font-semibold text-slate-600">Quoted fee (GBP)</label>
+                      <input
+                        type="text"
+                        value={apostilleQuotedFee}
+                        onChange={(event) => setApostilleQuotedFee(event.target.value)}
+                        className="w-full rounded-lg border border-[#D9E1EA] px-2 py-2 text-sm"
+                        placeholder="e.g. 85.00"
+                      />
+
+                      <label className="block text-xs font-semibold text-slate-600">Review note (customer-visible)</label>
+                      <textarea
+                        value={apostilleReviewNote}
+                        onChange={(event) => setApostilleReviewNote(event.target.value)}
+                        className="w-full rounded-lg border border-[#D9E1EA] px-2 py-2 text-sm"
+                        rows={3}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => { void handleSaveApostille(); }}
+                        disabled={isSavingApostille}
+                        className="inline-flex items-center rounded-lg bg-[#102A43] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {isSavingApostille ? "Saving..." : "Save Apostille Changes"}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               )}
 
-              {isDocumentsRequired && (isAmberCorrection || isEVisaCorrectionFlow) && (
+              {isDocumentsRequired && (isAmberCorrection || isEVisaCorrectionFlow || isApostilleCorrectionFlow) && (
                 <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
                   <span className="inline-flex rounded-full bg-[#FFF4E5] px-2.5 py-1 text-xs font-semibold text-[#B45309] border border-[#FCD9B0]">Corrections Requested</span>
                   {(details?.latest_audit_findings || []).map((finding) => (
@@ -1818,9 +2314,29 @@ export function SlideOverPanel({
               )}
 
               {isEVisaCase && (overviewRequestedDocuments.length > 0 || overviewUploadedDocuments.length > 0) && (
-                <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">EVisa Document Overview</h3>
+                <div className="bg-white rounded-xl border border-blue-200 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setEvisaDocOverviewOpen((prev) => !prev)}
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-[#F8FAFC] transition-colors"
+                    aria-expanded={evisaDocOverviewOpen}
+                  >
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">EVisa Document Overview</span>
+                    <span className="inline-flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] font-semibold text-[#627D98] normal-case">
+                        {overviewRequestedDocuments.length + overviewUploadedDocuments.length} doc(s)
+                      </span>
+                      <ChevronDown
+                        className={cn(
+                          "w-4 h-4 text-[#627D98] transition-transform duration-200",
+                          evisaDocOverviewOpen ? "rotate-180" : "rotate-0",
+                        )}
+                      />
+                    </span>
+                  </button>
 
+                  {evisaDocOverviewOpen ? (
+                  <div className="px-4 pb-4 space-y-3 border-t border-[#E5EAF0]">
                   {overviewRequestedDocuments.length > 0 ? (
                     <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Requested by Admin</p>
@@ -1843,10 +2359,16 @@ export function SlideOverPanel({
                   {overviewUploadedDocuments.length > 0 ? (
                     <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Uploaded by Customer</p>
-                      {overviewUploadedDocuments.map((item, index) => (
+                      {overviewUploadedDocuments.map((item, index) => {
+                        const typeLabel = toDocumentTypeLabel(item.document_type || "");
+                        const originalFilename = String((item as { original_filename?: string }).original_filename || "");
+                        return (
                         <div key={`${item.document_type || item.document_name}-uploaded-${index}`} className="rounded-md border border-[#D9E1EA] bg-white px-2.5 py-2">
-                          <p className="text-sm font-semibold text-[#102A43]">{item.document_name || toDocumentTypeLabel(item.document_type || "")}</p>
-                          <p className="text-xs text-[#486581]">Type: {toDocumentTypeLabel(item.document_type || "")}</p>
+                          <p className="text-sm font-semibold text-[#102A43]">{item.document_name || typeLabel}</p>
+                          <p className="text-xs text-[#486581]">Type: {typeLabel}</p>
+                          {originalFilename && originalFilename !== item.document_name ? (
+                            <p className="text-xs text-[#486581]">File: {originalFilename}</p>
+                          ) : null}
                           <p className="text-xs text-[#486581]">Uploaded: {item.uploaded_at ? new Date(item.uploaded_at).toLocaleString() : "-"}</p>
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             {item.is_requested ? (
@@ -1865,8 +2387,11 @@ export function SlideOverPanel({
                             )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
+                  ) : null}
+                  </div>
                   ) : null}
                 </div>
               )}
@@ -1901,13 +2426,50 @@ export function SlideOverPanel({
               {effectiveStage === "PAYMENT_PENDING" && (
                 <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-2">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Payment Monitoring</h3>
-                  <p className="text-sm text-[#334E68]">Amount due: GBP {toPounds(details?.amount_due_pence)}</p>
+                  <p className="text-sm text-[#334E68]">
+                    Amount due: {isApostilleCase ? `GBP ${apostilleAmountDue}` : `GBP ${toPounds(details?.amount_due_pence)}`}
+                  </p>
                   <p className="text-sm text-[#334E68]">Status: Customer has not yet paid</p>
                   <button onClick={() => { void handleReminder("payment"); }} className="inline-flex items-center gap-1 rounded-lg border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#334E68]">
                     <Send className="w-3 h-3" /> Send Payment Reminder
                   </button>
                 </div>
               )}
+
+              {isApostilleCase && (details?.payment_confirmed || String(details?.full_payment_status || "").toLowerCase() === "paid") ? (
+                <div className="bg-white p-4 rounded-xl border border-emerald-200 space-y-2">
+                  <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Payment Received</h3>
+                  <p className="text-sm text-[#334E68]">
+                    Paid: GBP {apostilleAmountDue}
+                    {details?.full_payment_id ? ` · Payment ID: ${details.full_payment_id}` : ""}
+                  </p>
+                </div>
+              ) : null}
+
+              {isApostilleCase && details?.final_submission_completed ? (
+                <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-2">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Final Submission Details</h3>
+                  {(() => {
+                    const delivery = (details as AdminApplication & { delivery?: Record<string, string> }).delivery || {};
+                    const lines = [
+                      delivery.delivery_name && `Name: ${delivery.delivery_name}`,
+                      delivery.delivery_address_line1 && `Address: ${delivery.delivery_address_line1}`,
+                      delivery.delivery_address_line2 && `Line 2: ${delivery.delivery_address_line2}`,
+                      delivery.delivery_city && `City: ${delivery.delivery_city}`,
+                      delivery.delivery_postcode && `Postcode: ${delivery.delivery_postcode}`,
+                      delivery.delivery_country && `Country: ${delivery.delivery_country}`,
+                      delivery.delivery_special_instructions && `Instructions: ${delivery.delivery_special_instructions}`,
+                    ].filter(Boolean);
+                    return lines.length ? (
+                      <div className="space-y-1 text-sm text-[#334E68]">
+                        {lines.map((line) => <p key={line}>{line}</p>)}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-[#627d98]">Final details submitted. Open Documents tab for uploaded files.</p>
+                    );
+                  })()}
+                </div>
+              ) : null}
 
               {effectiveStage === "DOCUMENT_UPLOAD_PENDING" && (
                 <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-2">
@@ -2060,15 +2622,6 @@ export function SlideOverPanel({
                               {key.replaceAll("_", " ")}
                             </label>
                           ))}
-                          <textarea
-                            value={auditorNotes}
-                            onChange={(event) => setAuditorNotes(event.target.value)}
-                            onBlur={() => {
-                              void handleSaveNotes();
-                            }}
-                            placeholder="Internal notes"
-                            className="w-full min-h-[80px] rounded-lg border border-[#D9E1EA] px-3 py-2 text-sm"
-                          />
                           <button
                             onClick={() => {
                               void handleSendToReview();
@@ -2096,15 +2649,20 @@ export function SlideOverPanel({
                   <p className="text-sm text-[#334E68]">Customer: {details?.customer_name || caseData.customer}</p>
                   <p className="text-sm text-[#334E68]">Service: {details?.service_name || details?.service_type || caseData.serviceType}</p>
                   <p className="text-sm text-[#334E68]">Reference: {details?.reference_number || caseData.id}</p>
-                  <p className="text-sm text-[#334E68]">Document count: {latestdocuments.length}</p>
+                  {isApostilleCase && details?.file_number ? (
+                    <p className="text-sm text-[#334E68]">File number: {details.file_number}</p>
+                  ) : null}
+                  <p className="text-sm text-[#334E68]">
+                    Document count: {panelDocuments.length || details?.document_count || 0}
+                  </p>
                   <p className="text-sm text-[#334E68]">Payment status: {paymentStatusLabel}</p>
 
                   <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Upload Status</p>
-                    {latestdocuments.length === 0 ? (
+                    {panelDocuments.length === 0 ? (
                       <p className="text-sm text-[#627D98]">No uploaded documents found.</p>
                     ) : (
-                      latestdocuments
+                      panelDocuments
                         .slice()
                         .sort((left, right) => {
                           const leftTs = new Date(left.upload_date || left.created_at || "").getTime();
@@ -2207,7 +2765,7 @@ export function SlideOverPanel({
               <div className="rounded-[12px] border border-[#E5EAF0] bg-white p-4 space-y-2">
                 <p className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide mb-3">Quick Actions</p>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  <button onClick={() => setShowRequestDocs((prev) => !prev)} className="flex items-center justify-center gap-2 bg-white border border-blue-200 text-slate-700 py-2 px-3 rounded-lg text-xs font-medium">
+                  <button onClick={() => { setShowRequestDocs((prev) => !prev); if (showRequestDocs) { setPendingDocRequests([]); setRequestDocDescription(""); } }} className="flex items-center justify-center gap-2 bg-white border border-blue-200 text-slate-700 py-2 px-3 rounded-lg text-xs font-medium">
                     <FileText className="w-4 h-4 text-[#33A1FD]" /> Request Documents
                   </button>
                   <button onClick={() => setShowSendMessage((prev) => !prev)} className="flex items-center justify-center gap-2 bg-white border border-blue-200 text-slate-700 py-2 px-3 rounded-lg text-xs font-medium">
@@ -2268,9 +2826,11 @@ export function SlideOverPanel({
 
                 {showRequestDocs && (
                   <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">
+                    <p className="text-[11px] font-semibold text-[#102A43]">Request Documents</p>
+
                     {requestedDocumentStatuses.length > 0 ? (
                       <div className="rounded-md border border-[#D9E1EA] bg-white px-2.5 py-2 space-y-1">
-                        <p className="text-[11px] font-semibold text-[#102A43]">Already Requested Files</p>
+                        <p className="text-[11px] font-semibold text-[#627D98]">Already Requested</p>
                         {requestedDocumentStatuses.map((item, index) => (
                           <p key={`${item.document_type || item.document_name}-${index}`} className="text-[11px] text-[#486581]">
                             • {(item.reuploaded && item.uploadedDocumentName) ? item.uploadedDocumentName : (item.document_name || toDocumentTypeLabel(item.document_type))} ({item.uploadStatusLabel})
@@ -2278,23 +2838,55 @@ export function SlideOverPanel({
                         ))}
                       </div>
                     ) : null}
+
+                    {/* Pending requests queue */}
+                    {pendingDocRequests.length > 0 ? (
+                      <div className="rounded-md border border-[#D9E1EA] bg-white px-2.5 py-2 space-y-1">
+                        <p className="text-[11px] font-semibold text-[#0B69B7]">Queued ({pendingDocRequests.length})</p>
+                        {pendingDocRequests.map((r, i) => (
+                          <div key={i} className="flex items-start justify-between gap-1">
+                            <p className="text-[11px] text-[#102A43]">• <span className="font-medium">{toDocumentTypeLabel(r.doc_type)}</span>: {r.description}</p>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveDocRequest(i)}
+                              className="text-[10px] text-[#B42318] font-semibold hover:underline shrink-0"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {/* Add document row */}
                     <select value={requestDocType} onChange={(event) => setRequestDocType(event.target.value)} className="w-full rounded border border-[#D9E1EA] px-2 py-1.5 text-xs">
                       {Object.keys(DOCUMENT_TYPE_LABELS).map((type) => (
                         <option key={type} value={type}>{toDocumentTypeLabel(type)}</option>
                       ))}
                     </select>
-                    <input
-                      value={requestDocDescription}
-                      onChange={(event) => setRequestDocDescription(event.target.value)}
-                      placeholder="Describe what is needed"
-                      className="w-full rounded border border-[#D9E1EA] px-2 py-1.5 text-xs"
-                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        value={requestDocDescription}
+                        onChange={(event) => setRequestDocDescription(event.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddDocRequest(); } }}
+                        placeholder="Describe what is needed"
+                        className="flex-1 rounded border border-[#D9E1EA] px-2 py-1.5 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddDocRequest}
+                        className="rounded border border-[#0B69B7] bg-white text-[#0B69B7] px-2 py-1.5 text-xs font-semibold hover:bg-[#EBF5FF]"
+                      >
+                        + Add
+                      </button>
+                    </div>
+
                     <button
                       onClick={() => { void handleRequestDocuments(); }}
-                      disabled={isRequestingDocs}
+                      disabled={isRequestingDocs || (pendingDocRequests.length === 0 && !requestDocDescription.trim())}
                       className="inline-flex items-center gap-1 rounded-lg bg-[#102A43] text-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
                     >
-                      {isRequestingDocs ? "Sending..." : "Send Request"}
+                      {isRequestingDocs ? "Sending..." : `Send Request${pendingDocRequests.length > 0 ? ` (${pendingDocRequests.length + (requestDocDescription.trim() ? 1 : 0)} doc${pendingDocRequests.length + (requestDocDescription.trim() ? 1 : 0) > 1 ? "s" : ""})` : ""}`}
                     </button>
                   </div>
                 )}

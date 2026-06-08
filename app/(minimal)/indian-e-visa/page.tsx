@@ -1650,9 +1650,7 @@ if (profileRes.ok) {
       return latestUploadedAt <= correctionRequestedAtMs;
     });
   }, [activeFlaggedDocuments, documents, correctionRequestedAtMs]);
-  const canShowInteractiveCorrection =
-    pendingFlaggedDocuments.length > 0 &&
-    (isEVisaCorrectionRequested || applicationRecord?.audit_result === "amber");
+  const canShowInteractiveCorrection = pendingFlaggedDocuments.length > 0;
   const adminMessages = useMemo(() => {
     const messagesFromApi = Array.isArray(applicationRecord?.admin_messages) ? applicationRecord.admin_messages : [];
     if (messagesFromApi.length > 0) {
@@ -1682,6 +1680,7 @@ if (profileRes.ok) {
     flaggedDocumentName: string,
     file: File,
     documentKey: string,
+    flaggedDocumentType?: string,
   ) => {
     const caseNumber = (caseFromQuery || data.fileNumber || "").trim().toUpperCase();
     const applicantEmail = (watch("email") || data.email || "").trim();
@@ -1699,6 +1698,9 @@ if (profileRes.ok) {
     formData.append("case_number", caseNumber);
     formData.append("email", applicantEmail);
     formData.append("flagged_document_name", flaggedDocumentName);
+    if (flaggedDocumentType) {
+      formData.append("flagged_document_type", flaggedDocumentType);
+    }
     formData.append("document", file);
 
     try {
@@ -1719,6 +1721,9 @@ if (profileRes.ok) {
       const responseData = (json as {
         data?: {
           application_status?: string;
+          current_stage?: string;
+          all_reuploaded?: boolean;
+          remaining_count?: number;
           document?: {
             id?: number;
             document_type?: string;
@@ -1730,17 +1735,23 @@ if (profileRes.ok) {
         };
       }).data;
 
-      setReuploadConfirmationMessage("Re-upload submitted, our team will review shortly");
+      const allReuploaded = responseData?.all_reuploaded === true;
+      setReuploadConfirmationMessage(
+        allReuploaded
+          ? "All documents re-uploaded. Our team will review shortly."
+          : `${responseData?.remaining_count ?? 1} more document(s) still required.`,
+      );
       setApplicationRecord((prev) => {
         if (!prev) return prev;
         const nextApplicationStatus = responseData?.application_status || prev.application_status;
+        const nextStage = responseData?.current_stage || prev.current_stage;
         return {
           ...prev,
           application_status: nextApplicationStatus,
-          unified_status:
-            String(nextApplicationStatus || "").toLowerCase() === "reuploaded_pending_review"
-              ? "reuploaded_pending_review"
-              : prev.unified_status,
+          current_stage: nextStage,
+          unified_status: allReuploaded
+            ? "reuploaded_pending_review"
+            : "pending_docs",
         };
       });
 
@@ -1758,7 +1769,11 @@ if (profileRes.ok) {
           ...prev,
         ]);
       }
-      toast.success("Correction document uploaded.");
+      toast.success(
+        allReuploaded
+          ? "All correction documents uploaded."
+          : "Document uploaded. Please upload the remaining document(s).",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to submit correction re-upload.");
     } finally {
@@ -1771,7 +1786,7 @@ if (profileRes.ok) {
     const appId = caseFromQuery || "N/A";
 
     return (
-      <div className={`${outfit.className} min-h-screen bg-[#eef4ff] text-[#0f1f3d]`}>
+      <div className="min-h-screen bg-[#eef4ff] text-[#0f1f3d]">
         <div className="border-b border-[#d4e3ff] bg-[#eaf2ff]">
           <div className="max-w-[1240px] mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-[12px] text-[#6982ab]">
@@ -2079,7 +2094,7 @@ if (profileRes.ok) {
                             onChange={(event) => {
                               const selectedFile = event.target.files?.[0];
                               if (selectedFile) {
-                                void handleCorrectionReupload(documentLabel, selectedFile, documentKey);
+                                void handleCorrectionReupload(documentLabel, selectedFile, documentKey, item.document_type);
                               }
                               event.currentTarget.value = "";
                             }}

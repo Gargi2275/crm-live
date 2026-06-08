@@ -83,18 +83,32 @@ const debouncedQuery = useDebounce(searchQuery, 350);
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-
     void loadAlertSummary();
     const intervalId = window.setInterval(() => {
       void loadAlertSummary();
     }, 60000);
 
     return () => {
-      isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, [adminUser?.role]);
+  }, [adminUser?.role, loadAlertSummary]);
+
+  const openNotification = (notification: import("@/lib/admin-auth").AdminNotification) => {
+    setShowNotificationMenu(false);
+    const applicationId = notification.application_id;
+    const isStaffRole = ["case_processor", "reviewer", "support_agent"].includes(adminUser?.role || "");
+    if (applicationId && isStaffRole) {
+      router.push(`/admin/my-cases?applicationId=${encodeURIComponent(String(applicationId))}`);
+      return;
+    }
+    if (applicationId) {
+      router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(applicationId))}`);
+      return;
+    }
+    if (["admin", "ops_manager"].includes(adminUser?.role || "")) {
+      router.push("/admin/alerts");
+    }
+  };
 
 const runSearch = useCallback(async (q: string) => {
   if (q.trim().length < 2) { setSearchResults(null); return; }
@@ -283,12 +297,18 @@ const totalResults = searchResults
                   <p className="px-4 py-6 text-sm text-[#627D98]">No notifications yet.</p>
                 ) : (
                   notifications.slice(0, 8).map((notification) => (
-                    <div key={String(notification.id)} className="px-4 py-3 border-b border-[#F1F5F9] last:border-b-0">
+                    <button
+                      key={String(notification.id)}
+                      type="button"
+                      onClick={() => openNotification(notification)}
+                      className="w-full text-left px-4 py-3 border-b border-[#F1F5F9] last:border-b-0 hover:bg-[#F8FAFC] transition-colors"
+                    >
                       <p className="text-sm text-[#102A43] leading-snug">{notification.message}</p>
                       <p className="mt-1 text-[11px] text-[#829AB1]">
+                        {notification.type_label ? `${notification.type_label} · ` : ""}
                         {new Date(notification.timestamp).toLocaleString([], { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}
                       </p>
-                    </div>
+                    </button>
                   ))
                 )}
               </div>

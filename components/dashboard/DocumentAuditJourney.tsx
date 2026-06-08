@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, Eye, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
-import { ApplicationTracker, ApplicationTrackerStep } from "@/components/dashboard/ApplicationTracker";
 import toast from "react-hot-toast";
 import {
   authenticatedFetch,
@@ -18,6 +17,7 @@ import {
   getAuditStatus,
   getPassportRenewalQuoteDetail,
   getPublicTestimonials,
+  openApplicationDocument,
   resubmitApplicationForReview,
   skipAuditWithDisclaimer,
   startAudit,
@@ -28,7 +28,7 @@ import {
   verifyPassportRenewalQuotePayment,
   verifyFullPayment,
 } from "@/lib/api";
-import { API_BASE_URL } from "@/lib/config";
+import { mergeHydratedDocuments, type StoredDocumentState } from "@/lib/document-upload-ui";
 import { useRouter } from "next/navigation";
 type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "apostille" | "undecided";
 type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "passport-quote-pending" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
@@ -60,17 +60,6 @@ type PaymentSummary = {
   currency: "GBP";
 };
 
-type ApplicationProgressResponse = {
-  current_step: number;
-  steps: Array<{
-    number: number;
-    label: string;
-    note: string | null;
-    completed: boolean;
-    active: boolean;
-  }>;
-};
-
 type Answers = Record<QuestionId, string>;
 
 type DocumentItem = {
@@ -97,10 +86,7 @@ type GeneratedChecklistResponse = {
   }>;
 };
 
-type DocumentState = {
-  status: DocumentStatus;
-  fileName?: string;
-};
+type DocumentState = StoredDocumentState;
 
 type JourneyStorage = {
   stage: FlowStage;
@@ -132,6 +118,7 @@ type JourneyDraftStorage = {
 
 type ApplicationRecord = {
   id: number;
+  latest_audit_id?: number | null;
   reference_number: string;
   file_number?: string;
   application_status: string;
@@ -475,17 +462,154 @@ type DocumentAuditJourneyProps = {
   applicationId?: number;
   serviceType?: string;
   resumeReference?: string;
+  startFresh?: boolean;
   focusQuote?: boolean;
   auditResult?: string;
   amountDuePence?: number;
   auditFeePence?: number;
-  showPersistentTracker?: boolean;
+  showPersistentTracker?: boolean; // deprecated: tracker UI removed
   onUnreadCountChange?: (count: number) => void;
 };
 
 
 
-export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, focusQuote = false, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker = true, onUnreadCountChange }: DocumentAuditJourneyProps) {
+const DRAFT_STAGE_RANK: Record<FlowStage, number> = {
+  service: 0,
+  questions: 1,
+  checklist: 2,
+  upload: 3,
+  summary: 4,
+  "passport-quote-pending": 5,
+  "audit-pending": 6,
+  "audit-result": 7,
+  "full-payment": 8,
+  processing: 9,
+  completed: 10,
+};
+
+const listReferenceDraftCandidates = (): Array<{ suffix: string; raw: string; stage: FlowStage | null }> => {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const prefix = `${OCI_AUDIT_DRAFT_KEY_PREFIX}:`;
+  const candidates: Array<{ suffix: string; raw: string; stage: FlowStage | null }> = [];
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(prefix)) {
+      continue;
+    }
+
+    const suffix = key.slice(prefix.length).trim();
+    if (!suffix || suffix.toUpperCase() === "ACTIVE") {
+      continue;
+    }
+
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<JourneyDraftStorage>;
+      const stage = parsed.stage && OCI_DRAFT_ALLOWED_STAGES.includes(parsed.stage) ? parsed.stage : null;
+      candidates.push({ suffix, raw, stage });
+    } catch {
+      // Ignore malformed drafts.
+    }
+  }
+
+  return candidates.sort((left, right) => (DRAFT_STAGE_RANK[right.stage || "service"] || 0) - (DRAFT_STAGE_RANK[left.stage || "service"] || 0));
+};
+
+type DocumentUploadControlsProps = {
+  docState?: DocumentState;
+  isUploaded: boolean;
+  isSubmittedUnderReview: boolean;
+  isUploading: boolean;
+  uploadLabel?: string;
+  onFileSelect: (event: ChangeEvent<HTMLInputElement>) => void;
+  onView: () => void;
+};
+
+function DocumentUploadControls({
+  docState,
+  isUploaded,
+  isSubmittedUnderReview,
+  isUploading,
+  uploadLabel = "Upload PDF/JPEG/PNG",
+  onFileSelect,
+  onView,
+}: DocumentUploadControlsProps) {
+  const fileName = docState?.fileName || "";
+  const canView = Boolean(docState?.previewUrl || docState?.documentId || docState?.fileUrl);
+
+  if (isSubmittedUnderReview && isUploaded) {
+    return (
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
+          <CheckCircle2 className="mr-2 h-4 w-4" /> Submitted for review
+        </div>
+        {fileName ? (
+          <p className="max-w-full truncate text-xs text-slate-600" title={fileName}>
+            {fileName}
+          </p>
+        ) : null}
+        {canView ? (
+          <button
+            type="button"
+            onClick={onView}
+            className="inline-flex items-center rounded-xl border border-primary/20 bg-white px-3 py-2 text-xs font-semibold text-primary hover:bg-bg-blue"
+          >
+            <Eye className="mr-1.5 h-3.5 w-3.5" /> View
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (isUploaded) {
+    return (
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
+          <CheckCircle2 className="mr-2 h-4 w-4" /> Uploaded
+        </div>
+        {fileName ? (
+          <p className="max-w-[240px] truncate text-xs text-slate-600" title={fileName}>
+            {fileName}
+          </p>
+        ) : null}
+        {canView ? (
+          <button
+            type="button"
+            onClick={onView}
+            className="inline-flex items-center rounded-xl border border-primary/20 bg-white px-3 py-2 text-xs font-semibold text-primary hover:bg-bg-blue"
+          >
+            <Eye className="mr-1.5 h-3.5 w-3.5" /> View
+          </button>
+        ) : null}
+        <label className="inline-flex cursor-pointer items-center rounded-xl border border-primary/20 bg-white px-3 py-2 text-xs font-semibold text-primary hover:bg-bg-blue">
+          <RefreshCcw className="mr-1.5 h-3.5 w-3.5" /> Upload again
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onFileSelect} />
+        </label>
+        {isUploading ? <span className="text-sm text-slate-500">Uploading...</span> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <label className="inline-flex cursor-pointer items-center rounded-xl border border-primary/20 bg-white px-4 py-2 text-sm font-semibold text-primary hover:bg-bg-blue">
+        <Upload className="mr-2 h-4 w-4" /> {uploadLabel}
+        <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onFileSelect} />
+      </label>
+      {isUploading ? <span className="text-sm text-slate-500">Uploading...</span> : null}
+    </div>
+  );
+}
+
+export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, startFresh = false, focusQuote = false, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker: _showPersistentTracker = false, onUnreadCountChange }: DocumentAuditJourneyProps) {
   const router = useRouter();
   void userEmail;
   void applicationIdProp;
@@ -494,6 +618,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const stageRef = useRef<FlowStage>("service");
   const quoteCardRef = useRef<HTMLDivElement | null>(null);
   const quoteFocusHandledRef = useRef(false);
+  const refreshRedirectHandledRef = useRef(false);
   const [loaded, setLoaded] = useState(false);
   const [stage, setStage] = useState<FlowStage>("service");
   const [selectedService, setSelectedService] = useState<ServiceId | null>(null);
@@ -531,16 +656,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [passportCaseReference, setPassportCaseReference] = useState<string>("");
   const [passportQuoteAcknowledged, setPassportQuoteAcknowledged] = useState(false);
   const [skipAuditDisclaimerAccepted, setSkipAuditDisclaimerAccepted] = useState(false);
-  const [progressCurrentStep, setProgressCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
-  const [progressSteps, setProgressSteps] = useState<ApplicationTrackerStep[]>([
-    { number: 1, label: "Documents audited", note: null, completed: false, active: true },
-    { number: 2, label: "Form filling in progress", note: null, completed: false, active: false },
-    { number: 3, label: "Submitted to Embassy / VFS", note: null, completed: false, active: false },
-    { number: 4, label: "Under process", note: null, completed: false, active: false },
-    { number: 5, label: "Decision / Dispatched / Collected", note: null, completed: false, active: false },
-  ]);
-  const [progressLoading, setProgressLoading] = useState(false);
-  const [progressError, setProgressError] = useState<string | null>(null);
   const [messageRequestedDocIds, setMessageRequestedDocIds] = useState<string[]>([]);
   const [applicationStartError, setApplicationStartError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -735,6 +850,36 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     return flaggedDocAliasMap[raw] || raw;
   };
 
+  const looksLikeFileName = (value: string) => /\.(pdf|jpg|jpeg|png|webp|heic)$/i.test(value.trim());
+
+  const formatDocumentTypeLabel = (value: string | number | null | undefined): string => {
+    const raw = String(value || "").trim();
+    if (!raw || looksLikeFileName(raw)) {
+      return "";
+    }
+    return raw
+      .replace(/[_-]+/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  };
+
+  const resolveFlaggedDocumentLabel = (item: any, matchedDoc?: DocumentItem | null): string => {
+    const fromType = formatDocumentTypeLabel(item?.document_type);
+    if (fromType) {
+      return fromType;
+    }
+    if (matchedDoc?.title) {
+      return matchedDoc.title;
+    }
+    const fromDocId = formatDocumentTypeLabel(item?.doc_id);
+    if (fromDocId) {
+      return fromDocId;
+    }
+    return "Document";
+  };
+
   const flaggedDocumentsLookup = useMemo(() => {
     const lookup = new Map<string, {
       document_type?: string;
@@ -742,6 +887,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       issue_reason?: string;
       required_action?: string;
       status?: string;
+      reuploaded?: boolean;
     }>();
 
     const backendFlagged = (auditResultData?.flagged_documents?.length
@@ -755,11 +901,12 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       }
 
       lookup.set(sourceKey, {
-        document_type: String(item?.document_type || item?.doc_id || "").trim(),
+        document_type: formatDocumentTypeLabel(item?.document_type || item?.doc_id) || String(item?.document_type || item?.doc_id || "").trim(),
         document_name: String(item?.document_name || item?.doc_name || "").trim(),
         issue_reason: String(item?.issue_reason || item?.issue || item?.finding_description || "").trim(),
         required_action: String(item?.required_action || item?.action_required || "").trim(),
         status: String(item?.status || "").trim(),
+        reuploaded: Boolean(item?.reuploaded) || String(item?.status || "").toLowerCase() === "reuploaded",
       });
     });
 
@@ -769,6 +916,28 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const requiredDocs = uploadChecklist.filter((item) => item.required);
   const requiredComplete = requiredDocs.every((doc) => documents[doc.id]?.status === "uploaded");
   const uploadedDocs = uploadChecklist.filter((doc) => documents[doc.id]?.status === "uploaded");
+
+  useEffect(() => {
+    const ref = String(applicationRecord?.reference_number || referenceNumber || "").trim();
+    if (!ref || uploadChecklist.length === 0) return;
+    if (!["checklist", "summary", "audit-result"].includes(stage)) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const docsRaw = await getApplicationDocuments(ref);
+        if (cancelled) return;
+        setDocuments((current) => mergeHydratedDocuments(current, docsRaw, uploadChecklist));
+      } catch {
+        // Non-fatal if documents cannot be refreshed yet.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationRecord?.reference_number, referenceNumber, stage, uploadChecklist]);
+
   const auditStatus = (auditResultData?.status || auditOutcome || null) as AuditOutcome | null;
   const flaggedSource = useMemo(
     () => (auditResultData?.flagged_documents?.length ? auditResultData.flagged_documents : applicationRecord?.flagged_documents || []),
@@ -782,8 +951,8 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
           (doc) => normalize(doc.id) === normalize(item?.doc_id) || normalize(doc.title) === normalize(item?.doc_name || item?.document_name)
         );
         const resolvedDocId = String(matchedDoc?.id || item?.doc_id || item?.document_type || "");
-        const backendDocumentName = String(item?.document_type || item?.doc_name || item?.document_name || "").trim();
-        const requiredDocumentName = String(matchedDoc?.title || backendDocumentName || "Document");
+        const requiredDocumentName = resolveFlaggedDocumentLabel(item, matchedDoc);
+        const uploadedFileLabel = String(item?.document_name || item?.doc_name || "").trim();
         const statusFromBackend = normalize(item?.status);
         const backendMarkedUploaded = Boolean(item?.reuploaded) || statusFromBackend === "reuploaded";
 
@@ -795,7 +964,8 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
           actionRequired: (item?.action_required || item?.required_action || "re-upload") as "re-upload" | "obtain" | "apostille" | "affidavit",
           canUploadInline: Boolean(resolvedDocId),
           isUploaded: backendMarkedUploaded || (resolvedDocId ? Boolean(flaggedReuploads[resolvedDocId]) : false),
-          uploadedFileName: resolvedDocId ? documents[resolvedDocId]?.fileName : "",
+          uploadedFileName: resolvedDocId ? documents[resolvedDocId]?.fileName || uploadedFileLabel : uploadedFileLabel,
+          docRecord: resolvedDocId ? documents[resolvedDocId] : undefined,
         };
       }),
     [flaggedSource, checklist, documents, flaggedReuploads]
@@ -869,9 +1039,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const serviceFeeForMath = typeof serviceFee === "number" ? serviceFee : 0;
   const addOnTotal = addOns.reduce((sum, id) => sum + (ADD_ONS.find((item) => item.id === id)?.fee || 0), 0);
   const finalAmount = Math.max(serviceFeeForMath - auditFee + addOnTotal, 0);
-  const questionProgress = ((questionIndex + 1) / QUESTION_LIST.length) * 100;
-  const shouldShowPersistentTracker =
-    showPersistentTracker && !["service", "questions", "checklist", "upload", "summary"].includes(stage);
 
   const normalizePayload = <T,>(response: unknown): T => {
     if (response && typeof response === "object" && "data" in (response as Record<string, unknown>)) {
@@ -983,8 +1150,14 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
 
 
+    const resolvedLatestAuditId = Number((response as { latest_audit_id?: number | null }).latest_audit_id || 0);
+    if (Number.isFinite(resolvedLatestAuditId) && resolvedLatestAuditId > 0) {
+      setAuditId(resolvedLatestAuditId);
+    }
+
     const nextRecord: ApplicationRecord = {
       id: backendApplicationId,
+      latest_audit_id: resolvedLatestAuditId > 0 ? resolvedLatestAuditId : null,
       reference_number: response.reference_number || refNum,
       application_status: response.application_status || "draft",
       service_type: response.service_type,
@@ -1083,9 +1256,12 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 const startApplicationIfNeeded = async (
   serviceOverride?: ServiceId | null,
   forceCreate = false
-): Promise<number> => {
+): Promise<{ id: number; referenceNumber: string }> => {
   if (!forceCreate && applicationRecord?.id) {
-    return applicationRecord.id;
+    return {
+      id: applicationRecord.id,
+      referenceNumber: applicationRecord.reference_number || referenceNumber || "",
+    };
   }
 
   const resolvedService = serviceOverride ?? selectedService;
@@ -1111,7 +1287,10 @@ const startApplicationIfNeeded = async (
   const refreshedApplication = await syncApplicationFromBackend(
     payload.reference_number || null
   );
-  return refreshedApplication.id || createdApplicationId;
+  return {
+    id: refreshedApplication.id || createdApplicationId,
+    referenceNumber: refreshedApplication.reference_number || payload.reference_number || "",
+  };
 };
 
   const ensureRazorpayLoaded = async (): Promise<void> => {
@@ -1237,12 +1416,24 @@ useEffect(() => {
     const resumeKey = getAuditDraftKey(resumeReference || null);
     const activeKey = getAuditDraftKey(null);
     const targetKey = resumeReference ? resumeKey : activeKey;
-    const raw = localStorage.getItem(targetKey) ||
+    let raw = localStorage.getItem(targetKey) ||
       (resumeReference ? localStorage.getItem(activeKey) : null) ||
       localStorage.getItem(OCI_AUDIT_DRAFT_KEY_LEGACY) ||
       sessionStorage.getItem(targetKey) ||
       (resumeReference ? sessionStorage.getItem(activeKey) : null) ||
       sessionStorage.getItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
+
+    if (!raw && !resumeReference && !startFresh) {
+      const referenceDraft = listReferenceDraftCandidates().find((candidate) => candidate.stage && candidate.stage !== "service");
+      if (referenceDraft) {
+        setDraftRestored(true);
+        router.replace(
+          `/dashboard/document-audit?reference=${encodeURIComponent(referenceDraft.suffix)}&resume=1`
+        );
+        return;
+      }
+    }
+
     if (!raw) {
       setHasDraftProgress(false);
       return;
@@ -1307,7 +1498,22 @@ useEffect(() => {
   } finally {
     setDraftRestored(true);
   }
-}, [resumeReference]);
+}, [resumeReference, startFresh, router]);
+
+useEffect(() => {
+  if (!draftRestored || !loaded || refreshRedirectHandledRef.current) {
+    return;
+  }
+  if (resumeReference || startFresh) {
+    return;
+  }
+  if (hasDraftProgress && stage !== "service") {
+    return;
+  }
+
+  refreshRedirectHandledRef.current = true;
+  router.replace("/dashboard");
+}, [draftRestored, loaded, resumeReference, startFresh, hasDraftProgress, stage, router]);
 
 useEffect(() => {
   if (typeof window === "undefined") return;
@@ -1387,7 +1593,7 @@ useEffect(() => {
         }
 
         // Restore audit id and checklist from backend
-        const resolvedAuditId = (app as any).audit_id ?? (app as any).latest_audit_id ?? null;
+        const resolvedAuditId = app.latest_audit_id ?? null;
         let restoredChecklistCount = 0;
         if (resolvedAuditId) {
           setAuditId(Number(resolvedAuditId));
@@ -1573,7 +1779,10 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         const flaggedFromFlaggedDocuments = Array.isArray(app.flagged_documents)
           ? app.flagged_documents.map((item: any) => ({
               doc_id: String(item?.doc_id || item?.document_type || ""),
-              doc_name: String(item?.doc_name || item?.document_name || ""),
+              doc_name:
+                formatDocumentTypeLabel(item?.document_type) ||
+                formatDocumentTypeLabel(item?.doc_id) ||
+                "Document",
               issue: String(item?.issue || item?.issue_reason || item?.finding_description || ""),
               action_required: (["re-upload", "obtain", "apostille", "affidavit"] as const).includes(
                 item?.action_required as AuditResult["flagged_documents"][number]["action_required"]
@@ -1626,9 +1835,10 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               });
 
               const resolvedDocId = matchedChecklistDoc?.id || (normalizedType && normalizedType !== "other" ? rawType : "");
-              const resolvedDocName = !genericLabels.has(normalizedName)
-                ? rawName
-                : matchedChecklistDoc?.title || (normalizedType && normalizedType !== "other" ? denormalizeType(rawType) : "Requested document");
+              const resolvedDocName =
+                (normalizedType && normalizedType !== "other" ? denormalizeType(rawType) : "") ||
+                matchedChecklistDoc?.title ||
+                (!genericLabels.has(normalizedName) && !looksLikeFileName(rawName) ? rawName : "Document");
 
               return {
                 doc_id: String(resolvedDocId || finding?.id || `finding-${index + 1}`),
@@ -1665,7 +1875,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
               return {
                 doc_id: String(rawType || doc.id || `doc-${index + 1}`),
-                doc_name: String(doc.document_name || labelFromType),
+                doc_name: labelFromType,
                 issue: String(doc.required_action || doc.verification_notes || "Document requires correction."),
                 action_required: "re-upload" as const,
                 status: "needs_fix",
@@ -1765,77 +1975,6 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   }, [referenceNumber, selectedServiceRecord?.name, stage]);
 
   useEffect(() => {
-    if (!shouldShowPersistentTracker) return;
-
-    let active = true;
-    const loadProgress = async () => {
-      try {
-        setProgressLoading(true);
-        setProgressError(null);
-
-        const app = await syncApplicationFromBackend(referenceNumber);
-        const stageValue = String(app.current_stage || "registered").toLowerCase();
-        const applicationStatusValue = String(app.application_status || "").toLowerCase();
-        const auditResultValue = String((app as any).audit_result || "").toLowerCase();
-
-        const isRejected = applicationStatusValue === "rejected" || auditResultValue === "red";
-        const isCorrectionLoop =
-          ["correction_requested", "reuploaded_pending_review"].includes(applicationStatusValue) ||
-          auditResultValue === "amber";
-
-        const stageToStep: Record<string, 1 | 2 | 3 | 4 | 5> = {
-          registered: 1,
-          email_confirmed: 1,
-          paid: 1,
-          docs_received: 1,
-          in_preparation: 2,
-          submitted: 3,
-          decision_received: 4,
-          closed: 5,
-          correction_requested: 1,
-        };
-        // If audit needs corrections (amber) or is rejected (red), keep the user in step 1.
-        const nextCurrent = (isRejected || isCorrectionLoop) ? 1 : (stageToStep[stageValue] || 1);
-        const step1Label = isRejected
-          ? "Audit rejected (case closed)"
-          : isCorrectionLoop
-            ? "Corrections required"
-            : "Documents audited";
-
-        const nextSteps: ApplicationTrackerStep[] = [
-          { number: 1, label: step1Label, note: null, completed: nextCurrent > 1, active: nextCurrent === 1 },
-          { number: 2, label: "Form filling in progress", note: null, completed: nextCurrent > 2, active: nextCurrent === 2 },
-          { number: 3, label: "Submitted to Embassy / VFS", note: null, completed: nextCurrent > 3, active: nextCurrent === 3 },
-          { number: 4, label: "Under process", note: null, completed: nextCurrent > 4, active: nextCurrent === 4 },
-          { number: 5, label: "Decision / Dispatched / Collected", note: null, completed: nextCurrent === 5, active: nextCurrent === 5 },
-        ];
-
-        if (!active) return;
-
-        setProgressCurrentStep(nextCurrent);
-        setProgressSteps(nextSteps);
-      } catch (error) {
-        if (!active) return;
-        setProgressError(error instanceof Error ? error.message : "Failed to load progress tracker.");
-      } finally {
-        if (active) {
-          setProgressLoading(false);
-        }
-      }
-    };
-
-    void loadProgress();
-    const intervalId = window.setInterval(() => {
-      void loadProgress();
-    }, 60000);
-
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-    };
-  }, [referenceNumber, shouldShowPersistentTracker]);
-
-  useEffect(() => {
     if (stage !== "processing" && stage !== "completed") return;
 
     let active = true;
@@ -1857,14 +1996,96 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     };
   }, [stage, referenceNumber]);
 
-  const updateDocument = (id: string, file?: File | null) => {
-    setDocuments((current) => ({
-      ...current,
-      [id]: file
-        ? { status: "uploaded", fileName: file.name }
-        : { status: "not_uploaded", fileName: undefined },
-    }));
+  const updateDocument = (id: string, file?: File | null, meta?: Partial<DocumentState>) => {
+    setDocuments((current) => {
+      const previous = current[id];
+      if (previous?.previewUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(previous.previewUrl);
+      }
+
+      if (!file) {
+        return {
+          ...current,
+          [id]: { status: "not_uploaded" },
+        };
+      }
+
+      return {
+        ...current,
+        [id]: {
+          status: "uploaded",
+          fileName: file.name,
+          previewUrl: URL.createObjectURL(file),
+          ...meta,
+        },
+      };
+    });
     setBannerMessage("Document status updated.");
+  };
+
+  const handleViewDocument = async (docState?: DocumentState) => {
+    if (!docState) {
+      toast.error("Document preview is not available yet.");
+      return;
+    }
+
+    try {
+      if (docState.previewUrl) {
+        await openApplicationDocument(docState.documentId || 0, { previewUrl: docState.previewUrl });
+        return;
+      }
+      if (docState.documentId) {
+        await openApplicationDocument(docState.documentId, { fileUrl: docState.fileUrl });
+        return;
+      }
+      toast.error("Document preview is not available yet.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to open document.");
+    }
+  };
+
+  const ensureAuditStarted = async (record: ApplicationRecord): Promise<number | null> => {
+    const fromState = Number(auditId || 0);
+    if (Number.isFinite(fromState) && fromState > 0) {
+      return fromState;
+    }
+
+    const fromRecord = Number(record.latest_audit_id || 0);
+    if (Number.isFinite(fromRecord) && fromRecord > 0) {
+      setAuditId(fromRecord);
+      return fromRecord;
+    }
+
+    const appId = Number(record.id || applicationId || 0);
+    if (!Number.isFinite(appId) || appId <= 0) {
+      return null;
+    }
+
+    try {
+      const raw = await startAudit(
+        appId,
+        serviceType,
+        lastChecklistAnswers || answers,
+        record.reference_number || referenceNumber || null
+      );
+      const result = normalizePayload<{ id?: number; audit_id?: number }>(raw);
+      const createdAuditId = Number(result.audit_id || result.id || 0);
+      if (Number.isFinite(createdAuditId) && createdAuditId > 0) {
+        setAuditId(createdAuditId);
+        return createdAuditId;
+      }
+    } catch {
+      // Upload API only requires reference_number; audit creation is best-effort here.
+    }
+
+    return null;
+  };
+
+  const handleDocumentFileInputChange = (id: string, event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0] || null;
+    void handleDocumentUpload(id, selected).finally(() => {
+      event.target.value = "";
+    });
   };
 
   const handleDocumentUpload = async (id: string, file?: File | null) => {
@@ -1873,41 +2094,33 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       return;
     }
 
-    const app = await syncApplicationFromBackend(referenceNumber, { skipStageSync: true }).catch(() => null);
-    const resolvedAuditId = Number(
-      auditId ||
-      (app as any)?.audit_id ||
-      (app as any)?.latest_audit_id ||
-      (applicationRecord as any)?.audit_id ||
-      (applicationRecord as any)?.latest_audit_id ||
-      app?.id ||
-      applicationRecord?.id ||
-      0
-    );
-
-    if (!app && !applicationRecord) {
-      toast.error("Could not load your application before upload. Please refresh and try again.");
-      return;
-    }
-
-    const correctionLoopStatus = String(app?.application_status || applicationRecord?.application_status || "").toLowerCase();
-    const isCorrectionLoop = ["correction_requested", "reuploaded_pending_review"].includes(correctionLoopStatus) || stage === "audit-result";
-    const resolvedService =
-      mapBackendServiceType(app?.service_type) ||
-      mapBackendServiceType(app?.service_name) ||
-      selectedService;
-    const isPassportService = resolvedService === "passport-renewal";
-    const isApostilleService = resolvedService === "apostille";
-    if (!resolvedAuditId && !isCorrectionLoop && !isPassportService && !isApostilleService) {
-      toast.error("Start audit first by completing questionnaire.");
-      return;
-    }
-
-    const checklistItemId = checklistItemIdByDocId[id] ?? id;
-
     try {
       setApiLoading(true);
       setUploadingDocId(id);
+
+      const app = await syncApplicationFromBackend(referenceNumber, { skipStageSync: true }).catch(() => null);
+      const record = app || applicationRecord;
+
+      if (!record) {
+        toast.error("Could not load your application before upload. Please refresh and try again.");
+        return;
+      }
+
+      const resolvedReferenceNumber = String(record.reference_number || referenceNumber || "").trim();
+      if (!resolvedReferenceNumber) {
+        toast.error("Application reference not found.");
+        return;
+      }
+
+      const correctionLoopStatus = String(record.application_status || "").toLowerCase();
+      const isCorrectionLoop =
+        ["correction_requested", "reuploaded_pending_review"].includes(correctionLoopStatus) || stage === "audit-result";
+
+      if (!isCorrectionLoop) {
+        await ensureAuditStarted(record);
+      }
+
+      const checklistItemId = checklistItemIdByDocId[id] ?? id;
       const inferredDocumentType = (() => {
         const normalizedId = String(id || "").trim().toLowerCase();
         if (!normalizedId) return "";
@@ -1915,28 +2128,23 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         return VALID_AUDIT_DOCUMENT_TYPES.has(candidateType) ? candidateType : "";
       })();
 
-      const resolvedReferenceNumber = app?.reference_number || referenceNumber || applicationRecord?.reference_number || "";
-      if (!resolvedReferenceNumber.trim()) {
-        toast.error("Application reference not found.");
-        return;
-      }
+      const auditIdForUpload = Number(auditId || record.latest_audit_id || 0);
 
-      const effectiveAuditId = resolvedAuditId;
-      if (!Number.isFinite(effectiveAuditId) || effectiveAuditId <= 0) {
-        toast.error("Could not determine the audit record for this upload.");
-        return;
-      }
-
-      await uploadDocument(
-        effectiveAuditId,
+      const raw = await uploadDocument(
+        auditIdForUpload > 0 ? auditIdForUpload : null,
         checklistItemId as string,
         file,
         resolvedReferenceNumber,
         inferredDocumentType
       );
+      const payload = normalizePayload<any>(raw);
+      const uploadedDoc = payload?.document || payload?.checklist_item || payload;
+      const documentId = Number(uploadedDoc?.id || 0) || undefined;
+      const fileUrl = String(uploadedDoc?.file_path || "").trim() || undefined;
+      const uploadedFileName = String(uploadedDoc?.original_filename || uploadedDoc?.uploaded_file_name || file.name).trim();
       // FLYOCI-FIX: BUG-REUPLOAD-5
       await syncApplicationFromBackend(referenceNumber, { skipStageSync: true });
-      updateDocument(id, file);
+      updateDocument(id, file, { documentId, fileUrl, fileName: uploadedFileName });
       setFlaggedReuploads((current) => ({ ...current, [id]: true }));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to upload document.");
@@ -1986,8 +2194,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   try {
     setApiLoading(true);
     // forceCreate=true so we never accidentally resume a stale application
-    const applicationIdValue = await startApplicationIfNeeded(service, true);
-    setApplicationId(applicationIdValue);
+    const startedApplication = await startApplicationIfNeeded(service, true);
+    setApplicationId(startedApplication.id);
     if (service === "apostille") {
       const apostilleChecklist = defaultDocuments("apostille", emptyAnswers);
       setGeneratedChecklist(apostilleChecklist);
@@ -1998,6 +2206,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       setChecklistItemIdByDocId(idMap);
       setStage("checklist");
       setBannerMessage("Upload your Apostille documents for review.");
+      const refreshed = await syncApplicationFromBackend(startedApplication.referenceNumber || null, { skipStageSync: true });
+      await ensureAuditStarted(refreshed);
     } else {
       setStage("questions");
     }
@@ -2694,36 +2904,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   }
 
   return (
-    <div className="space-y-7">
-      <div className="rounded-3xl border border-[#d7e5fb] bg-white p-5 sm:p-6 shadow-[0_14px_36px_rgba(30,74,135,0.08)]">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary/70">
-              {selectedService === "passport-renewal" ? "Passport Renewal Journey" : "Document Audit Journey"}
-            </p>
-            <h2 className="mt-1 text-2xl sm:text-3xl font-heading font-bold text-primary">Your Required Documents</h2>
-            <p className="mt-2 max-w-3xl text-sm sm:text-base text-slate-600">{bannerMessage}</p>
-          </div>
-          <button
-            type="button"
-            onClick={resetJourneyForNewApplication}
-            className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            <RefreshCcw className="mr-2 h-4 w-4" /> Reset Journey
-          </button>
-        </div>
-      </div>
-
-      {shouldShowPersistentTracker ? (
-        <div className="space-y-3">
-          {progressLoading ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">Loading progress tracker...</div>
-          ) : null}
-          {progressError ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{progressError}</div>
-          ) : null}
-          <ApplicationTracker currentStep={progressCurrentStep} steps={progressSteps} />
-        </div>
+    <div className="space-y-6">
+      {bannerMessage && stage === "service" ? (
+        <p className="text-sm text-slate-600">{bannerMessage}</p>
       ) : null}
 
       {customerMessages.length > 0 ? (
@@ -2753,9 +2936,16 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
 {stage === "service" && (
   <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-    <h3 className="text-2xl font-heading font-bold text-primary">
-      Which service do you need?
-    </h3>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <h3 className="text-2xl font-heading font-bold text-primary">Which service do you need?</h3>
+      <button
+        type="button"
+        onClick={resetJourneyForNewApplication}
+        className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+      >
+        <RefreshCcw className="mr-1.5 h-3.5 w-3.5" /> Start new application
+      </button>
+    </div>
     <p className="mt-2 text-textMuted">
       Select one to generate your personalised document checklist.
     </p>
@@ -2814,30 +3004,20 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 )}
       {stage === "questions" && currentQuestion && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-
-          <div className="mb-4 flex items-center gap-2">
-      <span className="text-sm font-semibold text-primary">
-        {serviceLabelMap[selectedService ?? "undecided"]}
-      </span>
-      <button
-        type="button"
-        onClick={() => setStage("service")}
-        className="text-xs text-slate-500 underline hover:text-primary"
-      >
-        Change service
-      </button>
-    </div>
-
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-2xl font-heading font-bold text-primary">Step 2 — Smart Questionnaire</h3>
-              <p className="mt-1 text-textMuted">This helps us generate your personalised document checklist.</p>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-primary">{serviceLabelMap[selectedService ?? "undecided"]}</span>
+              <button
+                type="button"
+                onClick={() => setStage("service")}
+                className="text-xs text-slate-500 underline hover:text-primary"
+              >
+                Change service
+              </button>
             </div>
-            <span className="rounded-full border border-primary/20 bg-bg-blue px-3 py-1 text-xs font-semibold text-primary">Q{questionIndex + 1} of {QUESTION_LIST.length}</span>
-          </div>
-
-          <div className="mb-4 h-2 rounded-full bg-slate-200 overflow-hidden">
-            <div className="h-full bg-primary transition-all" style={{ width: `${questionProgress}%` }} />
+            <span className="text-xs font-medium text-slate-500">
+              Question {questionIndex + 1} of {QUESTION_LIST.length}
+            </span>
           </div>
 
           <div className="rounded-2xl border border-border bg-bg-page p-5 sm:p-6">
@@ -2904,8 +3084,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               const applicationStatus = String(applicationRecord?.application_status || "").trim().toLowerCase();
               const isSubmittedUnderReview = Boolean(flaggedMatch && applicationStatus === "reuploaded_pending_review");
               const isAdminCorrectionRequested = applicationStatus === "correction_requested";
-              const uploadedFileName = documents[doc.id]?.fileName || flaggedMatch?.document_name || "";
-              const isUploaded = Boolean(documents[doc.id]?.fileName) || Boolean(flaggedMatch?.document_name);
+              const uploadedFileName = documents[doc.id]?.fileName || "";
+              const flaggedUploaded =
+                Boolean(flaggedMatch?.reuploaded) ||
+                String(flaggedMatch?.status || "").toLowerCase() === "reuploaded" ||
+                Boolean(flaggedReuploads[doc.id]);
+              const isUploaded = Boolean(documents[doc.id]?.fileName) || flaggedUploaded;
+              const flaggedDocLabel = flaggedMatch?.document_type || formatDocumentTypeLabel(doc.id) || doc.title;
               const state: DocumentStatus = isUploaded ? "uploaded" : (flaggedMatch ? "pending_reupload" : (documents[doc.id]?.status || "not_uploaded"));
               const mistakeItems = Array.isArray(doc.commonMistakes) ? doc.commonMistakes : [];
               const specialLabel =
@@ -2932,8 +3117,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                         ) : null}
                       </div>
                       <p className="mt-1 text-sm text-slate-600">{doc.description}</p>
-                      {flaggedMatch?.document_name ? (
-                        <p className="mt-1 text-xs font-medium text-slate-500">Flagged file: {flaggedMatch.document_name}</p>
+                      {flaggedMatch ? (
+                        <p className="mt-1 text-xs font-medium text-amber-800">Flagged document: {flaggedDocLabel}</p>
+                      ) : null}
+                      {flaggedMatch?.document_name && uploadedFileName ? (
+                        <p className="mt-0.5 text-xs text-slate-500">Uploaded file: {uploadedFileName}</p>
                       ) : null}
                       {flaggedMatch?.issue_reason ? (
                         <p className="mt-1 text-xs text-amber-800">Issue: {flaggedMatch.issue_reason}</p>
@@ -2989,32 +3177,24 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     </div>
                   ) : null}
 
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
-                    {isSubmittedUnderReview ? (
-                      <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
-                        <CheckCircle2 className="mr-2 h-4 w-4" /> {(flaggedMatch as any)?.document_type || uploadedFileName || "Uploaded"}
-                      </div>
-                    ) : isUploaded ? (
-                      <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
-                        <CheckCircle2 className="mr-2 h-4 w-4" /> {(flaggedMatch as any)?.document_type || uploadedFileName || "Uploaded"}
-                      </div>
-                    ) : (
-                      <label className={`inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold ${flaggedMatch ? "cursor-pointer border-primary/20 bg-white text-primary hover:bg-bg-blue" : "cursor-pointer border-primary/20 bg-white text-primary hover:bg-bg-blue"}`}>
-                        <Upload className="mr-2 h-4 w-4" /> Upload PDF/JPEG/PNG
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          className="hidden"
-                          onChange={(event) => void handleDocumentUpload(doc.id, event.target.files?.[0] || null)}
-                        />
-                      </label>
-                    )}
-                    {isSubmittedUnderReview ? null : isAdminCorrectionRequested ? (
-                      <p className="w-full text-sm text-amber-700">Admin has requested a new correction. Please re-upload.</p>
-                    ) : null}
-                    {uploadingDocId === doc.id ? <span className="text-sm text-slate-500">Uploading...</span> : null}
-                    {(isSubmittedUnderReview || (isUploaded && flaggedMatch?.status)) ? <span className="text-sm text-slate-500">Review status: {isSubmittedUnderReview ? "submitted_for_review" : flaggedMatch?.status}</span> : null}
-                  </div>
+                  <DocumentUploadControls
+                    docState={documents[doc.id]}
+                    isUploaded={isUploaded}
+                    isSubmittedUnderReview={isSubmittedUnderReview}
+                    isUploading={uploadingDocId === doc.id}
+                    onFileSelect={(event) => handleDocumentFileInputChange(doc.id, event)}
+                    onView={() => {
+                      void handleViewDocument(documents[doc.id]);
+                    }}
+                  />
+                  {isSubmittedUnderReview ? null : isAdminCorrectionRequested ? (
+                    <p className="mt-2 w-full text-sm text-amber-700">Admin has requested a new correction. Please re-upload.</p>
+                  ) : null}
+                  {(isSubmittedUnderReview || (isUploaded && flaggedMatch?.status)) ? (
+                    <span className="mt-2 block text-sm text-slate-500">
+                      Review status: {isSubmittedUnderReview ? "submitted_for_review" : flaggedMatch?.status}
+                    </span>
+                  ) : null}
                 </div>
               );
             })}
@@ -3118,13 +3298,12 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                   <p className="flex justify-between"><span>Credit if you proceed</span><strong>-£{auditFee}</strong></p>
                   <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>{serviceFee === null ? "Price on request" : `£${serviceFee}`}</strong></p>
                 </div>
-                <label className="mt-5 flex items-start gap-2 text-sm">
-                  <input type="checkbox" className="mt-1" />
-                  <span>I acknowledge the audit fee and understand it is credited against my final service fee if I proceed.</span>
-                </label>
-
                 <div className="mt-5">
-                  <ConsentCheckboxes mode="payment" onAcceptanceChange={setPaymentConsentsAccepted} />
+                  <ConsentCheckboxes
+                    mode="payment"
+                    includeAuditFeeAcknowledgement
+                    onAcceptanceChange={setPaymentConsentsAccepted}
+                  />
                 </div>
 
                 <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
@@ -3326,7 +3505,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                             {item.actionRequired}
                           </span>
                         </div>
-                        {item.uploadedFileName ? (
+                        {item.uploadedFileName && looksLikeFileName(item.uploadedFileName) ? (
                           <p className="mt-1 text-xs text-slate-500">Uploaded file: {item.uploadedFileName}</p>
                         ) : null}
                         <p className="mt-2 text-slate-700">Auditor Note: {item.reason}</p>
@@ -3344,12 +3523,16 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
                           if (applicationStatus === "reuploaded_pending_review") {
                             return (
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                {item.uploadedFileName ? <span className="text-xs text-slate-500">{item.uploadedFileName}</span> : null}
-                                <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800">
-                                  Submitted — Under Admin Review
-                                </span>
-                              </div>
+                              <DocumentUploadControls
+                                docState={item.docRecord}
+                                isUploaded={item.isUploaded}
+                                isSubmittedUnderReview
+                                isUploading={false}
+                                onFileSelect={() => undefined}
+                                onView={() => {
+                                  void handleViewDocument(item.docRecord);
+                                }}
+                              />
                             );
                           }
 
@@ -3357,52 +3540,52 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                             return (
                               <div className="mt-3 space-y-2">
                                 <p className="text-xs font-medium text-slate-600">Admin has requested a new correction. Please re-upload.</p>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  {item.canUploadInline ? (
-                                    <label className="inline-flex cursor-pointer items-center rounded-lg border border-primary/20 bg-white px-3 py-1.5 text-xs font-semibold text-primary hover:bg-bg-blue">
-                                      <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload corrected file
-                                      <input
-                                        type="file"
-                                        accept=".pdf,.jpg,.jpeg,.png"
-                                        className="hidden"
-                                        onChange={(event) => void handleDocumentUpload(item.documentId, event.target.files?.[0] || null)}
-                                      />
-                                    </label>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setReuploadOnlyFlagged(true);
-                                        setMessageRequestedDocIds([]);
-                                        setStage("checklist");
-                                      }}
-                                      className="rounded-lg border border-primary/20 bg-white px-3 py-1.5 text-xs font-semibold text-primary hover:bg-bg-blue"
-                                    >
-                                      Upload from checklist
-                                    </button>
-                                  )}
-                                  {uploadingDocId === item.documentId ? <span className="text-xs text-slate-500">Uploading...</span> : null}
-                                  {item.uploadedFileName ? <span className="text-xs text-slate-500">{item.uploadedFileName}</span> : null}
-                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${item.isUploaded ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
-                                    {item.isUploaded ? "Ready" : "Pending upload"}
-                                  </span>
-                                </div>
+                                {item.canUploadInline ? (
+                                  <DocumentUploadControls
+                                    docState={item.docRecord}
+                                    isUploaded={item.isUploaded}
+                                    isSubmittedUnderReview={false}
+                                    isUploading={uploadingDocId === item.documentId}
+                                    uploadLabel="Upload corrected file"
+                                    onFileSelect={(event) => handleDocumentFileInputChange(item.documentId, event)}
+                                    onView={() => {
+                                      void handleViewDocument(item.docRecord);
+                                    }}
+                                  />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReuploadOnlyFlagged(true);
+                                      setMessageRequestedDocIds([]);
+                                      setStage("checklist");
+                                    }}
+                                    className="rounded-lg border border-primary/20 bg-white px-3 py-1.5 text-xs font-semibold text-primary hover:bg-bg-blue"
+                                  >
+                                    Upload from checklist
+                                  </button>
+                                )}
+                                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${item.isUploaded ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                                  {item.isUploaded ? "Ready" : "Pending upload"}
+                                </span>
                               </div>
                             );
                           }
 
                           return (
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <div className="mt-3 space-y-2">
                               {item.canUploadInline ? (
-                                <label className="inline-flex cursor-pointer items-center rounded-lg border border-primary/20 bg-white px-3 py-1.5 text-xs font-semibold text-primary hover:bg-bg-blue">
-                                  <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload corrected file
-                                  <input
-                                    type="file"
-                                    accept=".pdf,.jpg,.jpeg,.png"
-                                    className="hidden"
-                                    onChange={(event) => void handleDocumentUpload(item.documentId, event.target.files?.[0] || null)}
-                                  />
-                                </label>
+                                <DocumentUploadControls
+                                  docState={item.docRecord}
+                                  isUploaded={item.isUploaded}
+                                  isSubmittedUnderReview={false}
+                                  isUploading={uploadingDocId === item.documentId}
+                                  uploadLabel="Upload corrected file"
+                                  onFileSelect={(event) => handleDocumentFileInputChange(item.documentId, event)}
+                                  onView={() => {
+                                    void handleViewDocument(item.docRecord);
+                                  }}
+                                />
                               ) : (
                                 <button
                                   type="button"
@@ -3416,9 +3599,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                                   Upload from checklist
                                 </button>
                               )}
-                              {uploadingDocId === item.documentId ? <span className="text-xs text-slate-500">Uploading...</span> : null}
-                              {item.uploadedFileName ? <span className="text-xs text-slate-500">{item.uploadedFileName}</span> : null}
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${item.isUploaded ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                              <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${item.isUploaded ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
                                 {item.isUploaded ? "Ready" : "Pending upload"}
                               </span>
                             </div>

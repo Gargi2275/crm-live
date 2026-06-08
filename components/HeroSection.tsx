@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, useMotionValue, useTransform, useSpring } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue } from "framer-motion";
 import {
   ArrowRight,
   BadgeCheck,
@@ -16,9 +16,8 @@ import {
   Star,
   Zap,
 } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // ─── Animation variants ───────────────────────────────────────────────────────
 const container = {
@@ -35,6 +34,11 @@ const item = {
 };
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
+const quickStats = [
+  { label: "Fast review", value: "24–48h", icon: Zap, color: "#2563eb" },
+  { label: "Coverage", value: "OCI / e-Visa / Passport", icon: Sparkles, color: "#7c3aed" },
+];
+
 const trustBadges = [
   { text: "UK-based support", icon: CheckCircle },
   { text: "Transparent fixed fees", icon: ShieldCheck },
@@ -42,12 +46,38 @@ const trustBadges = [
   { text: "WhatsApp & email updates", icon: MessageCircle },
 ];
 
-const quickStats = [
-  { label: "Fast review", value: "24–48h", icon: Zap, color: "#60a5fa" },
-  { label: "Support", value: "WhatsApp + Email", icon: MessageCircle, color: "#34d399" },
-  { label: "Coverage", value: "OCI / e-Visa / Passport", icon: Sparkles, color: "#a78bfa" },
+type HeroSlide = {
+  src: string;
+  /** Stronger scrim + text tuning for deep-sky backgrounds */
+  variant?: "sky";
+  objectPosition?: string;
+};
+
+const HERO_SLIDES: HeroSlide[] = [
+  { src: "/hero-bg/hero-1-passport-boarding.jpg" },
+  { src: "/hero-bg/hero-2-oci-card.jpg" },
+  // { src: "/hero-bg/hero-3-travel-collage.jpg" },
+  { src: "/hero-bg/hero-4-apostille.jpg" },
+  { src: "/hero-bg/hero-5-visa-application.jpg" },
+  { src: "/hero-bg/hero-airplane.jpg", variant: "sky", objectPosition: "42% center" },
 ];
 
+const BACKGROUND_IMAGES = HERO_SLIDES.map((s) => s.src);
+
+const BG_FADE_MS = 1500;
+const BG_HOLD_MS = 6000;
+
+function slideImageClass(index: number, extra = "") {
+  const isSky = HERO_SLIDES[index]?.variant === "sky";
+  return [
+    "absolute inset-0 h-full w-full object-cover transition-[object-position,opacity,filter,transform] ease-in-out",
+    isSky ? "scale-[1.03] blur-[2px]" : "scale-100 blur-0",
+    extra,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+ 
 type ServiceKey = "oci" | "evisa" | "passport" | "apostille";
 
 const serviceGroups: Array<{
@@ -90,25 +120,17 @@ const serviceGroups: Array<{
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function HeroSection() {
-  // Parallax motion values (normalized -1..1)
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
 
-  const bgX = useTransform(mouseX, [-1, 1], [-24, 24]);
-  const bgY = useTransform(mouseY, [-1, 1], [-12, 12]);
-  const orb1X = useTransform(mouseX, [-1, 1], [-40, 40]);
-  const orb1Y = useTransform(mouseY, [-1, 1], [-20, 20]);
-  const orb2X = useTransform(mouseX, [-1, 1], [30, -30]);
-  const orb2Y = useTransform(mouseY, [-1, 1], [12, -12]);
-
-  // Smooth springs for nicer motion
-  const springBgX = useSpring(bgX, { stiffness: 140, damping: 24 });
-  const springBgY = useSpring(bgY, { stiffness: 140, damping: 24 });
-  const springOrb1X = useSpring(orb1X, { stiffness: 140, damping: 26 });
-  const springOrb1Y = useSpring(orb1Y, { stiffness: 140, damping: 26 });
-  const springOrb2X = useSpring(orb2X, { stiffness: 140, damping: 26 });
-  const springOrb2Y = useSpring(orb2Y, { stiffness: 140, damping: 26 });
-  const [activeGroup, setActiveGroup] = useState<ServiceKey | null>("oci");
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [topImageIndex, setTopImageIndex] = useState<number | null>(null);
+  const [topImageVisible, setTopImageVisible] = useState(false);
+  const activeImageRef = useRef(0);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isTransitioningRef = useRef(false);
+  const [activeGroup, setActiveGroup] = useState<ServiceKey | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<Record<ServiceKey, string>>(
     () =>
       serviceGroups.reduce(
@@ -123,11 +145,68 @@ export default function HeroSection() {
     return g.options.find((o) => o.label === selectedOptions[key])?.href ?? g.options[0]?.href ?? "/services";
   };
 
+  const goToSlide = (next: number) => {
+    if (isTransitioningRef.current || next === activeImageRef.current) return;
+    isTransitioningRef.current = true;
+    setTopImageIndex(next);
+    setTopImageVisible(false);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setTopImageVisible(true));
+    });
+
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => {
+      activeImageRef.current = next;
+      setActiveImageIndex(next);
+      setTopImageIndex(null);
+      setTopImageVisible(false);
+      isTransitioningRef.current = false;
+    }, BG_FADE_MS);
+  };
+
+  const startAutoplay = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      const next = (activeImageRef.current + 1) % BACKGROUND_IMAGES.length;
+      goToSlide(next);
+    }, BG_HOLD_MS);
+  };
+
+  useEffect(() => {
+    BACKGROUND_IMAGES.forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
+
+    startAutoplay();
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, []);
+
+  const sliderIndex =
+    topImageIndex !== null && topImageVisible ? topImageIndex : activeImageIndex;
+
+  const activeSlide = HERO_SLIDES[sliderIndex] ?? HERO_SLIDES[0];
+  const isSkySlide = activeSlide.variant === "sky";
+
+  const handleDotClick = (index: number) => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    isTransitioningRef.current = false;
+
+    if (index === activeImageRef.current && topImageIndex === null) return;
+
+    goToSlide(index);
+    startAutoplay();
+  };
+
   return (
     <section
-      className="relative overflow-hidden"
+      className="relative overflow-hidden bg-[#1a2f4a]"
       onMouseMove={(e) => {
-        // normalize mouse position to -1..1
         const nx = (e.clientX - window.innerWidth / 2) / (window.innerWidth / 2);
         const ny = (e.clientY - window.innerHeight / 2) / (window.innerHeight / 2);
         mouseX.set(Math.max(-1, Math.min(1, nx)));
@@ -138,68 +217,90 @@ export default function HeroSection() {
         mouseY.set(0);
       }}
     >
+      {/* ── Travel / passport image background ── */}
+      <div className="pointer-events-none absolute inset-0 z-0">
+        <div className="absolute inset-0 overflow-hidden bg-[#1a2f4a]">
+           <div className="absolute inset-0 overflow-hidden bg-[#1a2f4a]">
+  <img
+    src={BACKGROUND_IMAGES[activeImageIndex]}
+    alt=""
+    aria-hidden
+    className={slideImageClass(activeImageIndex, "duration-[1500ms]")}
+    style={{
+      objectPosition: HERO_SLIDES[activeImageIndex]?.objectPosition ?? "center",
+      opacity: 0.3,
+      transition: `opacity ${BG_FADE_MS}ms ease-in-out, transform ${BG_FADE_MS}ms ease-in-out`,
+      transform: topImageVisible ? "scale(1.04)" : "scale(1)",
+    }}
+    decoding="sync"
+  />
+  {topImageIndex !== null && (
+    <img
+      src={BACKGROUND_IMAGES[topImageIndex]}
+      alt=""
+      aria-hidden
+      className={slideImageClass(topImageIndex)}
+      style={{
+        objectPosition: HERO_SLIDES[topImageIndex]?.objectPosition ?? "center",
+        opacity: topImageVisible ? 0.3 : 0,
+        transform: topImageVisible ? "scale(1)" : "scale(1.06)",
+        transition: `opacity ${BG_FADE_MS}ms ease-in-out, transform ${BG_FADE_MS}ms ease-in-out`,
+      }}
+      decoding="sync"
+    />
+  )}
+</div>
+ </div>
 
-      {/* ── Background image — untouched ── */}
-      <div
-        className="absolute inset-0"
-      >
-        <Image
-          src="/hero_section_banner.jpeg"
-          alt="OCI assistance banner"
-          fill
-          priority
-          className="object-cover object-center"
+        <div
+          className={`absolute inset-0 transition-all duration-[1500ms] ${
+            isSkySlide
+              ? "bg-gradient-to-r from-white/88 via-white/30 to-transparent"
+              : "bg-gradient-to-r from-white/98 via-white/80 to-white/20"
+          }`}
         />
-        {/* Multi-layer overlay: deep dark left → semi-transparent right */}
-        <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(4,10,28,0.95)_0%,rgba(5,18,54,0.86)_35%,rgba(10,36,100,0.60)_60%,rgba(18,54,150,0.22)_100%)]" />
-        {/* Top vignette */}
-        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/35 to-transparent" />
-        {/* Bottom vignette */}
-        <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-black/45 to-transparent" />
-      </div>
+        <div
+          className={`absolute inset-0 transition-all duration-[1500ms] ${
+            isSkySlide
+              ? "bg-gradient-to-b from-white/15 via-transparent to-transparent"
+              : "bg-gradient-to-b from-white/40 via-transparent to-transparent"
+          }`}
+        />
+        {!isSkySlide && (
+          <div className="absolute inset-0 bg-gradient-to-r from-[#f0f6ff]/60 via-transparent to-transparent transition-all duration-[1500ms]" />
+        )}
 
-      {/* ── Ambient glow orbs ── */}
-      <motion.div
-        className="pointer-events-none absolute left-[-10%] top-[-8%] h-[60vw] w-[60vw] rounded-full"
-        style={{
-          background: "radial-gradient(circle, rgba(37,99,235,0.20) 0%, transparent 65%)",
-          filter: "blur(60px)",
-          translateX: springOrb1X as any,
-          translateY: springOrb1Y as any,
-        }}
-        animate={{ x: [0, 22, 0], y: [0, -16, 0] }}
-        transition={{ duration: 16, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="pointer-events-none absolute bottom-[-10%] right-[15%] h-[45vw] w-[45vw] rounded-full"
-        style={{
-          background: "radial-gradient(circle, rgba(96,165,250,0.15) 0%, transparent 65%)",
-          filter: "blur(70px)",
-          translateX: springOrb2X as any,
-          translateY: springOrb2Y as any,
-        }}
-        animate={{ x: [0, -18, 0], y: [0, 18, 0] }}
-        transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
-      />
+        <div
+          className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-white to-transparent transition-all duration-[1500ms] ${
+            isSkySlide ? "h-24 opacity-70" : "h-40"
+          }`}
+        />
+      </div>
 
       {/* ── Main grid ── */}
       <motion.div
         variants={container}
         initial="hidden"
         animate="visible"
-        className="relative z-10 mx-auto grid min-h-[90vh] w-full grid-cols-1 items-center gap-8 px-4 pb-14 pt-24 sm:px-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:gap-10 lg:px-6 lg:pt-28 xl:grid-cols-[minmax(0,1fr)_440px] xl:gap-12 xl:px-10"
+        className="relative z-10 mx-auto grid min-h-[90vh] w-full grid-cols-1 items-center gap-8 px-4 pb-14 pt-24 sm:px-6 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-12 lg:px-8 lg:pt-28 xl:px-14"
       >
 
         {/* ════════════════════════════════════════
             LEFT — Copy block
         ════════════════════════════════════════ */}
-        <div className="flex flex-col items-center text-center lg:items-start lg:text-left lg:pr-6 xl:pr-10">
+        <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
 
           {/* Eyebrow */}
           <motion.div variants={item}>
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-100 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_20px_rgba(0,0,0,0.25)]">
-              <div className="flex h-4 w-4 items-center justify-center rounded-full bg-sky-400/30 ring-1 ring-sky-400/40">
-                <Sparkles className="h-2.5 w-2.5 text-sky-50" />
+            <div
+              className={`mb-5 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] shadow-sm transition-colors duration-700 ${
+                isSkySlide
+                  ? "border-[#1c69dd]/40 bg-white text-[#041020]"
+                  : "border-[#1c69dd]/30 bg-white text-[#041020]"
+              }`}
+            >
+              <div className="flex h-4 w-4 items-center justify-center rounded-full bg-[#1c69dd]/10 ring-1 ring-[#1c69dd]/20">
+                <Sparkles className="h-3 w-3 text-[#1c69dd]" />
               </div>
               Trusted support for Indian-origin families
             </div>
@@ -207,27 +308,26 @@ export default function HeroSection() {
 
           {/* Headline */}
           <motion.div variants={item}>
-            <h1 className="font-heading text-[clamp(2.25rem,4.6vw,4.3rem)] font-extrabold leading-[0.98] tracking-[-0.05em] text-white">
+            <h1
+              className={`font-heading text-[clamp(2.25rem,4.8vw,4.25rem)] font-black leading-[1.02] tracking-[-0.04em] transition-all duration-700 ${
+                isSkySlide
+                  ? "text-[#041020] drop-shadow-[0_1px_8px_rgba(255,255,255,0.85)]"
+                  : "text-[#041020]"
+              }`}
+            >
               Hassle-free OCI,
-              <span
-                className="mt-1 block bg-clip-text text-transparent"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(92deg, #7dd3fc 0%, #bfdbfe 50%, #e0f2fe 100%)",
-                }}
-              >
+              <span className={`mt-1 block ${isSkySlide ? "text-[#0f4cad]" : "text-[#0f4cad]"}`}>
                 Indian e-Visa and
               </span>
-              <span
-                className="mt-1 block bg-clip-text text-transparent"
-                style={{
-                  backgroundImage: "linear-gradient(92deg, #93c5fd 0%, #dbeafe 100%)",
-                }}
-              >
-                Passport services
-              </span>
+              <span className="mt-1 block text-[#041020]">Passport services</span>
             </h1>
-            <p className="mt-3 text-[clamp(0.95rem,1.5vw,1.1rem)] font-semibold tracking-[-0.01em] text-sky-100/90">
+            <p
+              className={`mt-3 text-[clamp(1rem,1.6vw,1.2rem)] font-extrabold tracking-[-0.01em] transition-all duration-700 ${
+                isSkySlide
+                  ? "text-[#041020] drop-shadow-[0_1px_6px_rgba(255,255,255,0.8)]"
+                  : "text-[#041020]"
+              }`}
+            >
               done for you with clarity and speed
             </p>
           </motion.div>
@@ -235,7 +335,11 @@ export default function HeroSection() {
           {/* Body copy */}
           <motion.p
             variants={item}
-            className="mt-4 max-w-[500px] text-[14px] leading-[1.7] text-slate-100/80 sm:text-[15px]"
+            className={`mt-4 max-w-[560px] text-[15px] font-bold leading-[1.7] sm:text-[16px] ${
+              isSkySlide
+                ? "text-[#102a43] drop-shadow-[0_1px_4px_rgba(255,255,255,0.75)]"
+                : "text-[#102a43]"
+            }`}
           >
             For UK and US residents of Indian origin. We handle forms, documents and
             appointments so you avoid delays, stress and back-and-forth.
@@ -247,17 +351,16 @@ export default function HeroSection() {
             className="mt-8 flex w-full flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start"
           >
             <Link href="/auth/login?next=%2Findian-e-visa" className="w-full sm:w-auto">
-              <button className="group relative w-full overflow-hidden rounded-2xl bg-[#1c69dd] px-7 py-3.5 text-[14px] font-semibold text-white shadow-[0_8px_32px_rgba(28,105,221,0.55)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_44px_rgba(28,105,221,0.7)] sm:w-auto">
+              <button className="group relative w-full overflow-hidden rounded-2xl bg-[#1c69dd] px-7 py-4 text-[15px] font-bold text-white shadow-[0_8px_32px_rgba(28,105,221,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_44px_rgba(28,105,221,0.5)] sm:w-auto">
                 <span className="relative z-10 flex items-center justify-center gap-2">
                   Start My Application
                   <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
                 </span>
-                {/* Shimmer layer */}
                 <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
               </button>
             </Link>
             <Link href="/document-audit" className="w-full sm:w-auto">
-              <button className="w-full rounded-2xl border border-white/25 bg-white/10 px-7 py-3.5 text-[14px] font-semibold text-white backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/16 hover:border-white/40 sm:w-auto">
+              <button className="w-full rounded-2xl border border-[#9bb8dc] bg-white px-7 py-4 text-[15px] font-bold text-[#041020] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#1c69dd]/35 hover:bg-white sm:w-auto">
                 Get My Documents Checked
               </button>
             </Link>
@@ -266,31 +369,29 @@ export default function HeroSection() {
           {/* Quick stat cards */}
           <motion.div
             variants={item}
-            className="mt-7 grid w-full grid-cols-1 gap-3 sm:grid-cols-3"
+            className="mt-7 grid w-full max-w-[520px] grid-cols-1 gap-3 sm:grid-cols-2"
           >
             {quickStats.map((stat) => {
               const Icon = stat.icon;
               return (
                 <motion.div
                   key={stat.label}
-                  whileHover={{ y: -4, scale: 1.02 }}
+                  whileHover={{ y: -3, scale: 1.02 }}
                   transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                  className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/8 p-3.5 backdrop-blur-md"
-                  style={{ boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 28px rgba(0,0,0,0.22)" }}
+                  className="relative overflow-hidden rounded-2xl border border-[#dbeafe] bg-white p-4 shadow-[0_8px_28px_rgba(15,23,42,0.08)]"
                 >
-                  {/* Colored glow dot top-right */}
                   <div
                     className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full"
-                    style={{ background: stat.color, boxShadow: `0 0 10px ${stat.color}99` }}
+                    style={{ background: stat.color, boxShadow: `0 0 10px ${stat.color}66` }}
                   />
                   <div
-                    className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em]"
+                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em]"
                     style={{ color: stat.color }}
                   >
-                    <Icon className="h-3.5 w-3.5" />
+                    <Icon className="h-4 w-4" />
                     {stat.label}
                   </div>
-                  <p className="mt-2.5 font-heading text-[15px] font-bold leading-snug text-white sm:text-[16px]">
+                  <p className="mt-2.5 font-heading text-[16px] font-black leading-snug text-[#041020] sm:text-[17px]">
                     {stat.value}
                   </p>
                 </motion.div>
@@ -301,16 +402,16 @@ export default function HeroSection() {
           {/* Trust badges */}
           <motion.div
             variants={item}
-            className="mt-5 flex flex-wrap justify-center gap-2 lg:justify-start"
+            className="mt-6 flex flex-wrap justify-center gap-2 lg:justify-start"
           >
             {trustBadges.map((badge, i) => {
               const Icon = badge.icon;
               return (
                 <div
                   key={i}
-                  className="flex items-center gap-1.5 rounded-full border border-white/12 bg-white/8 px-3 py-1.5 text-[11px] font-medium text-white/70 backdrop-blur-sm transition-colors hover:border-white/25 hover:text-white/90"
+                  className="flex items-center gap-1.5 rounded-full border border-[#b8cce4] bg-white px-3.5 py-2 text-[12px] font-bold text-[#102a43] shadow-sm transition-colors hover:border-[#1c69dd]/30 hover:text-[#041020]"
                 >
-                  <Icon className="h-3.5 w-3.5 text-sky-300/80" />
+                  <Icon className="h-4 w-4 text-[#1c69dd]" />
                   {badge.text}
                 </div>
               );
@@ -322,7 +423,6 @@ export default function HeroSection() {
             variants={item}
             className="mt-6 flex items-center gap-4"
           >
-            {/* Avatar stack */}
             <div className="flex -space-x-2.5">
               {[
                 { initials: "RK", hue: 215 },
@@ -333,7 +433,7 @@ export default function HeroSection() {
               ].map((av, i) => (
                 <div
                   key={i}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white/20 text-[9px] font-bold text-white ring-1 ring-inset ring-white/10"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[9px] font-bold text-white shadow-sm"
                   style={{
                     background: `hsl(${av.hue}, 62%, 44%)`,
                     zIndex: 10 - i,
@@ -348,9 +448,9 @@ export default function HeroSection() {
                 {[...Array(5)].map((_, i) => (
                   <Star key={i} className="h-3 w-3 fill-amber-400 text-amber-400" />
                 ))}
-                <span className="ml-1.5 text-[11px] font-bold text-sky-50">5.0</span>
+                <span className="ml-1.5 text-[13px] font-black text-[#041020]">5.0</span>
               </div>
-              <p className="text-[10.5px] text-sky-100/70">Trusted by 500+ UK &amp; US families</p>
+              <p className="text-[12px] font-bold text-[#102a43]">Trusted by 500+ UK &amp; US families</p>
             </div>
           </motion.div>
         </div>
@@ -358,11 +458,11 @@ export default function HeroSection() {
         {/* ════════════════════════════════════════
             RIGHT — Services card
         ════════════════════════════════════════ */}
-        <motion.aside variants={item} className="mx-auto w-full max-w-[450px] lg:mx-0">
+        <motion.aside variants={item} className="mx-auto w-full lg:mx-0">
           <motion.div
             whileHover={{ y: -5 }}
             transition={{ type: "spring", stiffness: 180, damping: 22 }}
-            className="overflow-hidden rounded-3xl border border-white/20 bg-white shadow-[0_40px_100px_rgba(4,12,40,0.55),0_0_0_1px_rgba(255,255,255,0.1)] backdrop-blur-2xl"
+            className="overflow-hidden rounded-3xl border border-white/60 bg-white shadow-[0_20px_60px_rgba(4,12,40,0.18)]"
           >
 
             {/* Card header */}
@@ -371,10 +471,10 @@ export default function HeroSection() {
               <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-[#1c69dd]/8" />
               <div className="relative flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="font-heading text-[22px] font-bold leading-tight text-[#0d1f3c] sm:text-[24px]">
+                  <h3 className="font-heading text-[24px] font-black leading-tight text-[#041020] sm:text-[26px]">
                     Our Services
                   </h3>
-                  <p className="mt-1 text-[11.5px] text-[#7a8fa8]">
+                  <p className="mt-1 text-[13px] font-bold text-[#334e68]">
                     Select a service to get started
                   </p>
                 </div>
@@ -423,8 +523,8 @@ export default function HeroSection() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`truncate text-[13px] font-semibold transition-colors ${
-                              isOpen ? "text-[#0d1f3c]" : "text-[#243b53]"
+                            className={`truncate text-[14px] font-bold transition-colors ${
+                              isOpen ? "text-[#041020]" : "text-[#102a43]"
                             }`}
                           >
                             {group.label}
@@ -435,7 +535,7 @@ export default function HeroSection() {
                             </span>
                           )}
                         </div>
-                        <p className="mt-0.5 text-[11px] text-[#8fa3bc]">
+                        <p className="mt-0.5 text-[12px] font-semibold text-[#486581]">
                           {group.options.length} option
                           {group.options.length > 1 ? "s" : ""} available
                         </p>
@@ -476,7 +576,7 @@ export default function HeroSection() {
                                     [group.key]: e.target.value,
                                   }))
                                 }
-                                className="w-full appearance-none rounded-xl border border-[#c8d9f0] bg-white px-4 py-2.5 pr-9 text-[12px] font-medium text-[#0d1f3c] shadow-[0_1px_4px_rgba(0,0,0,0.06)] focus:border-[#1c69dd] focus:outline-none focus:ring-2 focus:ring-[#1c69dd]/15 transition-colors"
+                                className="w-full appearance-none rounded-xl border border-[#c8d9f0] bg-white px-4 py-2.5 pr-9 text-[13px] font-bold text-[#041020] shadow-[0_1px_4px_rgba(0,0,0,0.06)] focus:border-[#1c69dd] focus:outline-none focus:ring-2 focus:ring-[#1c69dd]/15 transition-colors"
                               >
                                 {group.options.map((opt) => (
                                   <option key={opt.label} value={opt.label}>
@@ -489,7 +589,7 @@ export default function HeroSection() {
 
                             {/* Get Started CTA */}
                             <Link href={getHref(group.key)}>
-                              <button className="group mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#1c69dd] px-5 py-3 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(28,105,221,0.38)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#1558c0] hover:shadow-[0_8px_28px_rgba(28,105,221,0.52)]">
+                              <button className="group mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#1c69dd] px-5 py-3 text-[13px] font-bold text-white shadow-[0_4px_18px_rgba(28,105,221,0.38)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#1558c0] hover:shadow-[0_8px_28px_rgba(28,105,221,0.52)]">
                                 Get Started
                                 <ArrowRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-1" />
                               </button>
@@ -510,7 +610,7 @@ export default function HeroSection() {
                   className="h-2 w-2 rounded-full bg-emerald-400"
                   style={{ boxShadow: "0 0 8px rgba(52,211,153,0.7)" }}
                 />
-                <span className="text-[11px] font-medium text-[#6b80a0]">
+                <span className="text-[12px] font-bold text-[#102a43]">
                   Secure &amp; encrypted
                 </span>
               </div>
@@ -518,17 +618,35 @@ export default function HeroSection() {
                 {[...Array(5)].map((_, i) => (
                   <Star key={i} className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
                 ))}
-                <span className="ml-1.5 text-[10.5px] font-semibold text-[#4a5568]">5.0</span>
+                <span className="ml-1.5 text-[12px] font-black text-[#041020]">5.0</span>
               </div>
             </div>
           </motion.div>
 
           {/* Disclaimer below card */}
-          <p className="mt-3 text-center text-[10.5px] leading-relaxed text-sky-100/55 lg:text-left">
+          <p className="mt-3 text-center text-[12px] font-bold leading-relaxed text-[#334e68] lg:text-left">
             Private independent service · Not affiliated with any government body or VFS Global
           </p>
         </motion.aside>
       </motion.div>
+
+      {/* Slider dots — above content layer so clicks work */}
+      <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/80 bg-white/90 px-3 py-2 shadow-[0_8px_24px_rgba(28,105,221,0.12)]">
+        {BACKGROUND_IMAGES.map((_, index) => (
+          <button
+            key={index}
+            type="button"
+            aria-label={`Show background slide ${index + 1}`}
+            aria-current={sliderIndex === index ? "true" : undefined}
+            onClick={() => handleDotClick(index)}
+            className={`cursor-pointer rounded-full transition-all duration-300 ${
+              sliderIndex === index
+                ? "h-2.5 w-8 bg-[#1c69dd] shadow-[0_0_10px_rgba(28,105,221,0.45)]"
+                : "h-2.5 w-2.5 bg-[#1c69dd]/30 hover:bg-[#1c69dd]/55"
+            }`}
+          />
+        ))}
+      </div>
     </section>
   );
 }

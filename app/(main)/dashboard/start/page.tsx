@@ -13,7 +13,7 @@ export default function StartApplicationPage() {
           <span className="font-semibold text-[#0B69B7]">eVisa</span>
           <span className="mt-1 text-xs text-[#486581]">Indian eVisa</span>
         </Link>
-        <Link href="/dashboard/document-audit" className="w-full inline-flex flex-col items-center justify-center rounded-xl border border-[#CFE4F8] bg-[#EAF5FF] px-4 py-6 text-center shadow-sm hover:bg-[#DDEEFF] transition-colors">
+        <Link href="/dashboard/document-audit?start=1" className="w-full inline-flex flex-col items-center justify-center rounded-xl border border-[#CFE4F8] bg-[#EAF5FF] px-4 py-6 text-center shadow-sm hover:bg-[#DDEEFF] transition-colors">
           <Sparkles className="h-8 w-8 text-[#0B69B7] mb-2" />
           <span className="font-semibold text-[#0B69B7]">OCI</span>
           <span className="mt-1 text-xs text-[#486581]">OCI Card</span>

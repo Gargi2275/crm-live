@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { deleteEasyFlyBooking, listEasyFlyBookings, type EasyFlyBooking } from "@/lib/easyfly";
 import toast from "react-hot-toast";
@@ -121,8 +121,11 @@ function StatCard({ label, value, accent }: { label: string; value: string; acce
   );
 }
 
+const getPaymentPending = (booking: EasyFlyBooking) => Math.max(0, booking.amountPaid - booking.amountReceived);
+
 export default function EasyFlyBookingsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { adminUser } = useAdminAuth();
   const [bookings, setBookings] = useState<EasyFlyBooking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,11 +163,34 @@ export default function EasyFlyBookingsPage() {
   }, [adminUser?.role]);
 
   const isAdmin = adminUser?.role === "admin";
+  const accessScope = adminUser?.access_scope ?? "all";
+  const isEasyFlyOnlyScope = accessScope === "easyfly_only";
+  const showFinancialStats = isAdmin || isEasyFlyOnlyScope;
   const baseRows = useMemo(() => {
     if (isAdmin) return bookings;
+
     const isStaff = ["case_processor", "reviewer"].includes(adminUser?.role || "");
     if (!isStaff) return bookings;
-    return bookings.filter((booking) => booking.createdBy === adminUser?.id);
+
+    const now = Date.now();
+    const withinNext72Hours = (dateString: string) => {
+      const target = new Date(dateString).getTime();
+      if (Number.isNaN(target)) return false;
+      const diff = target - now;
+      return diff >= 0 && diff <= 72 * 60 * 60 * 1000;
+    };
+
+    return bookings.filter((booking) => {
+      const row = booking as EasyFlyBooking & { assignedTo?: number | null; paymentPending?: number };
+      const paymentPending = row.paymentPending ?? Math.max(0, booking.amountPaid - booking.amountReceived);
+
+      return (
+        row.assignedTo === adminUser?.id ||
+        paymentPending > 0 ||
+        withinNext72Hours(booking.depDate) ||
+        withinNext72Hours(booking.returnDate)
+      );
+    });
   }, [adminUser?.id, adminUser?.role, bookings, isAdmin]);
 
   const supplierOptions = useMemo(() => Array.from(new Set(baseRows.map((booking) => booking.supplier))).filter(Boolean), [baseRows]);
@@ -172,7 +198,7 @@ export default function EasyFlyBookingsPage() {
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return baseRows.filter((booking) => {
+    const rows = baseRows.filter((booking) => {
       const matchesSearch =
         !q ||
         booking.paxName.toLowerCase().includes(q) ||
@@ -187,7 +213,22 @@ export default function EasyFlyBookingsPage() {
 
       return matchesSearch && matchesSupplier && matchesAirline && matchesFrom && matchesTo;
     });
-  }, [airlineFilter, baseRows, depFrom, depTo, search, supplierFilter]);
+
+    if (searchParams.get("defaultTab") !== "pending") {
+      return rows;
+    }
+
+    return [...rows].sort((a, b) => {
+      const pendingA = getPaymentPending(a);
+      const pendingB = getPaymentPending(b);
+      const aHasPending = pendingA > 0;
+      const bHasPending = pendingB > 0;
+      if (aHasPending && !bHasPending) return -1;
+      if (!aHasPending && bHasPending) return 1;
+      if (aHasPending && bHasPending) return pendingB - pendingA;
+      return 0;
+    });
+  }, [airlineFilter, baseRows, depFrom, depTo, search, searchParams, supplierFilter]);
 
   const stats = useMemo(() => {
     const totalBookings = filteredRows.length;
@@ -224,8 +265,14 @@ export default function EasyFlyBookingsPage() {
               EasyFly Operations
             </div>
             <div>
-              <h1 className="text-[28px] font-heading font-semibold leading-tight text-[#102A43]">EasyFly Bookings</h1>
-              <p className="mt-1 max-w-2xl text-sm text-[#627D98]">Track bookings, review documents, and manage payments with a clean, responsive workspace.</p>
+              <h1 className="text-[28px] font-heading font-semibold leading-tight text-[#102A43]">
+                {isEasyFlyOnlyScope ? "My EasyFly Dashboard" : "EasyFly Bookings"}
+              </h1>
+              <p className="mt-1 max-w-2xl text-sm text-[#627D98]">
+                {isEasyFlyOnlyScope
+                  ? "Your EasyFly workspace — bookings, documents, and payments for cases you manage."
+                  : "Track bookings, review documents, and manage payments with a clean, responsive workspace."}
+              </p>
             </div>
           </div>
 
@@ -240,9 +287,11 @@ export default function EasyFlyBookingsPage() {
         </div>
       </section>
 
-      <section className={`grid gap-3 ${isAdmin ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-5" : "grid-cols-1"}`}>
+      <section
+        className={`grid gap-3 ${showFinancialStats ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-5" : "grid-cols-1 sm:grid-cols-2"}`}
+      >
         <StatCard label="Total Bookings" value={String(stats.totalBookings)} />
-        {isAdmin ? (
+        {showFinancialStats ? (
           <>
             <StatCard label="Amount Paid" value={formatInr(stats.amountPaid)} />
             <StatCard label="Amount Received" value={formatInr(stats.amountReceived)} />
@@ -378,12 +427,14 @@ export default function EasyFlyBookingsPage() {
                 <div className="mt-4 flex flex-wrap gap-2">
                   <ActionButton href={`/admin/easyfly/${booking.id}`} label="View" icon={<Eye className="h-4 w-4" />} />
                   <ActionButton href={`/admin/easyfly/${booking.id}`} label="Edit" icon={<Pencil className="h-4 w-4" />} variant="primary" />
-                  <ActionButton
-                    label={deletingId === booking.id ? "Deleting" : "Delete"}
-                    icon={<Trash2 className="h-4 w-4" />}
-                    variant="danger"
-                    onClick={() => void handleDeleteBooking(booking.id, booking.srNo)}
-                  />
+                  {isAdmin ? (
+                    <ActionButton
+                      label={deletingId === booking.id ? "Deleting" : "Delete"}
+                      icon={<Trash2 className="h-4 w-4" />}
+                      variant="danger"
+                      onClick={() => void handleDeleteBooking(booking.id, booking.srNo)}
+                    />
+                  ) : null}
                 </div>
               </article>
             );
@@ -455,12 +506,14 @@ export default function EasyFlyBookingsPage() {
                       <div className="flex justify-end gap-2">
                         <ActionButton href={`/admin/easyfly/${booking.id}`} label="View" icon={<Eye className="h-4 w-4" />} />
                         <ActionButton href={`/admin/easyfly/${booking.id}`} label="Edit" icon={<Pencil className="h-4 w-4" />} variant="primary" />
-                        <ActionButton
-                          label={deletingId === booking.id ? "Deleting" : "Delete"}
-                          icon={<Trash2 className="h-4 w-4" />}
-                          variant="danger"
-                          onClick={() => void handleDeleteBooking(booking.id, booking.srNo)}
-                        />
+                        {isAdmin ? (
+                          <ActionButton
+                            label={deletingId === booking.id ? "Deleting" : "Delete"}
+                            icon={<Trash2 className="h-4 w-4" />}
+                            variant="danger"
+                            onClick={() => void handleDeleteBooking(booking.id, booking.srNo)}
+                          />
+                        ) : null}
                       </div>
                     </td>
                   </tr>

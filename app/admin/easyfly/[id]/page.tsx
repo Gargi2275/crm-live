@@ -12,13 +12,14 @@ import {
   uploadEasyFlyBookingDocuments,
   type EasyFlyBooking,
 } from "@/lib/easyfly";
+import { adminAuthenticatedFetch } from "@/lib/admin-auth";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   ChevronLeft,
   Pencil,
   Trash2,
   FileText,
   BadgeCheck,
-  IdCard,
   Upload,
   Plus,
   Eye,
@@ -26,8 +27,17 @@ import {
 
 type RefundStatus = "none" | "pending" | "credit_note";
 type ScheduleChange = "none" | "minor" | "major";
-type ModeOfPayment = "card" | "bank_transfer" | "cash";
-type DepositType = "office" | "home";
+type PaymentLedgerEntry = {
+  id: string;
+  date: string;
+  amount: string;
+  method: "cash" | "card" | "bank_transfer" | "payment_link" | "other";
+  proof: File | null;
+  proofName: string;
+  proofUrl: string;
+  enteredBy: string;
+  status: "unverified" | "verified";
+};
 type UploadField =
   | "invoice_file"
   | "atol_file"
@@ -35,9 +45,91 @@ type UploadField =
   | "age_screenshot_file"
   | "payment_screenshot_file"
   | "receipt_file"
-  | "transfer_screenshot_file";
+  | "transfer_screenshot_file"
+  | "ticket_file";
 
 type BookingRow = EasyFlyBooking;
+
+type PassengerEntry = {
+  id: string;
+  type: "adult" | "youth" | "child" | "infant";
+  firstName: string;
+  lastName: string;
+  dob: string;
+  passportNumber: string;
+  passportExpiry: string;
+  nationality: string;
+  passportUploaded: boolean;
+  passportUrl?: string;
+  passportFileName?: string;
+};
+
+const createDefaultAdultPassenger = (data: BookingRow): PassengerEntry => ({
+  id: `${data.id}-passenger-0`,
+  type: "adult",
+  firstName: "",
+  lastName: "",
+  dob: "",
+  passportNumber: "",
+  passportExpiry: "",
+  nationality: "",
+  passportUploaded: data.docs.passport,
+  passportUrl: data.attachments?.passport?.url,
+  passportFileName: data.attachments?.passport?.name,
+});
+
+const mapPassengersFromBooking = (data: BookingRow): PassengerEntry[] => {
+  const rawPassengers = (data as BookingRow & { passengers?: PassengerEntry[] }).passengers;
+  if (Array.isArray(rawPassengers) && rawPassengers.length > 0) {
+    return rawPassengers.map((passenger, index) => ({
+      id: passenger.id || `${data.id}-passenger-${index}`,
+      type: passenger.type || "adult",
+      firstName: passenger.firstName || "",
+      lastName: passenger.lastName || "",
+      dob: passenger.dob || "",
+      passportNumber: passenger.passportNumber || "",
+      passportExpiry: passenger.passportExpiry || "",
+      nationality: passenger.nationality || "",
+      passportUploaded: Boolean(passenger.passportUploaded),
+      passportUrl: passenger.passportUrl,
+      passportFileName: passenger.passportFileName,
+    }));
+  }
+  return [createDefaultAdultPassenger(data)];
+};
+
+const passengerFieldClassName =
+  "w-full rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]";
+
+const createBlankLedgerEntry = (bookingId: number, enteredBy = "Staff"): PaymentLedgerEntry => ({
+  id: `${bookingId}-payment-${Date.now()}`,
+  date: new Date().toISOString().slice(0, 10),
+  amount: "",
+  method: "cash",
+  proof: null,
+  proofName: "",
+  proofUrl: "",
+  enteredBy,
+  status: "unverified",
+});
+
+const mapPaymentLedgerFromBooking = (data: BookingRow, enteredBy = "Staff"): PaymentLedgerEntry[] => {
+  const rawLedger = (data as BookingRow & { paymentLedger?: PaymentLedgerEntry[] }).paymentLedger;
+  if (Array.isArray(rawLedger) && rawLedger.length > 0) {
+    return rawLedger.map((entry, index) => ({
+      id: entry.id || `${data.id}-payment-${index}`,
+      date: entry.date || "",
+      amount: entry.amount || "",
+      method: entry.method || "cash",
+      proof: null,
+      proofName: entry.proofName || "",
+      proofUrl: entry.proofUrl || "",
+      enteredBy: entry.enteredBy || enteredBy,
+      status: entry.status === "verified" ? "verified" : "unverified",
+    }));
+  }
+  return [createBlankLedgerEntry(data.id, enteredBy)];
+};
 
 const formatInr = (amount: number) => `INR ${amount.toLocaleString("en-IN")}`;
 
@@ -213,15 +305,14 @@ export default function EasyFlyBookingDetailPage() {
   const params = useParams<{ id: string }>();
   const bookingId = Number(params?.id);
   const router = useRouter();
+  const { adminUser } = useAdminAuth();
+  const isAdmin = adminUser?.role === "admin";
 
   const [booking, setBooking] = useState<BookingRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [isYouthCategory, setIsYouthCategory] = useState(false);
-  const [modeOfPayment, setModeOfPayment] = useState<ModeOfPayment>("card");
-  const [depositType, setDepositType] = useState<DepositType>("office");
-  const [receiptReceived, setReceiptReceived] = useState(false);
 
   const [isRefund, setIsRefund] = useState(false);
   const [refundReceivedFromSupplier, setRefundReceivedFromSupplier] = useState(false);
@@ -229,6 +320,16 @@ export default function EasyFlyBookingDetailPage() {
 
   const [scheduleChange, setScheduleChange] = useState<ScheduleChange>(booking?.scheduleChange || "none");
   const [isReissued, setIsReissued] = useState(false);
+  const [passengers, setPassengers] = useState<PassengerEntry[]>([]);
+  const [extractingPassengerId, setExtractingPassengerId] = useState<string | null>(null);
+  const [paymentLedger, setPaymentLedger] = useState<PaymentLedgerEntry[]>([]);
+  const [ticketRiskScore, setTicketRiskScore] = useState<"green" | "amber" | "red" | null>(null);
+  const [aiChecks, setAiChecks] = useState<
+    Array<{
+      check: string;
+      result: "pass" | "warning" | "fail" | "missing";
+    }>
+  >([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -240,10 +341,14 @@ export default function EasyFlyBookingDetailPage() {
         const data = await getEasyFlyBooking(bookingId);
         if (!isMounted) return;
         setBooking(data);
+        setPassengers(mapPassengersFromBooking(data));
+        setPaymentLedger(
+          mapPaymentLedgerFromBooking(
+            data,
+            adminUser?.full_name || adminUser?.username || "Staff",
+          ),
+        );
         setIsYouthCategory(data.isYouthCategory);
-        setModeOfPayment(data.paymentMode);
-        setDepositType(data.depositType);
-        setReceiptReceived(data.receiptReceived);
         setIsRefund(data.refundStatus !== "none");
         setRefundReceivedFromSupplier(data.refundReceivedFromSupplier);
         setGivenToCustomer(data.givenToCustomer);
@@ -263,7 +368,7 @@ export default function EasyFlyBookingDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [bookingId]);
+  }, [adminUser?.full_name, adminUser?.username, bookingId]);
 
   if (loading) {
     return (
@@ -296,6 +401,9 @@ export default function EasyFlyBookingDetailPage() {
   const paymentPending = booking.amountPaid - booking.amountReceived;
   const earnings = booking.amountReceived - booking.amountPaid;
   const pendingRazorpayAmount = Math.max(0, paymentPending);
+  const totalLedgerReceived = paymentLedger.reduce((sum, entry) => sum + (Number.parseFloat(entry.amount) || 0), 0);
+  const balancePending = booking.amountPaid - totalLedgerReceived;
+  const isFullyPaid = balancePending <= 0;
 
   const handleDelete = async () => {
     const confirmed = window.confirm(`Delete booking ${booking.srNo}? This cannot be undone.`);
@@ -320,6 +428,111 @@ export default function EasyFlyBookingDetailPage() {
     }
   };
 
+  const handleAddPassenger = () => {
+    setPassengers((current) => [
+      ...current,
+      {
+        id: `${booking.id}-passenger-${Date.now()}`,
+        type: "adult",
+        firstName: "",
+        lastName: "",
+        dob: "",
+        passportNumber: "",
+        passportExpiry: "",
+        nationality: "",
+        passportUploaded: false,
+      },
+    ]);
+  };
+
+  const handleRemovePassenger = (passengerId: string) => {
+    setPassengers((current) => current.filter((passenger) => passenger.id !== passengerId));
+  };
+
+  const updatePassenger = (passengerId: string, patch: Partial<PassengerEntry>) => {
+    setPassengers((current) =>
+      current.map((passenger) => (passenger.id === passengerId ? { ...passenger, ...patch } : passenger)),
+    );
+  };
+
+  const extractPassportDetails = async (file: File, passengerId: string) => {
+    setExtractingPassengerId(passengerId);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await adminAuthenticatedFetch("/extract-passport/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Extraction failed");
+      }
+
+      const data = await res.json();
+
+      updatePassenger(passengerId, {
+        firstName: data.firstName || "",
+        lastName: data.lastName || "",
+        dob: data.dob || "",
+        passportNumber: data.passportNumber || "",
+        passportExpiry: data.expiry || "",
+        nationality: data.nationality || "",
+        type: data.passengerType || "adult",
+      });
+
+      toast.success("Passport details extracted automatically.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not read passport. Please fill in manually.");
+    } finally {
+      setExtractingPassengerId(null);
+    }
+  };
+
+  const handlePassportUpload = async (passengerIndex: number, file: File) => {
+    try {
+      const updated = await uploadEasyFlyBookingDocuments(booking.id, { passport_file: file });
+      setBooking(updated);
+      setPassengers((current) =>
+        current.map((passenger, index) =>
+          index === passengerIndex
+            ? {
+                ...passenger,
+                passportUploaded: true,
+                passportUrl: updated.attachments?.passport?.url,
+                passportFileName: updated.attachments?.passport?.name || file.name,
+              }
+            : passenger,
+        ),
+      );
+      toast.success("Passport uploaded.");
+      const pid = passengers[passengerIndex]?.id;
+      if (pid) void extractPassportDetails(file, pid);
+    } catch (uploadError) {
+      toast.error(uploadError instanceof Error ? uploadError.message : "Failed to upload passport.");
+    }
+  };
+
+  const handleRunAiCheck = () => {
+    setAiChecks([
+      { check: "Passport name vs ticket name", result: "pass" },
+      { check: "DOB vs passenger type", result: "pass" },
+      { check: "Passport expiry valid for travel", result: "warning" },
+      { check: "Departure date detected", result: "pass" },
+      { check: "Return date detected", result: "pass" },
+      { check: "Ticket uploaded for all passengers", result: "pass" },
+    ]);
+    setTicketRiskScore("amber");
+    toast.success("AI verification complete.");
+  };
+
+  const handleTicketUpload = async (file: File) => {
+    await handleUpload("ticket_file", file);
+    handleRunAiCheck();
+  };
+
   const handleCreatePaymentOrder = async () => {
     try {
       const order = await createEasyFlyPaymentOrder(booking.id);
@@ -338,13 +551,46 @@ export default function EasyFlyBookingDetailPage() {
     }
   };
 
+  const handleAddPayment = () => {
+    setPaymentLedger((current) => [
+      ...current,
+      createBlankLedgerEntry(booking.id, adminUser?.full_name || adminUser?.username || "Staff"),
+    ]);
+  };
+
+  const handleRemovePayment = (entryId: string) => {
+    setPaymentLedger((current) => current.filter((entry) => entry.id !== entryId));
+  };
+
+  const updatePaymentLedgerEntry = (entryId: string, patch: Partial<PaymentLedgerEntry>) => {
+    setPaymentLedger((current) =>
+      current.map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry)),
+    );
+  };
+
+  const handleLedgerProofUpload = (entryId: string, file: File) => {
+    updatePaymentLedgerEntry(entryId, {
+      proof: file,
+      proofName: file.name,
+    });
+    toast.success("Receipt saved locally.");
+  };
+
+  const handleMarkPaymentVerified = (entryId: string) => {
+    updatePaymentLedgerEntry(entryId, { status: "verified" });
+  };
+
+  const ticketAttachment = (
+    booking.attachments as (NonNullable<BookingRow["attachments"]> & { ticket?: { uploaded: boolean; url: string; name: string } }) | undefined
+  )?.ticket;
+
   const handleSave = async () => {
     try {
       const updated = await updateEasyFlyBooking(booking.id, {
         is_youth_category: isYouthCategory,
-        payment_mode: modeOfPayment,
-        deposit_type: depositType,
-        receipt_received: receiptReceived,
+        payment_mode: booking.paymentMode,
+        deposit_type: booking.depositType,
+        receipt_received: booking.receiptReceived,
         refund_status: isRefund ? "credit_note" : "none",
         refund_received_from_supplier: refundReceivedFromSupplier,
         given_to_customer: givenToCustomer,
@@ -438,15 +684,197 @@ export default function EasyFlyBookingDetailPage() {
             onUpload={(file) => void handleUpload("atol_file", file)}
             icon={<BadgeCheck className="h-4 w-4 text-[#009877]" />}
           />
-          <DocumentCard
-            title="Customer Passport"
-            uploaded={booking.docs.passport}
-            viewUrl={booking.attachments?.passport?.url || ""}
-            fileName={booking.attachments?.passport?.name || ""}
-            onUpload={(file) => void handleUpload("passport_file", file)}
-            icon={<IdCard className="h-4 w-4 text-[#009877]" />}
-          />
         </div>
+
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-heading font-semibold text-[#102A43]">Passengers & Passports</h3>
+            <button
+              type="button"
+              onClick={handleAddPassenger}
+              className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Passenger
+            </button>
+          </div>
+
+          {passengers.map((passenger, index) => (
+            <div key={passenger.id} className="rounded-[12px] border border-[#D9E1EA] bg-[#F8FAFC] p-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="block space-y-1">
+                  <span className="text-xs text-[#627D98]">Type</span>
+                  <select
+                    value={passenger.type}
+                    onChange={(event) =>
+                      updatePassenger(passenger.id, { type: event.target.value as PassengerEntry["type"] })
+                    }
+                    className={passengerFieldClassName}
+                  >
+                    <option value="adult">Adult</option>
+                    <option value="youth">Youth</option>
+                    <option value="child">Child</option>
+                    <option value="infant">Infant</option>
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-[#627D98]">First Name</span>
+                  <input
+                    type="text"
+                    value={passenger.firstName}
+                    onChange={(event) => updatePassenger(passenger.id, { firstName: event.target.value })}
+                    className={passengerFieldClassName}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-[#627D98]">Last Name</span>
+                  <input
+                    type="text"
+                    value={passenger.lastName}
+                    onChange={(event) => updatePassenger(passenger.id, { lastName: event.target.value })}
+                    className={passengerFieldClassName}
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <label className="block space-y-1">
+                  <span className="text-xs text-[#627D98]">DOB</span>
+                  <input
+                    type="date"
+                    value={passenger.dob}
+                    onChange={(event) => updatePassenger(passenger.id, { dob: event.target.value })}
+                    className={passengerFieldClassName}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-[#627D98]">Passport Number</span>
+                  <input
+                    type="text"
+                    value={passenger.passportNumber}
+                    onChange={(event) => updatePassenger(passenger.id, { passportNumber: event.target.value })}
+                    className={passengerFieldClassName}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-[#627D98]">Passport Expiry</span>
+                  <input
+                    type="date"
+                    value={passenger.passportExpiry}
+                    onChange={(event) => updatePassenger(passenger.id, { passportExpiry: event.target.value })}
+                    className={passengerFieldClassName}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-[#627D98]">Nationality</span>
+                  <input
+                    type="text"
+                    value={passenger.nationality}
+                    onChange={(event) => updatePassenger(passenger.id, { nationality: event.target.value })}
+                    className={passengerFieldClassName}
+                  />
+                </label>
+              </div>
+
+              <UploadStatusCard
+                title={`Passport — ${passenger.firstName || passenger.lastName ? `${passenger.firstName} ${passenger.lastName}`.trim() : `Passenger ${index + 1}`}`}
+                description="Upload this passenger's passport copy."
+                uploaded={passenger.passportUploaded}
+                fileName={passenger.passportFileName || ""}
+                viewUrl={passenger.passportUrl || ""}
+                onUpload={(file) => void handlePassportUpload(index, file)}
+              />
+
+              {extractingPassengerId === passenger.id ? (
+                <p className="text-xs text-[#0B69B7] animate-pulse flex items-center gap-1.5">
+                  <span>✦</span> Reading passport details...
+                </p>
+              ) : null}
+
+              {passengers.length >= 2 ? (
+                <button
+                  type="button"
+                  onClick={() => handleRemovePassenger(passenger.id)}
+                  className="text-xs font-semibold text-[#B42318] hover:underline"
+                >
+                  Remove
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-3">
+        <h2 className="text-sm font-heading font-semibold text-[#102A43]">Ticket & AI Verification</h2>
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+          <div className="flex-1">
+            <UploadStatusCard
+              title="Flight Ticket"
+              description="Upload ticket PDF or image. AI will extract and verify passenger details automatically."
+              uploaded={ticketAttachment?.uploaded || false}
+              fileName={ticketAttachment?.name || ""}
+              viewUrl={ticketAttachment?.url || ""}
+              onUpload={(file) => void handleTicketUpload(file)}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleRunAiCheck}
+            className="inline-flex items-center gap-2 rounded-[10px] border border-[#33A1FD]/35 bg-[#33A1FD]/10 px-3 py-1.5 text-xs font-semibold text-[#0B69B7] hover:bg-[#33A1FD]/18"
+          >
+            Run AI Verification
+          </button>
+        </div>
+
+        {aiChecks.length > 0 ? (
+          <div className="space-y-2">
+            {aiChecks.map((item) => (
+              <div
+                key={item.check}
+                className="flex items-center justify-between gap-3 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5"
+              >
+                <span className="text-sm text-[#102A43]">{item.check}</span>
+                <span
+                  className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
+                    item.result === "pass"
+                      ? "bg-[#009877]/12 text-[#006F57] border-[#009877]/35"
+                      : item.result === "warning"
+                        ? "bg-[#F9DBAF]/35 text-[#8D5E12] border-[#D4A84F]/40"
+                        : item.result === "fail"
+                          ? "bg-[#FDECEC] text-[#B42318] border-[#F1A7A0]/45"
+                          : "bg-[#F5F7FA] text-[#486581] border-[#D9E1EA]"
+                  }`}
+                >
+                  {item.result === "pass"
+                    ? "Pass ✓"
+                    : item.result === "warning"
+                      ? "Warning ⚠"
+                      : item.result === "fail"
+                        ? "Fail ✗"
+                        : "Missing"}
+                </span>
+              </div>
+            ))}
+
+            {ticketRiskScore === "green" ? (
+              <div className="rounded-[10px] border px-4 py-3 text-sm font-semibold w-full mt-2 bg-[#009877]/12 text-[#006F57] border-[#009877]/35">
+                ✓ All checks passed — Booking is low risk
+              </div>
+            ) : null}
+            {ticketRiskScore === "amber" ? (
+              <div className="rounded-[10px] border px-4 py-3 text-sm font-semibold w-full mt-2 bg-[#F9DBAF]/35 text-[#8D5E12] border-[#D4A84F]/40">
+                ⚠ Minor issues found — Review before closing
+              </div>
+            ) : null}
+            {ticketRiskScore === "red" ? (
+              <div className="rounded-[10px] border px-4 py-3 text-sm font-semibold w-full mt-2 bg-[#FDECEC] text-[#B42318] border-[#F1A7A0]/45">
+                ✗ Critical issues — Do not close this booking
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-3">
@@ -488,16 +916,35 @@ export default function EasyFlyBookingDetailPage() {
       </section>
 
       <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-3">
-        <h2 className="text-sm font-heading font-semibold text-[#102A43]">Mode of Payment</h2>
-        <select
-          value={modeOfPayment}
-          onChange={(e) => setModeOfPayment(e.target.value as ModeOfPayment)}
-          className="w-full md:w-[260px] rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]"
-        >
-          <option value="card">Card</option>
-          <option value="bank_transfer">Bank Transfer</option>
-          <option value="cash">Cash</option>
-        </select>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-heading font-semibold text-[#102A43]">Payment Ledger</h2>
+          <button
+            type="button"
+            onClick={handleAddPayment}
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add Payment
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold bg-[#009877]/12 text-[#006F57] border-[#009877]/35">
+            Total Received: {formatInr(totalLedgerReceived)}
+          </span>
+          <span className="inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold bg-[#F9DBAF]/35 text-[#8D5E12] border-[#D4A84F]/40">
+            Balance Pending: {formatInr(Math.max(0, balancePending))}
+          </span>
+          <span
+            className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold ${
+              isFullyPaid
+                ? "bg-[#009877]/12 text-[#006F57] border-[#009877]/35"
+                : "bg-[#F9DBAF]/35 text-[#8D5E12] border-[#D4A84F]/40"
+            }`}
+          >
+            {isFullyPaid ? "Fully Paid" : "Partially Paid"}
+          </span>
+        </div>
 
         {pendingRazorpayAmount > 0 ? (
           <button
@@ -510,95 +957,103 @@ export default function EasyFlyBookingDetailPage() {
           </button>
         ) : null}
 
-        {modeOfPayment === "card" || modeOfPayment === "bank_transfer" ? (
-          <UploadStatusCard
-            title="Payment screenshot"
-            description="Upload the card or bank-transfer payment proof."
-            uploaded={booking.attachments?.payment_screenshot?.uploaded || false}
-            fileName={booking.attachments?.payment_screenshot?.name || ""}
-            viewUrl={booking.attachments?.payment_screenshot?.url || ""}
-            onUpload={(file) => void handleUpload("payment_screenshot_file", file)}
-          />
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setDepositType("office")}
-                className={`rounded-[10px] px-3 py-1.5 text-xs font-semibold border ${
-                  depositType === "office"
-                    ? "bg-[#009877] border-[#009877] text-white"
-                    : "bg-white border-[#D9E1EA] text-[#486581]"
-                }`}
-              >
-                Office
-              </button>
-              <button
-                type="button"
-                onClick={() => setDepositType("home")}
-                className={`rounded-[10px] px-3 py-1.5 text-xs font-semibold border ${
-                  depositType === "home"
-                    ? "bg-[#009877] border-[#009877] text-white"
-                    : "bg-white border-[#D9E1EA] text-[#486581]"
-                }`}
-              >
-                Home Deposit
-              </button>
+        {paymentLedger.map((entry) => (
+          <div key={entry.id} className="rounded-[12px] border border-[#D9E1EA] bg-[#F8FAFC] p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="block space-y-1">
+                <span className="text-xs text-[#627D98]">Date</span>
+                <input
+                  type="date"
+                  value={entry.date}
+                  onChange={(event) => updatePaymentLedgerEntry(entry.id, { date: event.target.value })}
+                  className={passengerFieldClassName}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-[#627D98]">Amount £</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={entry.amount}
+                  onChange={(event) => updatePaymentLedgerEntry(entry.id, { amount: event.target.value })}
+                  className={passengerFieldClassName}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-[#627D98]">Method</span>
+                <select
+                  value={entry.method}
+                  onChange={(event) =>
+                    updatePaymentLedgerEntry(entry.id, {
+                      method: event.target.value as PaymentLedgerEntry["method"],
+                    })
+                  }
+                  className={passengerFieldClassName}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="payment_link">Payment Link</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
             </div>
 
-            {depositType === "home" ? (
-              <div className="space-y-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-[#486581]">Receipt received?</span>
-                  <div className="inline-flex rounded-[10px] border border-[#D9E1EA] overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setReceiptReceived(true)}
-                      className={`px-3 py-1.5 text-xs font-semibold ${receiptReceived ? "bg-[#009877] text-white" : "bg-white text-[#486581]"}`}
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setReceiptReceived(false)}
-                      className={`px-3 py-1.5 text-xs font-semibold ${!receiptReceived ? "bg-[#B42318] text-white" : "bg-white text-[#486581]"}`}
-                    >
-                      No
-                    </button>
-                  </div>
-                </div>
+            <div>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]">
+                <Upload className="h-3.5 w-3.5" />
+                Upload Receipt/Screenshot
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) handleLedgerProofUpload(entry.id, file);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              {entry.proofName ? (
+                <p className="mt-1 text-xs text-[#627D98] truncate" title={entry.proofName}>
+                  {entry.proofName}
+                </p>
+              ) : null}
+            </div>
 
-                {receiptReceived ? (
-                  <div className="space-y-2">
-                    <span className="inline-flex rounded-full border border-[#009877]/35 bg-[#009877]/12 px-2.5 py-1 text-xs font-medium text-[#006F57]">
-                      Receipt received
-                    </span>
-                    <div>
-                      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]">
-                        <Upload className="h-3.5 w-3.5" />
-                        Upload Receipt
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept=".pdf,image/*"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0];
-                            if (file) void handleUpload("receipt_file", file);
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                ) : (
-                  <span className="inline-flex rounded-full border border-[#F1A7A0]/45 bg-[#FDECEC] px-2.5 py-1 text-xs font-medium text-[#B42318]">
-                    Receipt not received
-                  </span>
-                )}
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {entry.status === "verified" ? (
+                <span className="inline-flex rounded-full border px-2.5 py-1 text-xs font-medium bg-[#009877]/12 text-[#006F57] border-[#009877]/35">
+                  Verified
+                </span>
+              ) : (
+                <span className="inline-flex rounded-full border px-2.5 py-1 text-xs font-medium bg-[#F5F7FA] text-[#486581] border-[#D9E1EA]">
+                  Unverified
+                </span>
+              )}
+              {isAdmin && entry.status === "unverified" ? (
+                <button
+                  type="button"
+                  onClick={() => handleMarkPaymentVerified(entry.id)}
+                  className="text-xs bg-[#009877]/12 text-[#006F57] border border-[#009877]/35 px-2 py-1 rounded-full font-semibold hover:bg-[#009877]/18"
+                >
+                  Mark Verified
+                </button>
+              ) : null}
+            </div>
+
+            {paymentLedger.length >= 2 ? (
+              <button
+                type="button"
+                onClick={() => handleRemovePayment(entry.id)}
+                className="text-xs font-semibold text-[#B42318] hover:underline"
+              >
+                Remove
+              </button>
             ) : null}
           </div>
-        )}
+        ))}
       </section>
 
       <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-3">

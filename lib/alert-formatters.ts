@@ -1,6 +1,9 @@
 const ALERT_TYPE_LABEL_MAP: Record<string, string> = {
   changed_status: "Stage Change",
   login: "Staff Login",
+  login_success: "Staff Login",
+  login_failed: "Login Failed",
+  account_locked: "Account Locked",
   admin_alert_status_updated: "Alert Update",
   payment_received: "Payment",
   document_uploaded: "Document Upload",
@@ -11,6 +14,11 @@ const ALERT_TYPE_LABEL_MAP: Record<string, string> = {
   follow_up_required: "Follow Up Required",
   lead_converted: "Lead Converted",
   staff_idle: "Staff Idle",
+  task_assigned: "Task Assigned",
+  task_activity: "Task Update",
+  form_review_pending: "Form Review",
+  submission_ready: "Submission",
+  submitted_monitoring: "Submitted — Monitor Result",
 };
 
 const ALERT_TYPE_SEVERITY_MAP: Record<string, "CRITICAL" | "MEDIUM" | "LOW"> = {
@@ -18,6 +26,8 @@ const ALERT_TYPE_SEVERITY_MAP: Record<string, "CRITICAL" | "MEDIUM" | "LOW"> = {
   follow_up_required: "MEDIUM",
   lead_converted: "LOW",
   staff_idle: "MEDIUM",
+  task_assigned: "MEDIUM",
+  sla_breach: "CRITICAL",
 };
 
 const ALERT_TYPE_BADGE_CLASS_MAP: Record<string, string> = {
@@ -25,6 +35,8 @@ const ALERT_TYPE_BADGE_CLASS_MAP: Record<string, string> = {
   follow_up_required: "bg-amber-100 text-amber-700 border border-amber-200",
   lead_converted: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   staff_idle: "bg-orange-100 text-orange-700 border border-orange-200",
+  task_assigned: "bg-blue-100 text-blue-700 border border-blue-200",
+  task_activity: "bg-slate-100 text-slate-700 border border-slate-200",
 };
 
 export function getAlertTypeLabel(actionType?: string | null): string {

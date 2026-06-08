@@ -9,6 +9,15 @@ import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
+  getAdminMyPermissions,
+  getConsoleDashboardLabel,
+  getConsoleHomePath,
+  hasEasyFlyConsoleAccess,
+  hasFlyOciConsoleAccess,
+  hasMyActiveCasesAccess,
+} from "@/lib/admin-auth";
+import { canAccessAdminRoute } from "@/lib/admin-console-nav";
+import {
   BarChart3,
   Briefcase,
   Users,
@@ -31,8 +40,10 @@ import {
   Mail,
   Activity,
   UserCog,
+  ClipboardList,
 } from "lucide-react";
 
+const STAFF_CONSOLE_ROLES = new Set(["case_processor", "reviewer", "support_agent"]);
 
 export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCollapsed: (val: boolean) => void }) {
   const pathname = usePathname();
@@ -45,6 +56,14 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
   const triggerRef = useRef<HTMLDivElement | null>(null);
   const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
   const [portalPos, setPortalPos] = useState<{ left: number; top: number } | null>(null);
+  const [modulePermissions, setModulePermissions] = useState<Record<string, boolean> | null>(null);
+
+  useEffect(() => {
+    if (!adminUser?.id) return;
+    void getAdminMyPermissions()
+      .then((data) => setModulePermissions(data.permissions || {}))
+      .catch(() => setModulePermissions(null));
+  }, [adminUser?.id, adminUser?.role]);
 
   useEffect(() => {
     setEasyFlyOpen(accessScope === "easyfly_only" || Boolean(pathname?.startsWith("/admin/easyfly")));
@@ -62,12 +81,20 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
   const easyFlySubItems = [
     { name: "Bookings", href: "/admin/easyfly", icon: List },
     { name: "Schedule Changes", href: "/admin/easyfly/schedule", icon: CalendarClock },
+    { name: "Travel", href: "/admin/easyfly/travel", icon: Plane },
     ...(role === "admin" ? [{ name: "Revenue", href: "/admin/easyfly/revenue", icon: TrendingUp }] : []),
   ];
 
+  const isStaffConsoleRole = STAFF_CONSOLE_ROLES.has(role || "");
+  const canViewMyCases = hasMyActiveCasesAccess(role);
+  const dashboardHref = getConsoleHomePath(accessScope);
+  const dashboardLabel = getConsoleDashboardLabel(accessScope);
+
   const baseMenuItems = [
-    { name: "Dashboard", href: "/admin", icon: BarChart3 },
+    { name: dashboardLabel, href: dashboardHref, icon: BarChart3 },
+    ...(canViewMyCases ? [{ name: "My Active Cases", href: "/admin/my-cases", icon: ClipboardList }] : []),
     { name: "Workload", href: "/admin/workload", icon: UserCog },
+    { name: "Team Performance", href: "/admin/team-performance", icon: Activity },
     { name: "Staff Management", href: "/admin/staff", icon: Briefcase },
     { name: "Roles", href: "/admin/roles", icon: ShieldCheck },
     { name: "Permissions", href: "/admin/permissions", icon: KeyRound },
@@ -77,7 +104,6 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
     { name: "Logs Module", href: "/admin/logs", icon: Logs },
     { name: "Notifications", href: "/admin/notifications", icon: Bell },
     { name: "Email Module", href: "/admin/email", icon: Mail },
-    { name: "Team Performance", href: "/admin/team-performance", icon: Activity },
     { name: "NDR / SLA Alerts", href: "/admin/alerts", icon: TriangleAlert },
     { name: "Team Management", href: "/admin/team", icon: Users },
     { name: "Remittance / Revenue", href: "/admin/revenue", icon: Landmark },
@@ -88,27 +114,27 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
 
   const menuItems = baseMenuItems.filter((item) => {
     if (accessScope === "easyfly_only") {
-      return item.href === "/admin/easyfly";
+      if (item.name === "EasyFly Bookings") return false;
+      return item.href === dashboardHref || item.href.startsWith("/admin/easyfly");
     }
 
-    if (accessScope === "exclude_easyfly") {
-      if (item.href === "/admin/easyfly") return false;
+    if (!hasEasyFlyConsoleAccess(accessScope) && item.href.startsWith("/admin/easyfly")) {
+      return false;
     }
 
-    if (role === "admin") return true;
-    if (role === "ops_manager") {
-      return !["/admin/revenue", "/admin/billing", "/admin/staff", "/j/staff"].includes(item.href);
+    if (!hasFlyOciConsoleAccess(accessScope) && (item.href === "/admin" || item.href.startsWith("/admin/my-cases"))) {
+      return false;
     }
-    if (role === "case_processor") {
-      return ["/admin", "/admin/kanban", "/admin/easyfly"].includes(item.href);
+
+    if ((role || "").toLowerCase() === "admin") return true;
+    if (item.href === dashboardHref) return true;
+    if (!modulePermissions) {
+      return item.href === dashboardHref || (canViewMyCases && item.href === "/admin/my-cases");
     }
-    if (role === "reviewer") {
-      return ["/admin", "/admin/kanban", "/admin/reports", "/admin/easyfly"].includes(item.href);
+    if (item.href === "/admin/my-cases") {
+      return canViewMyCases && canAccessAdminRoute(item.href, modulePermissions, role);
     }
-    if (role === "support_agent") {
-      return ["/admin"].includes(item.href);
-    }
-    return item.href === "/admin";
+    return canAccessAdminRoute(item.href, modulePermissions, role);
   });
 
   return (
@@ -135,7 +161,10 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean, setCo
       {/* Navigation Links */}
       <nav className="flex-1 py-4 overflow-y-auto px-2 space-y-1 scrollbar-none">
         {menuItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/admin" && pathname?.startsWith(item.href));
+          const isActive =
+            pathname === item.href ||
+            (item.href !== dashboardHref && item.href !== "/admin" && pathname?.startsWith(item.href)) ||
+            (item.href === dashboardHref && (pathname === "/admin" || pathname === "/admin/easyfly"));
           // EasyFly dropdown logic
           if (item.href === "/admin/easyfly") {
             if (accessScope === "exclude_easyfly") return null;

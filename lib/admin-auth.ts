@@ -1,7 +1,74 @@
 import { API_BASE_URL } from "./config";
 
-export type StaffRole = "admin" | "ops_manager" | "case_processor" | "reviewer" | "support_agent";
+export type StaffRole = "admin" | "ops_manager" | "case_processor" | "reviewer" | "support_agent" | (string & {});
 export type AccessScope = "all" | "easyfly_only" | "exclude_easyfly";
+
+/** FlyOCI console (cases, kanban, OCI revenue) — `all` or FlyOCI-only scope. */
+export function hasFlyOciConsoleAccess(scope: AccessScope = "all"): boolean {
+  return scope === "all" || scope === "exclude_easyfly";
+}
+
+/** EasyFly console (bookings) — `all` or EasyFly-only scope. */
+export function hasEasyFlyConsoleAccess(scope: AccessScope = "all"): boolean {
+  return scope === "all" || scope === "easyfly_only";
+}
+
+/** Default landing route after login, by access scope. */
+export function getConsoleHomePath(scope: AccessScope = "all"): string {
+  return scope === "easyfly_only" ? "/admin/easyfly" : "/admin";
+}
+
+export function getConsoleDashboardLabel(scope: AccessScope = "all"): string {
+  return scope === "easyfly_only" ? "EasyFly Dashboard" : "Dashboard";
+}
+
+/** Roles that see only their own attributed revenue on the dashboard (not company-wide). */
+export const STAFF_OWN_REVENUE_ROLES: readonly StaffRole[] = [
+  "case_processor",
+  "reviewer",
+  "support_agent",
+];
+
+/** Roles that can open My Active Cases (assigned tasks). */
+export const MY_ACTIVE_CASES_ROLES: readonly StaffRole[] = [
+  "case_processor",
+  "reviewer",
+  "support_agent",
+  "ops_manager",
+];
+
+export function hasMyActiveCasesAccess(role?: StaffRole | string | null): boolean {
+  return Boolean(role && MY_ACTIVE_CASES_ROLES.includes(role as StaffRole));
+}
+
+export function staffIdsMatch(a: unknown, b: unknown): boolean {
+  if (a == null || b == null) return false;
+  return Number(a) === Number(b);
+}
+
+export function isAdminStaffRole(role?: string | null): boolean {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "admin";
+}
+
+export function isStaffOwnRevenueDashboard(
+  data: AdminDashboardOverview | null | undefined,
+  role?: StaffRole | string | null,
+): boolean {
+  if (data?.view_mode === "staff") return true;
+  return Boolean(role && STAFF_OWN_REVENUE_ROLES.includes(role as StaffRole));
+}
+
+export interface StaffRevenueKpi {
+  revenue_today: number;
+  revenue_30d: number;
+  revenue_total: number;
+  order_revenue: number;
+  audit_revenue: number;
+  full_revenue: number;
+  paid_cases_total: number;
+  paid_cases_30d: number;
+}
 
 export interface AdminStaffUser {
   id: number;
@@ -19,23 +86,38 @@ export interface AdminStaffUser {
 }
 
 export interface AdminDashboardOverview {
+  view_mode?: "staff" | "admin";
+  my_revenue?: {
+    kpi_snapshot: StaffRevenueKpi;
+    daily_revenue: Array<{ day: string; expected: number; actual: number }>;
+    monthly_revenue: Array<{ month: string; revenue: number }>;
+    service_revenue_breakdown: Array<{ name: string; value: number; amount?: number }>;
+    attribution_note?: string;
+  };
   kpi_snapshot: {
-    total_leads: number;
-    todays_leads: number;
-    converted: number;
-    conversion: string;
+    total_leads?: number;
+    todays_leads?: number;
+    converted?: number;
+    conversion?: string;
     revenue_today: number;
+    revenue_30d?: number;
+    revenue_total?: number;
     order_revenue_today?: number;
     audit_revenue_today?: number;
     full_payment_revenue_today?: number;
-    pending_payments: number;
-    avg_ticket_size: number;
+    order_revenue?: number;
+    audit_revenue?: number;
+    full_revenue?: number;
+    paid_cases_total?: number;
+    paid_cases_30d?: number;
+    pending_payments?: number;
+    avg_ticket_size?: number;
   };
   daily_revenue: Array<{ day: string; expected: number; actual: number }>;
   monthly_revenue: Array<{ month: string; revenue: number }>;
   service_revenue_breakdown: Array<{ name: string; value: number; amount?: number }>;
   pipeline_overview: Array<{ stage: string; openCases: number; avgAge: string; breached: number }>;
-  health_metrics: {
+  health_metrics?: {
     total_leads: number;
     leads_converted: number;
     conversion: string;
@@ -47,12 +129,20 @@ export interface AdminDashboardOverview {
     avg_processing_time: string;
     customer_satisfaction: string;
   };
-  revenue_insights: Array<{ label: string; value: string; note: string; icon: string }>;
+  revenue_insights?: Array<{ label: string; value: string; note: string; icon: string }>;
+  team_performance?: {
+    period: "day" | "week" | "month" | "all";
+    label: string;
+    window_days?: number | null;
+  };
   staff_members: Array<{
     id: number;
     name: string;
     initials: string;
     role: string;
+    role_key?: StaffRole | string;
+    cases_generated?: number;
+    cases_completed?: number;
     assigned: number;
     completed: number;
     pending: number;
@@ -62,7 +152,20 @@ export interface AdminDashboardOverview {
     auditsPassed: number;
     auditsFailed: number;
     loadStatus: string;
+    revenue_total?: number;
+    revenue_30d?: number;
+    order_revenue?: number;
+    audit_revenue?: number;
+    full_revenue?: number;
+    paid_cases_total?: number;
+    paid_cases_30d?: number;
   }>;
+  staff_revenue_summary?: {
+    window_days?: number | null;
+    unattributed_revenue_total?: number;
+    unattributed_revenue_window?: number;
+    attribution_note?: string;
+  };
   failed_logins: number;
   access_logs: Array<{ staff: string; file: string; time: string }>;
   alerts_summary?: {
@@ -115,6 +218,8 @@ export interface AdminAlert {
     | "follow_up_required"
     | "lead_converted"
     | "staff_idle"
+    | "task_assigned"
+    | "task_activity"
     | "system";
   severity: "critical" | "high" | "medium" | "low";
   status: "open" | "acknowledged" | "resolved" | "dismissed";
@@ -148,6 +253,11 @@ export interface AdminNotification {
     deadline: string;
     application__reference_number: string | null;
   }>;
+  application_id?: number | null;
+  task_id?: number | null;
+  assignee_name?: string | null;
+  task_label?: string | null;
+  file_number?: string | null;
 }
 
 export interface AdminAlertsResponse {
@@ -164,14 +274,40 @@ export interface AdminAlertsResponse {
 export interface AdminLogItem {
   id: string;
   record_id: number;
-  source: "staff_login_attempt" | "staff_audit_log" | "activity_log";
-  event_type: "login" | "failed_attempt" | "website_visit" | "event";
+  source: "staff_login_attempt" | "staff_audit_log" | "activity_log" | "email_delivery_log";
+  event_type: "login" | "failed_attempt" | "website_visit" | "event" | "email";
   event: string;
   name: string;
   ip_address: string;
   website_visit_page: string;
   target: string;
   timestamp: string | null;
+  // email-specific fields (only present when source === "email_delivery_log")
+  email_subject?: string;
+  email_status?: "sent" | "failed";
+  email_recipient_type?: "staff" | "user" | "other";
+  email_context_label?: string;
+  email_application_reference?: string;
+  email_triggered_by?: string;
+  email_error?: string;
+}
+
+export interface AdminIpSecurityPayload {
+  daily_request_threshold: number;
+  alerts_enabled: boolean;
+  blocked_ips: Array<{
+    id: number;
+    ip_address: string;
+    reason: string;
+    blocked_at: string | null;
+    blocked_by: string | null;
+  }>;
+  ip_counts_today: Array<{
+    ip_address: string;
+    count_today: number;
+    over_threshold: boolean;
+    is_blocked: boolean;
+  }>;
 }
 
 export interface AdminLogsResponse {
@@ -182,6 +318,10 @@ export interface AdminLogsResponse {
     failed_attempt_count: number;
     website_visit_count: number;
     event_count: number;
+    email_total: number;
+    email_to_staff: number;
+    email_to_user: number;
+    email_failed: number;
   };
   pagination: {
     limit: number;
@@ -189,6 +329,7 @@ export interface AdminLogsResponse {
     total: number;
     has_more: boolean;
   };
+  ip_security?: AdminIpSecurityPayload;
 }
 
 export interface AdminLogsDeleteResponse {
@@ -196,6 +337,7 @@ export interface AdminLogsDeleteResponse {
     staff_login_attempt: number;
     staff_audit_log: number;
     activity_log: number;
+    email_delivery_log: number;
   };
   total_deleted: number;
 }
@@ -278,6 +420,22 @@ export interface AdminApplication {
   quote_status?: string;
   quote_set_at?: string | null;
   quote_expires_at?: string | null;
+  quoted_fee?: string | number | null;
+  quote_currency?: string | null;
+  review_note?: string;
+  internal_admin_notes?: string;
+  payment_confirmed?: boolean;
+  final_submission_completed?: boolean;
+  full_payment_id?: string | null;
+  delivery?: {
+    delivery_name?: string;
+    delivery_address_line1?: string;
+    delivery_address_line2?: string;
+    delivery_city?: string;
+    delivery_postcode?: string;
+    delivery_country?: string;
+    delivery_special_instructions?: string;
+  };
   created_at: string;
   updated_at?: string;
 }
@@ -349,15 +507,119 @@ export interface AdminTaskItem {
   assigned_staff_role?: StaffRole | string | null;
   customer_name?: string;
   task_type: string;
+  description?: string | null;
   status: string;
+  effective_status?: string;
+  application_stage?: string | null;
+  application_status?: string | null;
   priority: string;
   deadline?: string | null;
   created_at?: string;
+  updated_at?: string | null;
+  completed_at?: string | null;
+  completion_notes?: string | null;
+}
+
+const PENDING_TASK_STATUSES = new Set(["new", "in_progress", "blocked"]);
+
+export function getTaskEffectiveStatus(task: AdminTaskItem): string {
+  const effective = String(task.effective_status || task.status || "new").toLowerCase();
+  return effective;
+}
+
+export function isTaskPending(task: AdminTaskItem): boolean {
+  return PENDING_TASK_STATUSES.has(getTaskEffectiveStatus(task));
+}
+
+export function isTaskCompleted(task: AdminTaskItem): boolean {
+  return getTaskEffectiveStatus(task) === "completed";
+}
+
+export function isTaskClosedOut(task: AdminTaskItem): boolean {
+  const status = getTaskEffectiveStatus(task);
+  return status === "completed" || status === "cancelled";
 }
 
 export interface TaskAutoAssignResult {
   assigned_count: number;
   staff_assignments: Record<string, number>;
+  unassigned_pending_count?: number;
+  eligible_staff_count?: number;
+  reason?: string;
+  message?: string;
+}
+
+export interface AdminRoleOverview {
+  id: string;
+  label: string;
+  description: string;
+  active_staff_count: number;
+  is_system?: boolean;
+}
+
+export interface AdminPermissionStaffOption {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  role_label: string;
+}
+
+export interface AdminPermissionModuleRow {
+  module_key: string;
+  module: string;
+  allowed: boolean;
+  role_default: boolean | null;
+}
+
+export interface AdminPermissionCatalogItem {
+  key: string;
+  label: string;
+  is_system?: boolean;
+}
+
+export interface AdminPermissionRoleOption {
+  id: string;
+  label: string;
+  description?: string;
+  is_system?: boolean;
+}
+
+export interface AdminPermissionsResponse {
+  modules: Array<{ key: string; label: string }>;
+  permission_catalog?: AdminPermissionCatalogItem[];
+  staff: AdminPermissionStaffOption[];
+  roles?: AdminPermissionRoleOption[];
+  selected_staff: AdminPermissionStaffOption | null;
+  selected_role?: AdminPermissionRoleOption | null;
+  permissions: Record<string, boolean>;
+  module_rows: AdminPermissionModuleRow[];
+  role_defaults: Record<string, boolean>;
+}
+
+export interface AdminNotificationModuleItem {
+  key: string;
+  label: string;
+  description: string;
+  is_system?: boolean;
+  is_active?: boolean;
+  admin_default_enabled?: boolean;
+  alert_types?: string[];
+}
+
+export interface AdminNotificationModulePref {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  alert_types?: string[];
+}
+
+export interface AdminNotificationPreferencesResponse {
+  modules: AdminNotificationModulePref[];
+  preferences: Record<string, boolean>;
+  role: string;
+  role_defaults: Record<string, boolean>;
 }
 
 interface ApiEnvelope<T> {
@@ -598,10 +860,40 @@ export const adminAuthenticatedFetch = async (path: string, options: RequestInit
   return response;
 };
 
+export interface AdminStaffListSummary {
+  total: number;
+  active: number;
+  inactive: number;
+}
+
+export interface AdminStaffListResponse {
+  staff_users: AdminStaffUser[];
+  summary: AdminStaffListSummary;
+}
+
+export const listStaffUsersWithSummary = async (options?: {
+  excludeAdmin?: boolean;
+}): Promise<AdminStaffListResponse> => {
+  const query = options?.excludeAdmin ? "?exclude_admin=1" : "";
+  const response = await adminAuthenticatedFetch(`/admin/staff/list/${query}`, { method: "GET" });
+  const payload = await parseApiResponse<AdminStaffListResponse | AdminStaffUser[]>(response);
+  const data = payload.data;
+  if (Array.isArray(data)) {
+    const active = data.filter((row) => row.is_active !== false).length;
+    return {
+      staff_users: data,
+      summary: { total: data.length, active, inactive: data.length - active },
+    };
+  }
+  return {
+    staff_users: data?.staff_users || [],
+    summary: data?.summary || { total: 0, active: 0, inactive: 0 },
+  };
+};
+
 export const listStaffUsers = async () => {
-  const response = await adminAuthenticatedFetch("/admin/staff/list/", { method: "GET" });
-  const payload = await parseApiResponse<AdminStaffUser[]>(response);
-  return payload.data || [];
+  const payload = await listStaffUsersWithSummary();
+  return payload.staff_users;
 };
 
 export const createStaffUser = async (body: {
@@ -609,7 +901,7 @@ export const createStaffUser = async (body: {
   username: string;
   email?: string;
   phone?: string;
-  role: StaffRole;
+  role: string;
   access_scope?: AccessScope;
 }) => {
   const response = await adminAuthenticatedFetch("/admin/staff/create/", {
@@ -626,7 +918,7 @@ export const createStaffUserWithPassword = async (body: {
   email?: string;
   phone?: string;
   password: string;
-  role: StaffRole;
+  role: string;
   access_scope?: AccessScope;
 }) => {
   const response = await adminAuthenticatedFetch("/admin/staff/create/", {
@@ -639,7 +931,15 @@ export const createStaffUserWithPassword = async (body: {
 
 export const updateStaffUser = async (
   staffId: number,
-  body: Partial<{ role: StaffRole; is_active: boolean; access_scope: AccessScope }>,
+  body: Partial<{
+    full_name: string;
+    username: string;
+    email: string | null;
+    phone: string;
+    role: string;
+    is_active: boolean;
+    access_scope: AccessScope;
+  }>,
 ) => {
   const response = await adminAuthenticatedFetch(`/admin/staff/${staffId}/update/`, {
     method: "PATCH",
@@ -696,11 +996,224 @@ export const confirmStaffForgotPassword = async (token: string, newPassword: str
   await parseApiResponse(response);
 };
 
-export const getAdminDashboardOverview = async () => {
-  const response = await adminAuthenticatedFetch("/admin/dashboard/overview/", { method: "GET" });
+export type TeamPerformancePeriod = "day" | "week" | "month" | "all";
+
+export const getAdminDashboardOverview = async (options?: { teamPeriod?: TeamPerformancePeriod }) => {
+  const params = new URLSearchParams();
+  if (options?.teamPeriod) {
+    params.set("team_period", options.teamPeriod);
+  }
+  const query = params.toString();
+  const path = query ? `/admin/dashboard/overview/?${query}` : "/admin/dashboard/overview/";
+  const response = await adminAuthenticatedFetch(path, { method: "GET" });
   const payload = await parseApiResponse<AdminDashboardOverview>(response);
   if (!payload.data) {
     throw new Error("Missing dashboard overview payload.");
+  }
+  return payload.data;
+};
+
+export const getAdminRolesOverview = async () => {
+  const response = await adminAuthenticatedFetch("/admin/roles/", { method: "GET" });
+  const payload = await parseApiResponse<{ roles: AdminRoleOverview[] }>(response);
+  return payload.data?.roles || [];
+};
+
+export const createAdminRole = async (body: { label: string; slug?: string; description?: string }) => {
+  const response = await adminAuthenticatedFetch("/admin/roles/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ role: AdminRoleOverview }>(response);
+  if (!payload.data?.role) {
+    throw new Error("Missing role in response.");
+  }
+  return payload.data.role;
+};
+
+export const updateAdminRole = async (
+  roleId: string,
+  body: { label?: string; description?: string },
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/roles/${encodeURIComponent(roleId)}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ role: AdminRoleOverview }>(response);
+  if (!payload.data?.role) {
+    throw new Error("Missing role in response.");
+  }
+  return payload.data.role;
+};
+
+export const deleteAdminRole = async (roleId: string) => {
+  const response = await adminAuthenticatedFetch(`/admin/roles/${encodeURIComponent(roleId)}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export const getAdminStaffPermissions = async (staffId?: number) => {
+  const query = staffId != null ? `?staff_id=${staffId}` : "";
+  const response = await adminAuthenticatedFetch(`/admin/permissions/${query}`, { method: "GET" });
+  const payload = await parseApiResponse<AdminPermissionsResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing permissions payload.");
+  }
+  return payload.data;
+};
+
+export const getAdminRolePermissions = async (roleId: string) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/permissions/?role_id=${encodeURIComponent(roleId)}`,
+    { method: "GET" },
+  );
+  const payload = await parseApiResponse<AdminPermissionsResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing permissions payload.");
+  }
+  return payload.data;
+};
+
+export const getAdminMyPermissions = async () => {
+  const response = await adminAuthenticatedFetch("/admin/permissions/me/", { method: "GET" });
+  const payload = await parseApiResponse<{
+    staff_id: number;
+    role: string;
+    permissions: Record<string, boolean>;
+    modules: Array<{ key: string; label: string }>;
+  }>(response);
+  if (!payload.data) {
+    throw new Error("Missing permissions payload.");
+  }
+  return payload.data;
+};
+
+export const createAdminPermissionModule = async (body: { label: string; key?: string }) => {
+  const response = await adminAuthenticatedFetch("/admin/permissions/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ module: { key: string; label: string } }>(response);
+  if (!payload.data?.module) {
+    throw new Error("Missing module in response.");
+  }
+  return payload.data.module;
+};
+
+export const updateAdminPermissionModule = async (moduleKey: string, body: { label: string }) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/permissions/modules/${encodeURIComponent(moduleKey)}/`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  );
+  const payload = await parseApiResponse<{ module: { key: string; label: string } }>(response);
+  if (!payload.data?.module) {
+    throw new Error("Missing module in response.");
+  }
+  return payload.data.module;
+};
+
+export const deleteAdminPermissionModule = async (moduleKey: string) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/permissions/modules/${encodeURIComponent(moduleKey)}/`,
+    { method: "DELETE" },
+  );
+  await parseApiResponse(response);
+};
+
+export const getAdminNotificationModules = async () => {
+  const response = await adminAuthenticatedFetch("/admin/notifications/modules/", { method: "GET" });
+  const payload = await parseApiResponse<{ modules: AdminNotificationModuleItem[] }>(response);
+  return payload.data?.modules || [];
+};
+
+export const createAdminNotificationModule = async (body: {
+  label: string;
+  key?: string;
+  description?: string;
+  admin_default_enabled?: boolean;
+}) => {
+  const response = await adminAuthenticatedFetch("/admin/notifications/modules/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ module: AdminNotificationModuleItem }>(response);
+  if (!payload.data?.module) {
+    throw new Error("Missing module in response.");
+  }
+  return payload.data.module;
+};
+
+export const updateAdminNotificationModule = async (
+  moduleKey: string,
+  body: { label?: string; description?: string; admin_default_enabled?: boolean },
+) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/notifications/modules/${encodeURIComponent(moduleKey)}/`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  );
+  const payload = await parseApiResponse<{ module: AdminNotificationModuleItem }>(response);
+  if (!payload.data?.module) {
+    throw new Error("Missing module in response.");
+  }
+  return payload.data.module;
+};
+
+export const deleteAdminNotificationModule = async (moduleKey: string) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/notifications/modules/${encodeURIComponent(moduleKey)}/`,
+    { method: "DELETE" },
+  );
+  await parseApiResponse(response);
+};
+
+export const updateAdminStaffPermissions = async (
+  staffId: number,
+  permissions: Record<string, boolean>,
+) => {
+  const response = await adminAuthenticatedFetch("/admin/permissions/", {
+    method: "PATCH",
+    body: JSON.stringify({ staff_id: staffId, permissions }),
+  });
+  const payload = await parseApiResponse<AdminPermissionsResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing permissions payload.");
+  }
+  return payload.data;
+};
+
+export const updateAdminRolePermissions = async (
+  roleId: string,
+  permissions: Record<string, boolean>,
+) => {
+  const response = await adminAuthenticatedFetch("/admin/permissions/", {
+    method: "PATCH",
+    body: JSON.stringify({ role_id: roleId, permissions }),
+  });
+  const payload = await parseApiResponse<AdminPermissionsResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing permissions payload.");
+  }
+  return payload.data;
+};
+
+export const getAdminNotificationPreferences = async () => {
+  const response = await adminAuthenticatedFetch("/admin/notifications/preferences/", { method: "GET" });
+  const payload = await parseApiResponse<AdminNotificationPreferencesResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing notification preferences payload.");
+  }
+  return payload.data;
+};
+
+export const updateAdminNotificationPreferences = async (preferences: Record<string, boolean>) => {
+  const response = await adminAuthenticatedFetch("/admin/notifications/preferences/", {
+    method: "PATCH",
+    body: JSON.stringify({ preferences }),
+  });
+  const payload = await parseApiResponse<AdminNotificationPreferencesResponse>(response);
+  if (!payload.data) {
+    throw new Error("Missing notification preferences payload.");
   }
   return payload.data;
 };
@@ -763,6 +1276,37 @@ export const getAdminLogs = async (params?: {
   const payload = await parseApiResponse<AdminLogsResponse>(response);
   if (!payload.data) {
     throw new Error("Missing admin logs payload.");
+  }
+  return payload.data;
+};
+
+export const updateAdminIpSecurity = async (body: {
+  daily_request_threshold?: number;
+  alerts_enabled?: boolean;
+}) => {
+  const response = await adminAuthenticatedFetch("/admin/logs/ip-security/", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<AdminIpSecurityPayload>(response);
+  if (!payload.data) {
+    throw new Error("Missing IP security payload.");
+  }
+  return payload.data;
+};
+
+export const manageAdminIpBlock = async (body: {
+  action: "block" | "unblock";
+  ip_address: string;
+  reason?: string;
+}) => {
+  const response = await adminAuthenticatedFetch("/admin/logs/ip-security/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<AdminIpSecurityPayload>(response);
+  if (!payload.data) {
+    throw new Error("Missing IP security payload.");
   }
   return payload.data;
 };
@@ -833,7 +1377,7 @@ export const autoAssignAdminTasks = async () => {
   if (!payload.data) {
     throw new Error("Auto-assign response missing.");
   }
-  return payload.data;
+  return { ...payload.data, message: payload.message };
 };
 
 
@@ -940,6 +1484,50 @@ export const updateAdminApplicationNotes = async (applicationId: number, notes: 
     throw new Error("Application notes update response missing.");
   }
   return payload.data;
+};
+
+export type AdminStaffInternalMessage = {
+  id: number;
+  application_id: number;
+  application_reference: string;
+  customer_name?: string;
+  sender_id: number | null;
+  sender_name: string;
+  recipient_id: number | null;
+  recipient_name: string;
+  message_text: string;
+  created_at: string;
+};
+
+export const getAdminApplicationInternalMessages = async (applicationId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/applications/${applicationId}/internal-messages/`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<AdminStaffInternalMessage[]>(response);
+  return payload.data || [];
+};
+
+export const sendAdminApplicationInternalMessage = async (
+  applicationId: number,
+  body: { message_text: string; recipient_staff_id?: number | "all" | null },
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/applications/${applicationId}/internal-messages/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<AdminStaffInternalMessage>(response);
+  if (!payload.data) {
+    throw new Error("Internal message send response missing.");
+  }
+  return payload.data;
+};
+
+export const getAdminInternalMessagesFeed = async (limit = 30) => {
+  const response = await adminAuthenticatedFetch(`/admin/internal-messages/feed/?limit=${limit}`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<AdminStaffInternalMessage[]>(response);
+  return payload.data || [];
 };
 
 export const updateAdminDocumentStatus = async (

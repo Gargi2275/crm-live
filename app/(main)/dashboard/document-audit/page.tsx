@@ -12,6 +12,7 @@ export default function DashboardDocumentAuditPage() {
   const searchParams = useSearchParams();
   const { user, loading, isAuthenticated } = useAuth();
   const resumeReference = (searchParams.get("reference") || "").trim().toUpperCase() || undefined;
+  const startFresh = ["1", "true", "yes"].includes((searchParams.get("start") || "").trim().toLowerCase());
   const focusQuote = ["1", "true", "yes"].includes((searchParams.get("focusQuote") || "").trim().toLowerCase());
   const isResuming = Boolean(resumeReference);
   const progressPercent = isResuming ? 62 : 18;
@@ -113,6 +114,7 @@ export default function DashboardDocumentAuditPage() {
         <DocumentAuditJourney
           userEmail={user?.email}
           resumeReference={resumeReference}
+          startFresh={startFresh}
           focusQuote={focusQuote}
         />
       </div>

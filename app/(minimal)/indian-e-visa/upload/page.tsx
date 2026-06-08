@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2,Check } from "lucide-react";
+import { Check, CheckCircle2, FileText, Lock, Shield, Upload } from "lucide-react";
 
 import { useEVisa } from "@/context/EVisaContext";
 import { Reveal } from "@/components/Reveal";
@@ -463,6 +463,9 @@ export default function UploadPage() {
           formData.append("case_number", caseNumber);
           formData.append("email", applicantEmail.trim());
           formData.append("flagged_document_name", item.document_name || item.document_type || `Document ${index + 1}`);
+          if (item.document_type) {
+            formData.append("flagged_document_type", item.document_type);
+          }
           formData.append("document", file);
 
           const response = await fetch(`${API_BASE_URL}/evisa/correction-resubmit/`, {
@@ -555,50 +558,57 @@ export default function UploadPage() {
     }
   };
 
+  const inputClasses =
+    "w-full px-3.5 py-2.5 border border-[#d5e3f5] rounded-[10px] font-body text-[14px] bg-white outline-none focus:border-[#1c69dd] focus:ring-2 focus:ring-[#1c69dd]/15 transition-all";
+
+  const uploadChecklist = [
+    { label: "Passport bio page", done: Boolean(passportRef) && !passportError },
+    { label: "Applicant photograph", done: Boolean(photoRef) && !photoError },
+    { label: "Travel & contact details", done: Boolean(arrivalDate && portOfEntry && addressInIndia && applicantEmail) },
+    { label: "Consent accepted", done: consentsAccepted },
+  ];
+
   if (isSuccess) {
     return (
-      <div className="flex-1 w-full bg-bg relative pb-32">
-        <div className="w-full bg-white py-2 px-4 shadow-sm sticky top-[72px] z-30">
-          <div className="max-w-[1200px] mx-auto flex items-center justify-between">
-            <div className="font-mono text-primary text-xs sm:text-sm font-bold flex items-center gap-2">
-              <span className="text-muted">File No:</span> {fileNumber}
+      <div className="flex-1 w-full bg-[linear-gradient(180deg,#eef4fc_0%,#f8fafc_55%,#ffffff_100%)] relative pb-20">
+        <div className="w-full bg-[#0f2f66] py-2.5 px-4 shadow-sm">
+          <div className="max-w-[1000px] mx-auto flex items-center justify-between">
+            <div className="font-mono text-white text-xs sm:text-sm font-bold flex items-center gap-2">
+              <span className="text-white/60">File No:</span> {fileNumber}
             </div>
-            <div className="text-accent font-bold text-sm flex gap-2 items-center">
-              ✓ Documents Complete
-            </div>
+            <span className="text-[#7ee0b8] font-semibold text-xs sm:text-sm flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4" /> Documents complete
+            </span>
           </div>
         </div>
+        <ProgressStepper currentStep={5} />
 
-        <div className="w-full">
-          <ProgressStepper currentStep={5} />
-        </div>
-
-        <div className="max-w-[500px] mx-auto px-4 mt-16 text-center">
+        <div className="max-w-[480px] mx-auto px-4 mt-10">
           <Reveal direction="up">
-            <div className="mb-6 flex justify-center h-24">
-              <AnimatedCheckmark size={96} color="#16A34A" />
-            </div>
-            <h2 className="font-heading font-extrabold text-[#16A34A] text-[36px] sm:text-[44px] mb-4">
-              Documents Received <span className="inline-block translate-y-[-4px]">✅</span>
-            </h2>
-            <p className="font-body text-primary text-[17px] mb-10 max-w-[400px] mx-auto leading-relaxed">
-              We&apos;ll proceed with submission shortly. Check back to track your case status.
-            </p>
-            <div className="space-y-4">
-              <motion.button
-                onClick={() => router.push("/track")}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="w-full bg-accent text-white font-bold text-[16px] px-7 py-[16px] rounded-btn shadow-btn-hover"
-              >
-                Track Application
-              </motion.button>
-                  <button
-                onClick={() => setIsSuccess(false)}
-                className="w-full bg-transparent border-2 border-primary text-primary font-bold text-[16px] px-7 py-[16px] rounded-btn hover:bg-primary hover:text-white transition-colors"
-              >
-                    {isCorrectionMode ? "Upload more corrected documents" : "Upload more documents"}
-              </button>
+            <div className="bg-white rounded-[16px] border border-[#d8e7f8] shadow-[0_16px_40px_rgba(20,76,160,0.10)] p-6 sm:p-8 text-center">
+              <div className="mb-5 flex justify-center h-20">
+                <AnimatedCheckmark size={80} color="#16A34A" />
+              </div>
+              <h2 className="font-heading font-extrabold text-[#16A34A] text-2xl sm:text-3xl mb-2">Documents Received</h2>
+              <p className="font-body text-[#486581] text-[15px] mb-6 leading-relaxed">
+                We&apos;ll proceed with submission shortly. Track your case anytime from your dashboard.
+              </p>
+              <div className="space-y-3">
+                <motion.button
+                  onClick={() => router.push("/track")}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  className="w-full bg-accent text-white font-bold text-[15px] px-6 py-3 rounded-[10px] shadow-[0_4px_14px_rgba(245,166,35,0.28)]"
+                >
+                  Track Application
+                </motion.button>
+                <button
+                  onClick={() => setIsSuccess(false)}
+                  className="w-full border border-[#0f2f66] text-[#0f2f66] font-semibold text-[15px] px-6 py-3 rounded-[10px] hover:bg-[#0f2f66] hover:text-white transition-colors"
+                >
+                  {isCorrectionMode ? "Upload more corrected documents" : "Upload more documents"}
+                </button>
+              </div>
             </div>
           </Reveal>
         </div>
@@ -606,66 +616,74 @@ export default function UploadPage() {
     );
   }
 
-  const inputClasses = "w-full px-4 py-3 border-[1.5px] border-border rounded-input font-body text-[15px] bg-white outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(245,166,35,0.15)] transition-all duration-200";
-
   return (
-    <div className="flex-1 w-full bg-bg relative pb-32">
-      {/* Sticky White Header Bar */}
-     <div className="w-full bg-white py-3 px-4  z-30">
-  <div className="max-w-[1200px] mx-auto flex items-center gap-6">
-    
-    {/* File Number */}
-    <div className="font-mono text-primary text-xs sm:text-sm font-bold whitespace-nowrap flex items-center gap-2">
-      <span className="text-muted">File No:</span> {fileNumber}
-    </div>
-
-    {/* Stepper */}
-    <div className="flex-1">
-      <ProgressStepper currentStep={4} />
-    </div>
-
-  </div>
-</div>
-      <div className="sm:hidden w-full">
-         <ProgressStepper currentStep={4} />
+    <div className="flex-1 w-full bg-[linear-gradient(180deg,#eef4fc_0%,#f8fafc_45%,#ffffff_100%)] relative pb-24">
+      <div className="w-full bg-[#0f2f66] py-2.5 px-4 shadow-sm sticky top-0 z-30">
+        <div className="max-w-[1000px] mx-auto flex justify-between items-center gap-4">
+          <div className="font-mono text-white text-xs sm:text-sm font-bold flex items-center gap-2 shrink-0">
+            <span className="text-white/60">File No:</span> {fileNumber}
+          </div>
+          <div className="text-white/75 font-body text-[11px] sm:text-xs hidden sm:flex items-center gap-2">
+            <Lock className="w-3.5 h-3.5" />
+            AES-256 encrypted uploads
+          </div>
+        </div>
       </div>
 
-      <div className="max-w-[640px] mx-auto px-4 mt-10">
-        <Reveal direction="up" delay={0.1}>
-          <div className="mb-8">
-            <h2 className="font-heading font-extrabold text-primary text-[32px] sm:text-[42px] mb-2 text-center tracking-tight">
-              {isCorrectionMode ? "Re-upload Requested Documents" : "Upload Required Documents"}
-            </h2>
-            <p className="font-body text-muted text-[16px] text-center max-w-[440px] mx-auto">
-              {isCorrectionMode
-                ? "Upload only the documents requested by admin. No other documents are needed now."
-                : "Application cannot be submitted until uploads are complete."}
-            </p>
-            <p className="font-body text-[13px] text-center text-primary/80 mt-3">
-              All uploaded files are encrypted using AES-256 before secure storage.
-            </p>
+      <ProgressStepper currentStep={4} />
+
+      <div className="max-w-[1000px] w-full mx-auto px-4 mt-6 lg:mt-8">
+        <Reveal direction="up" delay={0.05}>
+          <div className="mb-5 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+            <div>
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-[#eaf4ff] border border-[#c5dcf7] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#1f4f8f] mb-2">
+                <Upload className="w-3 h-3" />
+                Step 4 of 5
+              </span>
+              <h2 className="font-heading font-extrabold text-[#0f2f66] text-2xl sm:text-[28px] tracking-tight">
+                {isCorrectionMode ? "Re-upload Requested Documents" : "Upload Required Documents"}
+              </h2>
+              <p className="font-body text-[#5f7391] text-sm mt-1 max-w-xl">
+                {isCorrectionMode
+                  ? "Upload only the documents flagged by our team. Other files are not needed right now."
+                  : "Complete all required uploads and travel details to move to review."}
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-lg border border-[#c5dcf7] bg-white/80 px-3 py-2 text-xs text-[#1f4f8f] shrink-0">
+              <Shield className="w-4 h-4 text-[#1c69dd]" />
+              Secure &amp; encrypted storage
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-5 items-start">
+            <div className="space-y-4 min-w-0">
             {isCorrectionMode ? (
-              <div className="bg-card rounded-card shadow-card p-6 sm:p-8 space-y-4">
-                <h3 className="font-body font-bold text-primary text-xl">Reupload Required Documents</h3>
-                {flaggedDocuments.map((item, index) => {
-                  const key = `flagged-${index}`;
-                  const label = item.document_name || item.document_type || `Document ${index + 1}`;
-                  const hintText = item.required_action || item.issue_reason || "Upload corrected document.";
-                  const docHint = (item.document_type || item.document_name || "").toLowerCase();
-                  const isPhotoDoc = docHint.includes("photo") || docHint.includes("photograph");
-                  const accept = isPhotoDoc ? "image/jpeg,image/png" : ".pdf,image/jpeg,image/png";
+              <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_12px_32px_rgba(20,76,160,0.08)] overflow-hidden">
+                <div className="px-5 py-3.5 bg-gradient-to-r from-[#7c2d12] to-[#9a3412] border-b border-[#f5c4a8]">
+                  <h3 className="font-body font-bold text-white text-base">Documents to Re-upload</h3>
+                  <p className="text-white/80 text-xs mt-0.5">{flaggedDocuments.length} item(s) requested by our team</p>
+                </div>
+                <div className="p-4 sm:p-5 space-y-3">
+                  {flaggedDocuments.map((item, index) => {
+                    const key = `flagged-${index}`;
+                    const label = item.document_name || item.document_type || `Document ${index + 1}`;
+                    const hintText = item.required_action || item.issue_reason || "Upload corrected document.";
+                    const docHint = (item.document_type || item.document_name || "").toLowerCase();
+                    const isPhotoDoc = docHint.includes("photo") || docHint.includes("photograph");
+                    const accept = isPhotoDoc ? "image/jpeg,image/png" : ".pdf,image/jpeg,image/png";
 
-                  return (
-                    <div key={key} className="rounded-xl border border-border bg-[#FAF9F5] p-4">
-                      <p className="font-body font-bold text-primary text-[15px]">{label}</p>
-                      {item.issue_reason ? (
-                        <p className="font-body text-[12px] text-[#8A4B08] mt-1">Reason: {item.issue_reason}</p>
-                      ) : null}
-                      <p className="font-body text-[12px] text-muted mt-1">Required action: {hintText}</p>
-                      <div className="mt-3">
+                    return (
+                      <div key={key} className="rounded-[10px] border border-[#f0d9b8] bg-[#fffaf3] p-3.5">
+                        <div className="flex items-start gap-2 mb-2">
+                          <FileText className="w-4 h-4 text-[#9a3412] mt-0.5 shrink-0" />
+                          <div>
+                            <p className="font-body font-bold text-[#0f2f66] text-sm">{label}</p>
+                            {item.issue_reason ? (
+                              <p className="font-body text-[11px] text-[#9a3412] mt-0.5">Reason: {item.issue_reason}</p>
+                            ) : null}
+                            <p className="font-body text-[11px] text-[#627d98] mt-0.5">{hintText}</p>
+                          </div>
+                        </div>
                         <FileDropZone
                           label={`Upload corrected ${label}`}
                           accept={accept}
@@ -675,171 +693,163 @@ export default function UploadPage() {
                           error={correctionErrors[key] || ""}
                         />
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
 
             {!isCorrectionMode ? (
               <>
-            
-            {/* Passport Card */}
-            <div className="bg-card rounded-card shadow-card p-6 sm:p-8">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-[10px] bg-accent/10 text-xl flex items-center justify-center shrink-0">
-                  🛂
+                <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_12px_32px_rgba(20,76,160,0.08)] overflow-hidden">
+                  <div className="px-5 py-3.5 bg-gradient-to-r from-[#0f2f66] to-[#1a4a8a] border-b border-[#d0dff5]">
+                    <h3 className="font-body font-bold text-white text-base">Required Documents</h3>
+                    <p className="text-white/75 text-xs mt-0.5">Passport bio page and applicant photograph</p>
+                  </div>
+                  <div className="p-4 sm:p-5 grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-body font-bold text-[#0f2f66] text-sm">Passport Bio Page *</p>
+                        <span className="text-[10px] font-mono font-bold text-[#627d98] bg-[#f0f6ff] px-2 py-0.5 rounded">Max 5MB</span>
+                      </div>
+                      <FileDropZone
+                        label="Upload passport photo page"
+                        accept=".pdf,image/jpeg,image/png"
+                        maxSizeMsg="Clear scan of passport photo page (JPG, PNG, PDF)."
+                        file={passportRef}
+                        onUpload={handlePassportUpload}
+                        error={passportError}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-body font-bold text-[#0f2f66] text-sm">Applicant Photograph *</p>
+                        <span className="text-[10px] font-mono font-bold text-[#627d98] bg-[#f0f6ff] px-2 py-0.5 rounded">Max 2MB</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mb-1">
+                        {["White background", "No glasses", "Recent photo", "Face visible"].map((tip) => (
+                          <span key={tip} className="inline-flex items-center gap-1 rounded-full bg-[#ecfdf5] border border-[#bbf7d0] px-2 py-0.5 text-[10px] font-semibold text-[#166534]">
+                            <CheckCircle2 className="w-3 h-3" />
+                            {tip}
+                          </span>
+                        ))}
+                      </div>
+                      <FileDropZone
+                        label="Upload applicant photo"
+                        accept="image/jpeg,image/png"
+                        maxSizeMsg="JPG or PNG only. Match government photo specs."
+                        file={photoRef}
+                        onUpload={handlePhotoUpload}
+                        error={photoError}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-body font-bold text-primary text-xl">Passport Bio Page *</h3>
-                  <p className="font-mono text-xs text-muted font-bold tracking-wide mt-1">JPG / PNG / PDF — Max 5MB</p>
+
+                <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_12px_32px_rgba(20,76,160,0.08)] overflow-hidden">
+                  <div className="px-5 py-3.5 bg-gradient-to-r from-[#0f2f66] to-[#1a4a8a] border-b border-[#d0dff5]">
+                    <h3 className="font-body font-bold text-white text-base">Travel &amp; Contact Details</h3>
+                  </div>
+                  <div className="p-4 sm:p-5 space-y-3">
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Email Used for Registration *</label>
+                        <input
+                          type="email"
+                          required
+                          value={applicantEmail}
+                          onChange={(e) => setApplicantEmail(e.target.value)}
+                          className={inputClasses}
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Intended Arrival Date *</label>
+                        <input
+                          type="date"
+                          required
+                          value={arrivalDate}
+                          onChange={(e) => setArrivalDate(e.target.value)}
+                          className={inputClasses}
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Port of Entry *</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. New Delhi"
+                          required
+                          value={portOfEntry}
+                          onChange={(e) => setPortOfEntry(e.target.value)}
+                          className={inputClasses}
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Emergency Contact</label>
+                        <input
+                          type="text"
+                          placeholder="Name and phone (optional)"
+                          value={emergencyContact}
+                          onChange={(e) => setEmergencyContact(e.target.value)}
+                          className={inputClasses}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Address in India *</label>
+                      <textarea
+                        placeholder="Hotel name or complete residential address"
+                        required
+                        rows={2}
+                        value={addressInIndia}
+                        onChange={(e) => setAddressInIndia(e.target.value)}
+                        className={`${inputClasses} resize-none`}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <FileDropZone
-                label="Upload Passport Photo Page"
-                accept=".pdf,image/jpeg,image/png"
-                maxSizeMsg="Upload a clear photo or scan of the photo page of your passport."
-                file={passportRef}
-                onUpload={handlePassportUpload}
-                error={passportError}
-              />
-            </div>
 
-            {/* Photo Card */}
-            <div className="bg-card rounded-card shadow-card p-6 sm:p-8">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-[10px] bg-accent/10 text-xl flex items-center justify-center shrink-0">
-                  📸
+                <div className="bg-white rounded-[14px] border border-[#e8edf3] shadow-sm overflow-hidden">
+                  <div className="px-5 py-3 border-b border-[#e8edf3] bg-[#f8fafc]">
+                    <h3 className="font-body font-bold text-[#334e68] text-sm">Optional — Supporting Files &amp; Notes</h3>
+                  </div>
+                  <div className="p-4 sm:p-5 space-y-3">
+                    <div>
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Supporting Documents</label>
+                      <input
+                        type="file"
+                        multiple
+                        accept=".pdf,image/jpeg,image/png"
+                        onChange={(e) => handleSupportingFilesChange(Array.from(e.target.files || []))}
+                        className="block w-full font-body text-sm text-[#627d98] file:mr-3 file:py-1.5 file:px-3 file:rounded-[8px] file:border-0 file:text-xs file:font-semibold file:bg-[#eaf4ff] file:text-[#0f2f66] hover:file:bg-[#d8e9ff]"
+                      />
+                      {supportingFiles.length > 0 ? (
+                        <p className="text-[11px] text-[#166534] font-semibold mt-1.5">{supportingFiles.length} file(s) selected</p>
+                      ) : null}
+                      {supportingError ? <p className="text-xs text-red-600 font-semibold mt-1.5">{supportingError}</p> : null}
+                    </div>
+                    <div>
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Notes to FlyOCI team</label>
+                      <textarea
+                        placeholder="Any specific information our team should know..."
+                        rows={2}
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className={`${inputClasses} resize-none`}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-body font-bold text-primary text-xl">Applicant Photograph *</h3>
-                  <p className="font-mono text-xs text-muted font-bold tracking-wide mt-1">JPG / PNG only — Max 2MB</p>
+
+                <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-sm p-4 sm:p-5 space-y-3">
+                  <h3 className="font-body font-bold text-[#0f2f66] text-sm">Consent Before Submission</h3>
+                  <ConsentCheckboxes mode="upload" showMinorConsent={showMinorConsent} onAcceptanceChange={setConsentsAccepted} />
                 </div>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 mb-6 font-body text-sm font-medium text-primary bg-[#FAF9F5] p-5 rounded-xl border border-border">
-                <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green" /> White background only</div>
-                <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green" /> No glasses</div>
-                <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green" /> Taken within 6 months</div>
-                <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green" /> Face clearly visible</div>
-              </div>
-
-              <FileDropZone
-                label="Upload Applicant Photo"
-                accept="image/jpeg,image/png"
-                maxSizeMsg="Ensure your photo meets the requirements above to avoid delays."
-                file={photoRef}
-                onUpload={handlePhotoUpload}
-                error={photoError}
-              />
-            </div>
-
-            {/* Additional Details Form */}
-            <div className="bg-card rounded-card shadow-card overflow-hidden">
-               <div className="bg-primary px-6 py-5 border-b border-border">
-                  <h3 className="font-body font-bold text-white text-xl">Arrival & Additional Details</h3>
-               </div>
-               
-               <div className="p-6 sm:p-8 space-y-5">
-                 <div className="grid sm:grid-cols-2 gap-5">
-                   <div>
-                     <label className="block font-body font-bold text-primary text-sm mb-2">Email Used for Registration *</label>
-                     <input
-                       type="email"
-                       required
-                       value={applicantEmail}
-                       onChange={(e) => setApplicantEmail(e.target.value)}
-                       className={inputClasses}
-                     />
-                   </div>
-                   <div>
-                     <label className="block font-body font-bold text-primary text-sm mb-2">Intended Arrival Date *</label>
-                     <input
-                       type="date"
-                       required
-                       value={arrivalDate}
-                       onChange={(e) => setArrivalDate(e.target.value)}
-                       className={inputClasses}
-                     />
-                   </div>
-                   <div>
-                     <label className="block font-body font-bold text-primary text-sm mb-2">Port of Entry *</label>
-                     <input
-                       type="text"
-                       placeholder="e.g. New Delhi"
-                       required
-                       value={portOfEntry}
-                       onChange={(e) => setPortOfEntry(e.target.value)}
-                       className={inputClasses}
-                     />
-                   </div>
-                 </div>
-                 <div>
-                   <label className="block font-body font-bold text-primary text-sm mb-2">Address in India *</label>
-                   <textarea
-                     placeholder="Hotel name or complete residential address"
-                     required
-                     rows={3}
-                     value={addressInIndia}
-                     onChange={(e) => setAddressInIndia(e.target.value)}
-                     className={`${inputClasses} resize-none`}
-                   />
-                 </div>
-                 <div>
-                   <label className="block font-body font-bold text-primary text-sm mb-2">Emergency Contact (Optional)</label>
-                   <input
-                     type="text"
-                     placeholder="Name and phone number"
-                     value={emergencyContact}
-                     onChange={(e) => setEmergencyContact(e.target.value)}
-                     className={inputClasses}
-                   />
-                 </div>
-               </div>
-            </div>
-
-            {/* Optional Section */}
-            <div className="bg-card rounded-card shadow-card p-6 sm:p-8 border border-border">
-              <h3 className="font-body font-bold text-primary text-xl mb-3">Optional Information</h3>
-              <p className="font-body text-sm text-muted mb-6">If you have extra supporting documents, upload them below.</p>
-               
-               <label className="block font-body font-bold text-primary text-sm mb-2">Supporting Documents</label>
-               <input 
-                  type="file" 
-                  multiple 
-                  accept=".pdf,image/jpeg,image/png"
-                  onChange={(e) => handleSupportingFilesChange(Array.from(e.target.files || []))}
-                  className="block w-full font-body text-sm text-muted
-                  file:mr-4 file:py-2 file:px-4
-                  file:rounded-btn file:border-0
-                  file:text-sm file:font-semibold
-                  file:bg-primary/5 file:text-primary
-                  hover:file:bg-primary/10 file:transition-colors mb-6"
-               />
-               {supportingError && (
-                 <p className="text-sm text-red-600 font-semibold mb-4">{supportingError}</p>
-               )}
-
-               <label className="block font-body font-bold text-primary text-sm mb-2">Notes to FlyOCI team</label>
-               <textarea
-                 placeholder="Any specific information our team should know..."
-                 rows={3}
-                 value={notes}
-                 onChange={(e) => setNotes(e.target.value)}
-                 className={`${inputClasses} resize-none`}
-               />
-            </div>
-
-            <div className="bg-card rounded-card shadow-card p-6 sm:p-8 border border-border space-y-4">
-              <h3 className="font-body font-bold text-primary text-xl">Consent Before Submission</h3>
-              <ConsentCheckboxes mode="upload" showMinorConsent={showMinorConsent} onAcceptanceChange={setConsentsAccepted} />
-            </div>
-            </>
+              </>
             ) : null}
 
             {isCorrectionMode ? (
-              <div className="bg-card rounded-card shadow-card p-6 sm:p-8 border border-border space-y-4">
-                <h3 className="font-body font-bold text-primary text-xl">Consent Before Submission</h3>
+              <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-sm p-4 sm:p-5 space-y-3">
+                <h3 className="font-body font-bold text-[#0f2f66] text-sm">Consent Before Submission</h3>
                 <ConsentCheckboxes mode="upload" onAcceptanceChange={setConsentsAccepted} />
               </div>
             ) : null}
@@ -847,59 +857,100 @@ export default function UploadPage() {
             <motion.button
               type="submit"
               disabled={!isFormValid || isUploading || !consentsAccepted}
-              whileHover={isFormValid && !isUploading ? { scale: 1.02, y: -2 } : {}}
-              whileTap={isFormValid && !isUploading ? { scale: 0.98 } : {}}
-              className={`w-full font-bold text-[16px] px-7 py-[18px] rounded-btn shadow-[0_4px_16px_rgba(245,166,35,0.28)] flex justify-center items-center transition-all duration-300 mt-8 ${
-                isFormValid && !isUploading 
-                  ? "bg-accent text-white shadow-btn hover:shadow-btn-hover" 
-                  : "bg-slate-300 text-white-500 shadow-none cursor-not-allowed transform-none"
+              whileHover={isFormValid && !isUploading ? { scale: 1.01 } : {}}
+              whileTap={isFormValid && !isUploading ? { scale: 0.99 } : {}}
+              className={`w-full font-bold text-[15px] px-6 py-3.5 rounded-[10px] flex justify-center items-center gap-2 transition-all ${
+                isFormValid && !isUploading && consentsAccepted
+                  ? "bg-accent text-white shadow-[0_4px_14px_rgba(245,166,35,0.28)] hover:shadow-[0_6px_18px_rgba(245,166,35,0.35)]"
+                  : "bg-[#cbd5e1] text-white cursor-not-allowed"
               }`}
             >
+              <Upload className="w-4 h-4" />
               {isCorrectionMode ? "Submit Corrected Documents" : "Submit Documents"}
             </motion.button>
 
-            {uploadError && (
-              <p className="text-center text-sm text-red-600 font-semibold">{uploadError}</p>
-            )}
+            {uploadError ? (
+              <p className="text-center text-sm text-red-600 font-semibold bg-red-50 border border-red-100 rounded-lg px-3 py-2">{uploadError}</p>
+            ) : null}
+            </div>
+
+            <aside className="lg:sticky lg:top-[72px] space-y-3">
+              <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_10px_28px_rgba(20,76,160,0.08)] p-4">
+                <h4 className="font-body font-bold text-[#0f2f66] text-sm mb-3">Upload Checklist</h4>
+                <ul className="space-y-2">
+                  {(isCorrectionMode
+                    ? flaggedDocuments.map((item, index) => ({
+                        label: item.document_name || item.document_type || `Document ${index + 1}`,
+                        done: Boolean(correctionFiles[`flagged-${index}`]),
+                      }))
+                    : uploadChecklist
+                  ).map((item) => (
+                    <li key={item.label} className="flex items-center gap-2 text-xs">
+                      <span
+                        className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                          item.done ? "bg-[#dcfce7] text-[#16a34a]" : "bg-[#f1f5f9] text-[#94a3b8]"
+                        }`}
+                      >
+                        {item.done ? <Check className="w-3 h-3" strokeWidth={3} /> : <span className="w-1.5 h-1.5 rounded-full bg-current" />}
+                      </span>
+                      <span className={item.done ? "text-[#166534] font-semibold" : "text-[#627d98]"}>{item.label}</span>
+                    </li>
+                  ))}
+                  {isCorrectionMode ? (
+                    <li className="flex items-center gap-2 text-xs">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${consentsAccepted ? "bg-[#dcfce7] text-[#16a34a]" : "bg-[#f1f5f9] text-[#94a3b8]"}`}>
+                        {consentsAccepted ? <Check className="w-3 h-3" strokeWidth={3} /> : <span className="w-1.5 h-1.5 rounded-full bg-current" />}
+                      </span>
+                      <span className={consentsAccepted ? "text-[#166534] font-semibold" : "text-[#627d98]"}>Consent accepted</span>
+                    </li>
+                  ) : null}
+                </ul>
+              </div>
+
+              <div className="bg-[#fff8e8] border border-[#f4d89a] rounded-[12px] p-3.5 text-[#3b2a08]">
+                <p className="text-xs font-bold mb-1">Photo tip</p>
+                <p className="text-[11px] leading-relaxed">Use a plain white background and ensure your face fills 70–80% of the frame to avoid government rejection.</p>
+              </div>
+
+              <div className="bg-[#f0f6ff] border border-[#c5dcf7] rounded-[12px] p-3.5 flex gap-2.5">
+                <Lock className="w-4 h-4 text-[#1c69dd] shrink-0 mt-0.5" />
+                <p className="text-[11px] text-[#1f4f8f] leading-relaxed">
+                  Files are encrypted with AES-256 before storage. Only authorised FlyOCI staff can access your documents.
+                </p>
+              </div>
+            </aside>
           </form>
         </Reveal>
       </div>
 
-      {/* Upload Progress Overlay */}
       <AnimatePresence>
-        {isUploading && (
+        {isUploading ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-white/95 backdrop-blur-sm"
+            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-[#0f2f66]/20 backdrop-blur-sm"
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
+              initial={{ scale: 0.95, y: 12 }}
               animate={{ scale: 1, y: 0 }}
-              className="max-w-[360px] w-full text-center"
+              className="max-w-[340px] w-full text-center bg-white rounded-[16px] border border-[#d8e7f8] shadow-[0_20px_50px_rgba(20,76,160,0.18)] p-6"
             >
-              <div className="w-20 h-20 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-6 relative">
-                <span className="text-4xl translate-x-1">
-  <Check className="w-8 h-8 text-green-500" strokeWidth={3} />
-</span>
+              <div className="w-14 h-14 rounded-full bg-[#eaf4ff] flex items-center justify-center mx-auto mb-4">
+                <Upload className="w-6 h-6 text-[#1c69dd] animate-pulse" />
               </div>
-              
-              <h3 className="font-heading font-extrabold text-primary text-2xl mb-2">Uploading Files</h3>
-              
-              <div className="w-full h-2.5 bg-border rounded-full overflow-hidden mb-3 relative mt-8">
+              <h3 className="font-heading font-extrabold text-[#0f2f66] text-xl mb-1">Uploading Files</h3>
+              <p className="text-xs text-[#627d98] mb-5">Please keep this tab open</p>
+              <div className="w-full h-2 bg-[#e8edf3] rounded-full overflow-hidden mb-2">
                 <motion.div
-                  className="absolute top-0 left-0 h-full bg-primary"
+                  className="h-full bg-gradient-to-r from-[#1c69dd] to-[#0f2f66] rounded-full"
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
-              
-              <div className="font-mono text-xl font-bold text-primary">
-                {Math.round(uploadProgress)}%
-              </div>
+              <div className="font-mono text-lg font-bold text-[#0f2f66]">{Math.round(uploadProgress)}%</div>
             </motion.div>
           </motion.div>
-        )}
+        ) : null}
       </AnimatePresence>
     </div>
   );

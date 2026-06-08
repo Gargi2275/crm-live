@@ -1,4 +1,6 @@
 import HeroSection from "../../components/HeroSection";
+import { DocumentAuditSection } from "@/components/home/DocumentAuditSection";
+import { TrustFeaturesSection } from "@/components/home/TrustFeaturesSection";
 import WhatWeDo from "@/components/WhatWeDo";
 import { StepTimeline } from "@/components/StepTimeline";
 import { ServiceFees } from "@/components/ServiceFees";
@@ -7,8 +9,10 @@ import { FadeInUp } from "@/components/FadeInUp";
 import { Button } from "@/components/ui/Button";
 import { getPublicTestimonials } from "@/lib/api";
 import Link from "next/link";
-import { CheckCircle, FileX, Globe, MessageCircle, Shield, UserCheck } from "lucide-react";
-// Parallax removed — using static wrappers
+import { buildPageMetadata } from "@/lib/seo";
+import { PAGE_SEO } from "@/lib/seo-pages";
+
+export const metadata = buildPageMetadata(PAGE_SEO.home);
 
 const fallbackTestimonials = [
   {
@@ -82,39 +86,6 @@ export default async function Home() {
     { title: "Step 3 - End-to-End Handling", description: "Once documents are ready, we prepare forms, submission steps, and ongoing guidance." },
   ];
 
-  const features = [
-    {
-      title: "Specialised Focus",
-      description: "We only handle OCI, Indian passports and e-Visas.",
-      icon: <Globe />,
-      points: ["OCI, e-Visa and passport work only", "Rules for UK & US applicants", "Avoid generic travel-agency gaps"],
-    },
-    {
-      title: "Expert Checks",
-      description: "We reduce rejections by catching issues upfront.",
-      icon: <Shield />,
-      points: ["Name, DOB & document cross-checks", "Photo and biometric validation", "Apostille / translation guidance"],
-    },
-    {
-      title: "Clear Comms",
-      description: "WhatsApp & email support directly with humans.",
-      icon: <MessageCircle />,
-      points: ["Human replies via WhatsApp and email", "Concise written audit reports", "Guidance at each next step"],
-    },
-    {
-      title: "Fixed Fees",
-      description: "Transparent pricing without surprises.",
-      icon: <CheckCircle />,
-      points: ["Clear service vs government fees", "Audit fee credited against service", "No hidden extras in our quote"],
-    },
-    {
-      title: "Step Guidance",
-      description: "Especially helpful for elderly or first-timers.",
-      icon: <UserCheck />,
-      points: ["Step-by-step checklists", "Help with form completion", "Phone/WhatsApp assistance for seniors"],
-    },
-  ];
-
   return (
     <>
       <HeroSection />
@@ -122,100 +93,7 @@ export default async function Home() {
       {/* SECTION 1: What We Do */}
       <WhatWeDo />
 
-      {/* SECTION 2: Why Document Audit First */}
-      <section className="py-20 lg:py-24 bg-[#f5f9ff]">
-        <div className="mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <FadeInUp>
-              <p className="text-xs font-semibold tracking-widest uppercase mb-4 text-[#2b5e93]">
-                Document audit
-              </p>
-              <h2 className="text-3xl md:text-4xl leading-snug mb-5 font-heading font-bold text-primary">
-                Most OCI and visa files are rejected because of documents.
-                <span className="text-[#1c69dd]"> We fix that first.</span>
-              </h2>
-              <p className="text-base mb-8 leading-relaxed text-textMuted">
-                From our experience, more than half of applicants do not have documents in the exact required format.
-                Typical issues include:
-              </p>
-              <ul className="flex flex-col gap-3 mb-10">
-                {[
-                  "Name mismatch across documents",
-                  "Missing apostille or notarisation",
-                  "Wrong photo size or background",
-                  "Incorrect or incomplete supporting documents",
-                  "Missing bilingual certificates",
-                ].map((item) => (
-                  <li key={item} className="flex items-start gap-3 text-primary text-[15px] font-medium">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center mt-0.5 bg-[#e8f1ff]">
-                      <FileX className="w-3 h-3 text-[#1c69dd]" />
-                    </span>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <Link href="/document-audit">
-                <Button variant="outline" className="text-base py-3 px-8 rounded-xl font-semibold border-[#cfe2ff] text-primary bg-white hover:bg-[#f2f8ff]">
-                  Learn About Document Audit
-                </Button>
-              </Link>
-            </FadeInUp>
-
-            <FadeInUp delay={0.2} className="relative">
-              <div className="absolute top-5 -right-2 w-full h-full rounded-3xl -z-10 bg-[#dcecff]" />
-              <div className="relative z-10">
-                <div className="rounded-3xl p-8 sm:p-10 bg-white border border-[#d4e7ff] shadow-[0_12px_40px_rgba(30,74,135,0.12)]">
-                <div className="flex items-center gap-3 mb-8">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#e8f1ff]">
-                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                      <path d="M9 2L3 5v5c0 4 2.5 6.5 6 7 3.5-.5 6-3 6-7V5L9 2z" stroke="#1c69dd" strokeWidth="1.4" strokeLinejoin="round" />
-                      <path d="M6.5 9l1.5 1.5L11.5 7" stroke="#1c69dd" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-heading font-bold text-primary">
-                    Our 3-step safety net
-                  </h3>
-                </div>
-                <div className="flex flex-col gap-6">
-                  {[
-                    { num: "1", bg: "#1c69dd", color: "#fff", label: "We review your documents before full-service payment.", icon: false },
-                    { num: "2", bg: "#33A1FD", color: "#fff", label: "We tell you what is missing, what needs correction, and how to fix it.", icon: false },
-                    { num: "✓", bg: "#e8f1ff", color: "#1c69dd", label: "Once documents are cleared, we proceed with your full application.", icon: true },
-                  ].map((step, i, arr) => (
-                    <div key={i} className="flex gap-4 items-start">
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold"
-                        style={{ background: step.bg, color: step.color }}
-                      >
-                        {step.icon ? <CheckCircle className="w-4 h-4" /> : step.num}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm text-slate-600 leading-7">
-                          {step.label}
-                        </p>
-                        {i < arr.length - 1 && (
-                          <div className="mt-5 h-px w-full bg-[#e5eeff]" />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-8 rounded-xl px-4 py-3 flex items-center gap-3 bg-[#f5f9ff] border border-[#d6e8ff]">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0 bg-[#1c69dd]" />
-                  <p className="text-[13px] text-[#2b5e93] font-semibold">
-                    We are a private independent service, not a government website.
-                  </p>
-                </div>
-                </div>
-              </div>
-            </FadeInUp>
-
-          </div>
-        </div>
-      </section>
-
-
-
+      <DocumentAuditSection />
       {/* SECTION 3: How It Works */}
   <section className="py-20 lg:py-24 relative overflow-hidden" style={{background: 'linear-gradient(160deg, #f0f6ff 0%, #fafcff 50%, #eef5ff 100%)'}}>
   {/* bg blobs */}
@@ -342,57 +220,9 @@ export default async function Home() {
         </div>
       </div>
 
-      {/* SECTION 5: Trust Features */}
-      <section className="py-20 lg:py-24 bg-[#f8fbff]">
-        <div className="mx-auto px-4 sm:px-6 lg:px-8">
-          <FadeInUp className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary mb-4">
-              Why UK & US Families Trust Us
-            </h2>
-            <p className="text-textMuted max-w-3xl mx-auto">
-              A specialist process, clear communication, and transparent pricing from start to finish.
-            </p>
-          </FadeInUp>
+      <TrustFeaturesSection />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {features.map((feature, i) => (
-              <FadeInUp key={feature.title} delay={i * 0.1}>
-                <div
-                  className="bg-bg-page rounded-2xl p-6 border border-border group hover:-translate-y-2 hover:shadow-xl transition-transform duration-300 ease-out focus-within:ring-2 focus-within:ring-primary/20"
-                  tabIndex={0}
-                  role="article"
-                  aria-label={feature.title}
-                >
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/10 to-primary/5 text-primary flex items-center justify-center mb-4 transform transition-transform duration-300 group-hover:scale-110">
-                    {feature.icon}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-heading font-bold text-primary mb-2">{feature.title}</h3>
-                    <div className="ml-2 text-xs text-primary/70 uppercase font-semibold tracking-wide hidden sm:inline-flex">Trusted</div>
-                  </div>
-                  <p className="text-textMuted text-sm leading-relaxed">{feature.description}</p>
-                  {feature.points && (
-                    <ul className="mt-3 space-y-1 text-sm text-textMuted">
-                      {feature.points.map((p, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="mt-0.5 text-primary font-semibold">•</span>
-                          <span>{p}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <div className="mt-4 flex items-center justify-between">
-                    <Link href="/services" className="text-primary text-sm font-semibold opacity-90 hover:opacity-100 transition-opacity">Learn more</Link>
-                    {/* <div className="text-xs text-textMuted">No hidden fees</div> */}
-                  </div>
-                </div>
-              </FadeInUp>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* SECTION 6: Testimonials */}
+      {/* Testimonials */}
       <section className="py-10 lg:py-14 bg-white">
         <div className="mx-auto px-4 sm:px-6 lg:px-8">
           <FadeInUp className="mb-10 text-center">

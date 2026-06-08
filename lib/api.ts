@@ -354,8 +354,48 @@ export type ApostilleTrackStatusLog = {
   metadata: Record<string, unknown>;
 };
 
+export type ApostilleFlaggedDocument = {
+  document_type?: string;
+  document_name?: string;
+  issue_reason?: string;
+  required_action?: string;
+  status?: string;
+  reuploaded?: boolean;
+};
+
+export type ApostilleCaseSummary = {
+  reference_number?: string;
+  file_number?: string;
+  document_type?: string;
+  status?: string;
+  stage_label?: string;
+  current_stage?: string;
+  kanban_stage?: string;
+  precheck_submitted_at?: string | null;
+  payment_paid_at?: string | null;
+  payment_amount?: string | null;
+  payment_currency?: string;
+  payment_verified?: boolean;
+  final_submission_at?: string | null;
+  government_submitted_at?: string | null;
+  government_reference?: string | null;
+  expected_delivery_at?: string | null;
+  delivered_at?: string | null;
+  review_note?: string | null;
+};
+
+export type ApostilleTrackDocument = {
+  id: number;
+  name: string;
+  document_type?: string;
+  document_type_label?: string;
+  uploaded_at?: string | null;
+  downloadable?: boolean;
+};
+
 export type ApostilleTrackCaseResponse = {
   file_number: string;
+  reference_number?: string;
   full_name: string;
   document_type: string;
   status: string;
@@ -364,11 +404,36 @@ export type ApostilleTrackCaseResponse = {
   quote_currency: string;
   payment_verified: boolean;
   final_submission_completed: boolean;
+  case_summary?: ApostilleCaseSummary;
+  delivery?: {
+    delivery_name?: string;
+    delivery_address_line1?: string;
+    delivery_address_line2?: string;
+    delivery_city?: string;
+    delivery_postcode?: string;
+    delivery_country?: string;
+    delivery_special_instructions?: string;
+  };
+  correction_requested_at?: string | null;
   created_at: string | null;
   updated_at: string | null;
   messages: ApostilleTrackMessage[];
   status_logs: ApostilleTrackStatusLog[];
-  documents: Array<{ id: number; name: string }>;
+  documents: ApostilleTrackDocument[];
+  flagged_documents?: ApostilleFlaggedDocument[];
+  pending_documents?: ApostilleFlaggedDocument[];
+  reuploaded_documents?: ApostilleFlaggedDocument[];
+  document_overview?: {
+    requested_documents?: ApostilleFlaggedDocument[];
+    uploaded_documents?: Array<{
+      document_type?: string;
+      document_name?: string;
+      original_filename?: string;
+      is_reupload?: boolean;
+      is_requested?: boolean;
+    }>;
+  };
+  all_corrections_submitted?: boolean;
 };
 
 /** Legacy GET track by reference in URL path */
@@ -376,6 +441,7 @@ export type ApostilleTrackResponse = ApostilleTrackCaseResponse;
 
 export type ApplicationDetailResponse = {
   id: number;
+  latest_audit_id?: number | null;
   reference_number: string;
   file_number?: string;
   service_type?: string;
@@ -447,11 +513,34 @@ export type ApplicationDocumentResponse = {
   id: number;
   document_type?: string;
   document_name?: string;
+  original_filename?: string;
+  file_path?: string;
   verification_status?: string;
   verification_notes?: string;
   finding_type?: string;
   required_action?: string;
   priority?: string;
+};
+
+export const openApplicationDocument = async (
+  documentId: number,
+  options?: { fileUrl?: string; previewUrl?: string },
+): Promise<void> => {
+  if (options?.previewUrl) {
+    window.open(options.previewUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  const url = (options?.fileUrl || "").trim() || `${API_BASE_URL}/documents/${documentId}/file/`;
+  const response = await authenticatedFetch(url, { method: "GET" });
+  if (!response.ok) {
+    throw new Error("Unable to open document.");
+  }
+
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  window.open(blobUrl, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 };
 
 export type PublicTestimonial = {
@@ -629,6 +718,18 @@ export const verifyApostillePayment = async (
   return (raw?.data || raw) as { status: string };
 };
 
+export const submitApostilleCorrectionUpload = async (formData: FormData): Promise<ApostilleTrackCaseResponse> => {
+  const response = await fetch(`${API_BASE_URL}/apostille/correction-upload/`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as ApostilleTrackCaseResponse;
+};
+
 export const submitApostilleFinalDetails = async (formData: FormData): Promise<{ status: string }> => {
   const response = await fetch(`${API_BASE_URL}/apostille/final-submission/`, {
     method: 'POST',
@@ -653,6 +754,35 @@ export const sendApostilleCustomerMessage = async (
   if (!response.ok) {
     throw new Error(await extractErrorMessage(response));
   }
+};
+
+export const downloadApostilleDocument = async (
+  fileNumber: string,
+  email: string,
+  documentId: number,
+  fallbackName?: string,
+): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/apostille/document/download/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_number: fileNumber, email, document_id: documentId }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const utfMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+  const fileName = decodeURIComponent(utfMatch?.[1] || plainMatch?.[1] || fallbackName || `document-${documentId}`);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 };
 
 export const getApplicationByReference = async (referenceNumber: string): Promise<ApplicationDetailResponse> => {
@@ -781,7 +911,7 @@ export const startAudit = async (
  * Uploads a checklist document file for an audit item.
  */
 export const uploadDocument = async (
-  auditId: number,
+  auditId: number | null | undefined,
   checklistItemId: string | number,
   file: File,
   referenceNumber: string,
@@ -789,7 +919,9 @@ export const uploadDocument = async (
 ): Promise<UploadDocumentResponse> => {
   try {
     const formData = new FormData();
-    formData.append('audit_id', String(auditId));
+    if (auditId != null && Number.isFinite(auditId) && auditId > 0) {
+      formData.append('audit_id', String(auditId));
+    }
     formData.append('checklist_item_id', String(checklistItemId));
     formData.append('reference_number', referenceNumber);
     if (documentType && documentType.trim()) {

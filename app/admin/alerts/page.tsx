@@ -346,9 +346,10 @@ export default function AlertsPage() {
       </td>
       {/* Owner column — show actor name if available */}
       <td className="px-4 py-2.5">
-        {notification.actor
-          ? notification.actor
-          : notification.type_label || getAlertTypeLabel(notification.type)}
+        {notification.assignee_name
+          || notification.actor
+          || notification.type_label
+          || getAlertTypeLabel(notification.type)}
       </td>
       {/* Age column */}
       <td className="px-4 py-2.5">

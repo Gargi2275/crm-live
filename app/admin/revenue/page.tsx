@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getAdminDashboardOverview, type AdminDashboardOverview } from "@/lib/admin-auth";
+import Link from "next/link";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import {
+  getAdminDashboardOverview,
+  isStaffOwnRevenueDashboard,
+  type AdminDashboardOverview,
+} from "@/lib/admin-auth";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line } from "recharts";
 import { motion } from "framer-motion";
 import { TrendingUp, BarChart3, Landmark } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function RevenuePage() {
+  const { adminUser } = useAdminAuth();
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
 
   useEffect(() => {
@@ -23,8 +30,11 @@ export default function RevenuePage() {
     void loadDashboard();
   }, []);
 
+  const isOwnRevenue = isStaffOwnRevenueDashboard(dashboardData, adminUser?.role);
+
   const formatInr = (amount: number) => `₹${amount.toLocaleString("en-IN")}`;
-  const kpiSnapshot = dashboardData?.kpi_snapshot;
+  const adminKpiSnapshot = dashboardData?.kpi_snapshot;
+  const staffKpiSnapshot = dashboardData?.my_revenue?.kpi_snapshot ?? adminKpiSnapshot;
   const healthMetrics = dashboardData?.health_metrics;
   const dailyRevenue = dashboardData?.daily_revenue ?? [];
   const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
@@ -47,6 +57,92 @@ export default function RevenuePage() {
     [serviceRevenueBreakdown],
   );
 
+  const staffRevenueRows = useMemo(
+    () =>
+      [...(dashboardData?.staff_members ?? [])]
+        .filter((staff) => String(staff.role || "").toLowerCase() !== "admin")
+        .sort((left, right) => Number(right.revenue_total || 0) - Number(left.revenue_total || 0)),
+    [dashboardData?.staff_members],
+  );
+
+  if (isOwnRevenue) {
+    const staffRevenue = staffKpiSnapshot;
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-4 font-body max-w-[1100px] mx-auto"
+      >
+        <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">My revenue</h1>
+        <p className="text-sm text-[#627D98]">
+          {dashboardData?.staff_revenue_summary?.attribution_note ||
+            "Revenue from cases where you are on the latest assigned task."}
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-3">
+            <p className="text-xs text-[#627D98]">Today</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">
+              {formatInr(Number(staffRevenue?.revenue_today || 0))}
+            </p>
+          </div>
+          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-3">
+            <p className="text-xs text-[#627D98]">Last 30 days</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">
+              {formatInr(Number(staffRevenue?.revenue_30d || 0))}
+            </p>
+          </div>
+          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-3">
+            <p className="text-xs text-[#627D98]">All time</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">
+              {formatInr(Number(staffRevenue?.revenue_total || 0))}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-4">
+            <h2 className="text-[#102A43] font-heading font-semibold mb-2">My revenue (last 7 days)</h2>
+            <div className="h-[240px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dailyRevenue}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                  <XAxis dataKey="day" tick={{ fill: "#486581" }} />
+                  <YAxis tick={{ fill: "#486581" }} />
+                  <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                  <Bar dataKey="actual" fill="#009877" name="My revenue" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-4">
+            <h2 className="text-[#102A43] font-heading font-semibold mb-2">My revenue split</h2>
+            {serviceRows.length === 0 ? (
+              <p className="text-sm text-[#627D98]">No attributed revenue yet.</p>
+            ) : (
+              <div className="space-y-2 text-sm text-[#486581]">
+                {serviceRows.map((row) => (
+                  <p key={row.service}>
+                    {row.service}: {formatInr(row.revenue)} ({row.share.toFixed(1)}%)
+                  </p>
+                ))}
+                <p className="pt-2 border-t border-[#E5EAF0] text-xs">
+                  Order {formatInr(Number(staffRevenue?.order_revenue || 0))} · Audit{" "}
+                  {formatInr(Number(staffRevenue?.audit_revenue || 0))} · Full payment{" "}
+                  {formatInr(Number(staffRevenue?.full_revenue || 0))}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Link href="/admin" className="text-sm font-semibold text-[#009877] hover:underline">
+          ← Back to dashboard
+        </Link>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -59,7 +155,7 @@ export default function RevenuePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
           <p className="text-xs text-[#627D98]">Conversion</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><TrendingUp className="w-4 h-4 text-[#009877]" />{kpiSnapshot?.conversion ?? "0%"}</p>
+          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><TrendingUp className="w-4 h-4 text-[#009877]" />{adminKpiSnapshot?.conversion ?? healthMetrics?.conversion ?? "0%"}</p>
         </div>
         <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
           <p className="text-xs text-[#627D98]">Weekly collections</p>
@@ -130,6 +226,52 @@ export default function RevenuePage() {
         </div>
       </div>
 
+      <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
+        <h2 className="text-[#102A43] font-heading font-semibold mb-1">Revenue by staff</h2>
+        <p className="text-xs text-[#627D98] mb-3">
+          {dashboardData?.staff_revenue_summary?.attribution_note ||
+            "Credited to the staff member on the latest assigned task per application."}
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-[#F5F7FA] text-[#486581]">
+              <tr>
+                <th className="px-4 py-2.5 text-left">Staff</th>
+                <th className="px-4 py-2.5 text-left">Role</th>
+                <th className="px-4 py-2.5 text-left">Last 30 days</th>
+                <th className="px-4 py-2.5 text-left">All time</th>
+                <th className="px-4 py-2.5 text-left">Paid cases</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+              {staffRevenueRows.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-4 text-[#627D98]">
+                    No staff revenue data yet.
+                  </td>
+                </tr>
+              ) : (
+                staffRevenueRows.map((staff) => (
+                  <tr key={staff.id}>
+                    <td className="px-4 py-2.5 font-medium text-[#102A43]">{staff.name}</td>
+                    <td className="px-4 py-2.5 capitalize">{String(staff.role || "").replace(/_/g, " ")}</td>
+                    <td className="px-4 py-2.5">{formatInr(Number(staff.revenue_30d || 0))}</td>
+                    <td className="px-4 py-2.5">{formatInr(Number(staff.revenue_total || 0))}</td>
+                    <td className="px-4 py-2.5">{staff.paid_cases_total ?? 0}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {dashboardData?.staff_revenue_summary ? (
+          <p className="text-xs text-[#627D98] mt-3">
+            Unattributed (no task assignee): {formatInr(dashboardData.staff_revenue_summary.unattributed_revenue_total ?? 0)} all
+            time · {formatInr(dashboardData.staff_revenue_summary.unattributed_revenue_window ?? 0)} last 30 days
+          </p>
+        ) : null}
+      </div>
+
       <div className="space-y-2">
         <details className="bg-white border border-[#D9E1EA] rounded-[12px] p-3 group">
           <summary className="list-none cursor-pointer text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
@@ -149,4 +291,3 @@ export default function RevenuePage() {
     </motion.div>
   );
 }
-

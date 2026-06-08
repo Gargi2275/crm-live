@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { redirect } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { listEasyFlyBookings, type EasyFlyBooking } from "@/lib/easyfly";
 import { TrendingUp, Download } from "lucide-react";
+import toast from "react-hot-toast";
 
 type RefundStatus = "none" | "pending" | "credit_note";
 type ScheduleChange = "none" | "minor" | "major";
@@ -34,7 +35,7 @@ function formatPaymentMode(mode: PaymentMode) {
   return "Card";
 }
 
-function csvEscape(value: string | number | boolean) {
+function csvEscape(value: string | number | boolean | null) {
   const text = String(value ?? "");
   if (text.includes(",") || text.includes("\n") || text.includes('"')) {
     return `"${text.replace(/"/g, '""')}"`;
@@ -57,10 +58,145 @@ function getRangeStart(now: Date, range: DateRange) {
   return new Date(date.getFullYear(), 0, 1);
 }
 
-export default function EasyFlyRevenuePage() {
-  const { adminUser } = useAdminAuth();
-  if (adminUser?.role !== "admin") redirect("/admin/easyfly");
+type StaffRevenueEntryForm = {
+  bookingReference: string;
+  customerName: string;
+  supplier: string;
+  amountPaid: string;
+  amountReceived: string;
+  paymentMode: PaymentMode;
+  notes: string;
+};
 
+const emptyStaffRevenueEntry: StaffRevenueEntryForm = {
+  bookingReference: "",
+  customerName: "",
+  supplier: "",
+  amountPaid: "",
+  amountReceived: "",
+  paymentMode: "cash",
+  notes: "",
+};
+
+const STAFF_ENTRY_ROLES = new Set(["case_processor", "reviewer"]);
+
+function EasyFlyStaffRevenueEntryForm() {
+  const [form, setForm] = useState<StaffRevenueEntryForm>(emptyStaffRevenueEntry);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    toast.success("Revenue entry submitted. Awaiting admin review.");
+    setForm(emptyStaffRevenueEntry);
+  };
+
+  return (
+    <div className="space-y-4 font-body max-w-[720px] mx-auto">
+      <div>
+        <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43] inline-flex items-center gap-2">
+          <TrendingUp className="w-6 h-6 text-[#009877]" />
+          Daily Revenue Entry
+        </h1>
+        <p className="mt-1 text-sm text-[#627D98]">Submit today&apos;s booking revenue for admin review</p>
+      </div>
+
+      <div className="bg-[#F9DBAF]/35 text-[#8D5E12] border border-[#D4A84F]/40 rounded-[12px] px-4 py-3 text-sm">
+        You can only enter today&apos;s revenue. Previous records are not visible to staff. Entries are locked after submission.
+      </div>
+
+      <form onSubmit={handleSubmit} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-5 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-[#627D98]">Booking Reference</span>
+            <input
+              type="text"
+              value={form.bookingReference}
+              onChange={(event) => setForm((current) => ({ ...current, bookingReference: event.target.value }))}
+              className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+              required
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-[#627D98]">Customer Name</span>
+            <input
+              type="text"
+              value={form.customerName}
+              onChange={(event) => setForm((current) => ({ ...current, customerName: event.target.value }))}
+              className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+              required
+            />
+          </label>
+          <label className="block space-y-1.5 md:col-span-2">
+            <span className="text-xs font-medium text-[#627D98]">Supplier</span>
+            <input
+              type="text"
+              value={form.supplier}
+              onChange={(event) => setForm((current) => ({ ...current, supplier: event.target.value }))}
+              className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+              required
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-[#627D98]">Ticket Amount / Amount Paid to Supplier</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.amountPaid}
+              onChange={(event) => setForm((current) => ({ ...current, amountPaid: event.target.value }))}
+              className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+              required
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-[#627D98]">Amount Received from Customer</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.amountReceived}
+              onChange={(event) => setForm((current) => ({ ...current, amountReceived: event.target.value }))}
+              className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+              required
+            />
+          </label>
+          <label className="block space-y-1.5 md:col-span-2">
+            <span className="text-xs font-medium text-[#627D98]">Mode of Payment</span>
+            <select
+              value={form.paymentMode}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, paymentMode: event.target.value as PaymentMode }))
+              }
+              className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
+              required
+            >
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="bank_transfer">Bank Transfer</option>
+            </select>
+          </label>
+          <label className="block space-y-1.5 md:col-span-2">
+            <span className="text-xs font-medium text-[#627D98]">Notes</span>
+            <textarea
+              value={form.notes}
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+              rows={4}
+              className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD] resize-y"
+            />
+          </label>
+        </div>
+
+        <button
+          type="submit"
+          className="inline-flex items-center justify-center rounded-[10px] bg-[#009877] px-4 py-2.5 text-sm font-heading font-semibold text-white hover:bg-[#007B61]"
+        >
+          Submit
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function EasyFlyAdminRevenueView() {
   const [dateRange, setDateRange] = useState<DateRange>("month");
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -405,4 +541,29 @@ export default function EasyFlyRevenuePage() {
       </section>
     </div>
   );
+}
+
+export default function EasyFlyRevenuePage() {
+  const router = useRouter();
+  const { adminUser } = useAdminAuth();
+  const role = adminUser?.role ?? "";
+  const isAdmin = role === "admin";
+  const isStaffEntryRole = STAFF_ENTRY_ROLES.has(role);
+
+  useEffect(() => {
+    if (!adminUser) return;
+    if (!isAdmin && !isStaffEntryRole) {
+      router.replace("/admin/easyfly");
+    }
+  }, [adminUser, isAdmin, isStaffEntryRole, router]);
+
+  if (!adminUser || (!isAdmin && !isStaffEntryRole)) {
+    return null;
+  }
+
+  if (isStaffEntryRole) {
+    return <EasyFlyStaffRevenueEntryForm />;
+  }
+
+  return <EasyFlyAdminRevenueView />;
 }

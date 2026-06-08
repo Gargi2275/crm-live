@@ -1,8 +1,8 @@
 import { FadeInUp } from "@/components/FadeInUp";
+import { buildPageMetadata } from "@/lib/seo";
+import { PAGE_SEO } from "@/lib/seo-pages";
 
-export const metadata = {
-  title: "Disclaimer | FlyOCI",
-};
+export const metadata = buildPageMetadata(PAGE_SEO.disclaimer);
 
 export default function DisclaimerPage() {
   return (

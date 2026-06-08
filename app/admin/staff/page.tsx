@@ -1,482 +1,631 @@
 "use client";
 
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { useRouter } from "next/navigation";
 import {
-  AccessScope,
-  AdminStaffUser,
-  StaffRole,
+  Briefcase,
+  KeyRound,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  UserCheck,
+  UserMinus,
+  Users,
+  X,
+} from "lucide-react";
+import {
   createStaffUserWithPassword,
-  deleteStaffUser,
   deactivateStaffUser,
-  listStaffUsers,
+  deleteStaffUser,
+  getAdminRolesOverview,
+  listStaffUsersWithSummary,
   resetStaffUserPassword,
-  unlockStaffUser,
   updateStaffUser,
+  type AdminRoleOverview,
+  type AdminStaffListSummary,
+  type AdminStaffUser,
+  type AccessScope,
 } from "@/lib/admin-auth";
-import { useAdminAuth } from "@/context/AdminAuthContext";
 
-export default function StaffPage() {
-  const router = useRouter();
-  const { adminUser, logout } = useAdminAuth();
-  const [staffUsers, setStaffUsers] = useState<AdminStaffUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [resettingStaffId, setResettingStaffId] = useState<number | null>(null);
+const ACCESS_SCOPES: AccessScope[] = ["all", "easyfly_only", "exclude_easyfly"];
 
-  const [newStaff, setNewStaff] = useState({
-    full_name: "",
-    username: "",
-    email: "",
-    phone: "",
-    password: "",
-    role: "case_processor" as StaffRole,
-    access_scope: "all" as AccessScope,
+const emptyForm = () => ({
+  full_name: "",
+  username: "",
+  email: "",
+  phone: "",
+  password: "",
+  role: "support_agent",
+  access_scope: "all" as AccessScope,
+  is_active: true,
+});
+
+function formatLastLogin(value?: string | null) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
+}
 
-  const canCreate = adminUser?.role === "admin";
-  const isAdmin = adminUser?.role === "admin";
-  const visibleStaffUsers = useMemo(() => staffUsers.filter((row) => row.role !== "admin"), [staffUsers]);
+function roleLabel(roles: AdminRoleOverview[], role?: string) {
+  return roles.find((r) => r.id === role)?.label || role || "—";
+}
 
-  const handleAuthFailure = (error: unknown): boolean => {
-    const message = error instanceof Error ? error.message : "";
-    const normalized = message.toLowerCase();
-    const isSessionError =
-      normalized.includes("expired") ||
-      normalized.includes("unauthorized") ||
-      normalized.includes("401") ||
-      normalized.includes("login again");
+export default function AdminStaffPage() {
+  const [staff, setStaff] = useState<AdminStaffUser[]>([]);
+  const [summary, setSummary] = useState<AdminStaffListSummary>({ total: 0, active: 0, inactive: 0 });
+  const [roles, setRoles] = useState<AdminRoleOverview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [resetUser, setResetUser] = useState<AdminStaffUser | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [form, setForm] = useState(emptyForm());
 
-    if (isSessionError) {
-      toast.error("Session expired. Please login again.");
-      logout();
-      router.replace("/admin/login");
-      return true;
-    }
+  const assignableRoles = useMemo(
+    () => roles.filter((role) => role.id !== "admin"),
+    [roles],
+  );
 
-    return false;
-  };
-
-  const loadStaffUsers = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await listStaffUsers();
-      setStaffUsers(rows);
+      const [staffPayload, roleRows] = await Promise.all([
+        listStaffUsersWithSummary({ excludeAdmin: true }),
+        getAdminRolesOverview(),
+      ]);
+      setStaff(staffPayload.staff_users);
+      setSummary(staffPayload.summary);
+      setRoles(roleRows.filter((role) => role.id !== "admin"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load staff users.";
-      toast.error(message);
-      if (message.toLowerCase().includes("expired")) {
-        logout();
-      }
+      toast.error(error instanceof Error ? error.message : "Failed to load staff.");
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    void loadStaffUsers();
   }, []);
 
-  const activeCount = useMemo(() => visibleStaffUsers.filter((row) => row.is_active !== false).length, [visibleStaffUsers]);
-  const inactiveCount = useMemo(() => visibleStaffUsers.filter((row) => row.is_active === false).length, [visibleStaffUsers]);
-  const hasActiveAdmin = useMemo(
-    () => staffUsers.some((row) => row.role === "admin" && row.is_active !== false),
-    [staffUsers],
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const kpiCards = useMemo(
+    () => [
+      { label: "Total staff", value: summary.total, icon: Users, tone: "text-[#102A43]" },
+      { label: "Active", value: summary.active, icon: UserCheck, tone: "text-[#006F57]" },
+      { label: "Inactive", value: summary.inactive, icon: UserMinus, tone: "text-[#9C4F17]" },
+    ],
+    [summary],
   );
 
-  const roleCounts = useMemo(() => {
-    return visibleStaffUsers.reduce<Record<string, number>>((acc, row) => {
-      acc[row.role] = (acc[row.role] || 0) + 1;
-      return acc;
-    }, {});
-  }, [visibleStaffUsers]);
-
-  const allStaffRoles: StaffRole[] = ["admin", "ops_manager", "case_processor", "reviewer", "support_agent"];
-  const allowedCreateRoles: StaffRole[] = hasActiveAdmin
-    ? ["ops_manager", "case_processor", "reviewer", "support_agent"]
-    : allStaffRoles;
-
-  useEffect(() => {
-    if (hasActiveAdmin && newStaff.role === "admin") {
-      setNewStaff((prev) => ({ ...prev, role: "case_processor" }));
-    }
-  }, [hasActiveAdmin, newStaff.role]);
-
-  const handleCreate = async () => {
-    if (!newStaff.full_name || !newStaff.username || !newStaff.password) {
-      toast.error("Full name, username, and password are required.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await createStaffUserWithPassword(newStaff);
-      toast.success("Staff user created successfully.");
-      setNewStaff({ full_name: "", username: "", email: "", phone: "", password: "", role: "case_processor", access_scope: "all" });
-      await loadStaffUsers();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create staff user.");
-    } finally {
-      setSaving(false);
-    }
+  const closeModal = () => {
+    setEditId(null);
+    setShowCreate(false);
+    setForm(emptyForm());
   };
 
-  const handleRoleChange = async (staffId: number, role: StaffRole) => {
-    setSaving(true);
-    try {
-      await updateStaffUser(staffId, { role });
-      toast.success("Role updated.");
-      await loadStaffUsers();
-    } catch (error) {
-      if (!handleAuthFailure(error)) {
-        toast.error(error instanceof Error ? error.message : "Failed to update role.");
-      }
-    } finally {
-      setSaving(false);
-    }
+  const startEdit = (user: AdminStaffUser) => {
+    setShowCreate(false);
+    setEditId(user.id);
+    setForm({
+      full_name: user.full_name || "",
+      username: user.username || "",
+      email: user.email || "",
+      phone: user.phone || "",
+      password: "",
+      role: user.role || "support_agent",
+      access_scope: user.access_scope || "all",
+      is_active: user.is_active !== false,
+    });
   };
 
-  const handleAccessScopeChange = async (staffId: number, access_scope: AccessScope) => {
-    setSaving(true);
-    try {
-      await updateStaffUser(staffId, { access_scope });
-      toast.success("Access scope updated.");
-      await loadStaffUsers();
-    } catch (error) {
-      if (!handleAuthFailure(error)) {
-        toast.error(error instanceof Error ? error.message : "Failed to update access scope.");
-      }
-    } finally {
-      setSaving(false);
-    }
+  const openCreate = () => {
+    setEditId(null);
+    setShowCreate(true);
+    setForm({
+      ...emptyForm(),
+      role: assignableRoles[0]?.id || "support_agent",
+    });
   };
 
-  const handleToggleActive = async (staffId: number, isActive: boolean) => {
-    setSaving(true);
-    try {
-      await updateStaffUser(staffId, { is_active: isActive });
-      toast.success("Status updated.");
-      if (!isActive && adminUser?.id === staffId) {
-        logout();
-        router.replace("/admin/login");
-        return;
-      }
-      await loadStaffUsers();
-    } catch (error) {
-      if (!handleAuthFailure(error)) {
-        toast.error(error instanceof Error ? error.message : "Failed to update status.");
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeactivate = async (staffId: number) => {
-    setSaving(true);
-    try {
-      await deactivateStaffUser(staffId);
-      toast.success("Staff user deactivated.");
-      if (adminUser?.id === staffId) {
-        logout();
-        router.replace("/admin/login");
-        return;
-      }
-      await loadStaffUsers();
-    } catch (error) {
-      if (!handleAuthFailure(error)) {
-        toast.error(error instanceof Error ? error.message : "Failed to deactivate user.");
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (staffId: number) => {
-    if (!confirm("Delete this staff user permanently?")) {
+  const handleSave = async () => {
+    if (!form.full_name.trim() || !form.username.trim()) {
+      toast.error("Name and username are required.");
       return;
     }
     setSaving(true);
     try {
-      await deleteStaffUser(staffId);
-      toast.success("Staff user deleted.");
-      await loadStaffUsers();
-    } catch (error) {
-      if (!handleAuthFailure(error)) {
-        toast.error(error instanceof Error ? error.message : "Failed to delete user.");
+      if (editId) {
+        const updated = await updateStaffUser(editId, {
+          full_name: form.full_name.trim(),
+          username: form.username.trim(),
+          email: form.email.trim() || null,
+          phone: form.phone.trim(),
+          role: form.role,
+          access_scope: form.access_scope,
+          is_active: form.is_active,
+        });
+        if (updated) {
+          setStaff((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+        }
+        toast.success("Staff updated.");
+      } else {
+        if (!form.password || form.password.length < 8) {
+          toast.error("Password must be at least 8 characters.");
+          return;
+        }
+        await createStaffUserWithPassword({
+          full_name: form.full_name.trim(),
+          username: form.username.trim(),
+          email: form.email.trim() || undefined,
+          phone: form.phone.trim() || undefined,
+          password: form.password,
+          role: form.role,
+          access_scope: form.access_scope,
+        });
+        toast.success("Staff created.");
       }
+      closeModal();
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save staff.");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleResetPassword = async (staffId: number) => {
-    const password = prompt("Enter new password for this staff user:");
-    if (!password) {
+  const handleDeactivate = async (user: AdminStaffUser) => {
+    if (!confirm(`Deactivate ${user.full_name}?`)) return;
+    setActionLoadingId(user.id);
+    try {
+      await deactivateStaffUser(user.id);
+      toast.success("Staff deactivated.");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not deactivate.");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleReactivate = async (user: AdminStaffUser) => {
+    setActionLoadingId(user.id);
+    try {
+      await updateStaffUser(user.id, { is_active: true });
+      toast.success("Staff reactivated.");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not reactivate.");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleDelete = async (user: AdminStaffUser) => {
+    if (!confirm(`Permanently delete ${user.full_name}? This cannot be undone.`)) return;
+    setActionLoadingId(user.id);
+    try {
+      await deleteStaffUser(user.id);
+      toast.success("Staff deleted.");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete staff.");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetUser) return;
+    if (!resetPassword || resetPassword.length < 8) {
+      toast.error("Password must be at least 8 characters.");
       return;
     }
-    setResettingStaffId(staffId);
-    try {
-      await resetStaffUserPassword(staffId, password);
-      toast.success("Password reset successfully.");
-    } catch (error) {
-      if (!handleAuthFailure(error)) {
-        toast.error(error instanceof Error ? error.message : "Failed to reset password.");
-      }
-    } finally {
-      setResettingStaffId(null);
-    }
-  };
-
-  const handleUnlock = async (staffId: number) => {
     setSaving(true);
     try {
-      await unlockStaffUser(staffId);
-      toast.success("Staff account unlocked.");
-      await loadStaffUsers();
+      await resetStaffUserPassword(resetUser.id, resetPassword);
+      toast.success("Password reset.");
+      setResetUser(null);
+      setResetPassword("");
     } catch (error) {
-      if (!handleAuthFailure(error)) {
-        toast.error(error instanceof Error ? error.message : "Failed to unlock account.");
-      }
+      toast.error(error instanceof Error ? error.message : "Could not reset password.");
     } finally {
       setSaving(false);
     }
   };
+
+  const renderActions = (user: AdminStaffUser, compact = false) => {
+    const busy = actionLoadingId === user.id;
+    const btnClass = compact
+      ? "inline-flex items-center justify-center gap-1 rounded-[8px] border px-2 py-1.5 text-xs font-semibold"
+      : "inline-flex items-center justify-center gap-1 rounded-[8px] border p-1.5";
+
+    return (
+      <div className={`flex flex-wrap gap-1 ${compact ? "w-full" : ""}`}>
+        <button
+          type="button"
+          onClick={() => startEdit(user)}
+          disabled={busy}
+          className={`${btnClass} border-[#D9E1EA] hover:bg-[#F8FAFC] text-[#334E68]`}
+          title="Edit"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          {compact ? "Edit" : null}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setResetUser(user);
+            setResetPassword("");
+          }}
+          disabled={busy}
+          className={`${btnClass} border-[#D9E1EA] hover:bg-[#F8FAFC] text-[#0B69B7]`}
+          title="Reset password"
+        >
+          <KeyRound className="h-3.5 w-3.5" />
+          {compact ? "Reset" : null}
+        </button>
+        {user.is_active !== false ? (
+          <button
+            type="button"
+            onClick={() => void handleDeactivate(user)}
+            disabled={busy}
+            className={`${btnClass} border-amber-200 text-amber-700 hover:bg-amber-50`}
+            title="Deactivate"
+          >
+            <UserMinus className="h-3.5 w-3.5" />
+            {compact ? "Deactivate" : null}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleReactivate(user)}
+            disabled={busy}
+            className={`${btnClass} border-[#009877]/30 text-[#006F57] hover:bg-[#009877]/10`}
+            title="Reactivate"
+          >
+            <UserCheck className="h-3.5 w-3.5" />
+            {compact ? "Activate" : null}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void handleDelete(user)}
+          disabled={busy}
+          className={`${btnClass} border-rose-200 text-rose-600 hover:bg-rose-50`}
+          title="Delete"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {compact ? "Delete" : null}
+        </button>
+      </div>
+    );
+  };
+
+  const modalOpen = showCreate || editId != null;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
-      className="animate-in fade-in zoom-in-95 duration-500 max-w-[1300px] mx-auto space-y-6 font-body"
+      className="space-y-4 font-body max-w-[1300px] mx-auto px-1 sm:px-0"
     >
-      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Staff User Management</h1>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-3">
-          <p className="text-xs text-[#627D98]">Total staff</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffUsers.length}</p>
-        </div>
-        <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-3">
-          <p className="text-xs text-[#627D98]">Active</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{activeCount}</p>
-        </div>
-        <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-3">
-          <p className="text-xs text-[#627D98]">Inactive</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{inactiveCount}</p>
-        </div>
-      </div>
-
-      {canCreate && (
-        <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-          <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-3">Create Staff User</h2>
-          {hasActiveAdmin ? (
-            <p className="mb-3 text-xs text-[#9C4F17]">
-              Only one active admin is allowed. Deactivate or change the current admin role first.
-            </p>
-          ) : null}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input
-              value={newStaff.full_name}
-              onChange={(e) => setNewStaff((prev) => ({ ...prev, full_name: e.target.value }))}
-              placeholder="Full name"
-              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
-            />
-            <input
-              value={newStaff.username}
-              onChange={(e) => setNewStaff((prev) => ({ ...prev, username: e.target.value.toLowerCase() }))}
-              placeholder="Username"
-              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
-            />
-            <input
-              value={newStaff.email}
-              onChange={(e) => setNewStaff((prev) => ({ ...prev, email: e.target.value }))}
-              placeholder="Email (optional)"
-              type="email"
-              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
-            />
-            <input
-              value={newStaff.phone}
-              onChange={(e) => setNewStaff((prev) => ({ ...prev, phone: e.target.value }))}
-              placeholder="Phone (optional)"
-              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
-            />
-            <input
-              value={newStaff.password}
-              type="password"
-              onChange={(e) => setNewStaff((prev) => ({ ...prev, password: e.target.value }))}
-              placeholder="Password"
-              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
-            />
-            <select
-              value={newStaff.role}
-              onChange={(e) =>
-                setNewStaff((prev) => ({
-                  ...prev,
-                  role: e.target.value as StaffRole,
-                }))
-              }
-              className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
-            >
-              {allowedCreateRoles.map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-
-            {isAdmin && (
-              <select
-                value={newStaff.access_scope}
-                onChange={(e) =>
-                  setNewStaff((prev) => ({
-                    ...prev,
-                    access_scope: e.target.value as AccessScope,
-                  }))
-                }
-                className="rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
-              >
-                <option value="all">All Access</option>
-                <option value="easyfly_only">EasyFly Only</option>
-                <option value="exclude_easyfly">FlyOCI only</option>
-              </select>
-            )}
-          </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-[22px] sm:text-[26px] leading-tight font-heading font-semibold text-[#102A43] flex items-center gap-2">
+          <Briefcase className="h-6 w-6 text-[#009877] shrink-0" />
+          Staff Management
+        </h1>
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={handleCreate}
-            disabled={saving}
-            className="mt-3 rounded-[10px] bg-[#009877] px-4 py-2 text-sm font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center gap-2 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
           >
-            {saving ? "Saving..." : "Create User"}
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-[10px] bg-[#009877] px-3 py-2 text-sm font-semibold text-white hover:bg-[#007B61]"
+          >
+            <Plus className="h-4 w-4" />
+            Add staff
           </button>
         </div>
-      )}
-
-      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
-        <h2 className="text-[#102A43] font-heading font-semibold mb-2">Role distribution</h2>
-        <p className="text-sm text-[#486581]">
-          {Object.entries(roleCounts)
-            .map(([role, count]) => `${role}: ${count}`)
-            .join(" | ") || "No staff records found."}
-        </p>
       </div>
 
-      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] overflow-hidden">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {kpiCards.map((card) => (
+          <div key={card.label} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-[#627D98]">{card.label}</p>
+              <card.icon className={`h-4 w-4 ${card.tone}`} />
+            </div>
+            <p className={`mt-1 text-xl sm:text-2xl font-heading font-semibold ${card.tone}`}>{card.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Mobile cards */}
+      <div className="space-y-3 md:hidden">
+        {loading ? (
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-6 text-center text-sm text-[#627D98]">Loading…</div>
+        ) : staff.length === 0 ? (
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-6 text-center text-sm text-[#627D98]">No staff accounts found.</div>
+        ) : (
+          staff.map((user) => (
+            <div key={user.id} className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-heading font-semibold text-[#102A43] truncate">{user.full_name}</p>
+                  <p className="text-xs text-[#627D98] font-mono truncate">@{user.username}</p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    user.is_active !== false
+                      ? "bg-[#009877]/12 text-[#006F57]"
+                      : "bg-[#FEF3C7] text-[#9C4F17]"
+                  }`}
+                >
+                  {user.is_active !== false ? "Active" : "Inactive"}
+                </span>
+              </div>
+              <dl className="grid grid-cols-1 gap-1.5 text-sm text-[#486581]">
+                <div className="flex justify-between gap-2">
+                  <dt className="text-[#627D98]">Email</dt>
+                  <dd className="text-right truncate">{user.email || "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-[#627D98]">Role</dt>
+                  <dd className="text-right">{roleLabel(roles, user.role)}</dd>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-[#627D98]">Last login</dt>
+                  <dd className="text-right text-xs">{formatLastLogin(user.last_login)}</dd>
+                </div>
+              </dl>
+              {renderActions(user, true)}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden">
         <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
-          <h2 className="text-sm font-heading font-semibold text-[#102A43]">Staff users</h2>
-          <span className="text-xs text-[#627D98]">{loading ? "Loading..." : `${visibleStaffUsers.length} records`}</span>
+          <h2 className="text-sm font-heading font-semibold text-[#102A43]">Staff accounts</h2>
+          <span className="text-xs text-[#627D98]">{summary.total} users</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[880px] text-sm">
             <thead className="bg-[#F5F7FA] text-[#486581]">
               <tr>
-                <th className="px-4 py-2.5 text-left">Name</th>
-                <th className="px-4 py-2.5 text-left">Email</th>
-                <th className="px-4 py-2.5 text-left">Role</th>
-                <th className="px-4 py-2.5 text-left">Access scope</th>
-                <th className="px-4 py-2.5 text-left">Active</th>
-                <th className="px-4 py-2.5 text-left">Last login</th>
-                <th className="px-4 py-2.5 text-left">Actions</th>
+                <th className="px-4 py-2.5 text-left font-medium">Name</th>
+                <th className="px-4 py-2.5 text-left font-medium">Username</th>
+                <th className="px-4 py-2.5 text-left font-medium">Email</th>
+                <th className="px-4 py-2.5 text-left font-medium">Role</th>
+                <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                <th className="px-4 py-2.5 text-left font-medium">Last login</th>
+                <th className="px-4 py-2.5 text-left font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              {visibleStaffUsers.map((row) => (
-                <tr key={row.id}>
-                  <td className="px-4 py-2.5">{row.full_name}</td>
-                  <td className="px-4 py-2.5">{row.email}</td>
-                  <td className="px-4 py-2.5">
-                    {isAdmin ? (
-                      <select
-                        value={row.role}
-                        onChange={(e) => handleRoleChange(row.id, e.target.value as StaffRole)}
-                        className="rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-xs"
-                      >
-                        {(hasActiveAdmin && row.role !== "admin"
-                          ? ["ops_manager", "case_processor", "reviewer", "support_agent"]
-                          : allStaffRoles).map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      row.role
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {isAdmin ? (
-                      <select
-                        value={row.access_scope ?? "all"}
-                        onChange={(e) => handleAccessScopeChange(row.id, e.target.value as AccessScope)}
-                        className="rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-xs"
-                      >
-                        <option value="all">All Access</option>
-                        <option value="easyfly_only">EasyFly Only</option>
-                        <option value="exclude_easyfly">FlyOCI only</option>
-                      </select>
-                    ) : (
-                      row.access_scope ?? "all"
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {isAdmin ? (
-                      <input
-                        type="checkbox"
-                        checked={row.is_active !== false}
-                        onChange={(e) => handleToggleActive(row.id, e.target.checked)}
-                      />
-                    ) : row.is_active !== false ? (
-                      "Yes"
-                    ) : (
-                      "No"
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">{row.last_login ? new Date(row.last_login).toLocaleString() : "Never"}</td>
-                  <td className="px-4 py-2.5">
-                    {isAdmin && (
-                      <div className="flex flex-wrap gap-2">
-                        {row.is_active !== false && (
-                          <button
-                            className="rounded-[8px] bg-[#B42318]/10 px-2 py-1 text-xs text-[#B42318]"
-                            onClick={() => handleDeactivate(row.id)}
-                          >
-                            Deactivate
-                          </button>
-                        )}
-                        <button
-                          className="rounded-[8px] bg-[#0B69B7]/10 px-2 py-1 text-xs text-[#0B69B7] disabled:opacity-50"
-                          onClick={() => handleResetPassword(row.id)}
-                          disabled={resettingStaffId === row.id}
-                        >
-                          {resettingStaffId === row.id ? "Resetting..." : "Reset Password"}
-                        </button>
-                        {row.is_locked === true && (
-                          <button
-                            className="rounded-[8px] bg-[#027A48]/10 px-2 py-1 text-xs text-[#027A48] disabled:opacity-50"
-                            onClick={() => handleUnlock(row.id)}
-                            disabled={saving}
-                          >
-                            Unlock
-                          </button>
-                        )}
-                        <button
-                          className="rounded-[8px] bg-[#7A1E12]/10 px-2 py-1 text-xs text-[#7A1E12]"
-                          onClick={() => handleDelete(row.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    )}
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-[#627D98]">
+                    Loading…
                   </td>
                 </tr>
-              ))}
-
-
+              ) : staff.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-[#627D98]">
+                    No staff accounts found.
+                  </td>
+                </tr>
+              ) : (
+                staff.map((user) => (
+                  <tr key={user.id} className="hover:bg-[#F8FAFC]">
+                    <td className="px-4 py-2.5 font-medium text-[#102A43]">{user.full_name}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs">{user.username}</td>
+                    <td className="px-4 py-2.5 max-w-[200px] truncate">{user.email || "—"}</td>
+                    <td className="px-4 py-2.5">{roleLabel(roles, user.role)}</td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          user.is_active !== false
+                            ? "bg-[#009877]/12 text-[#006F57]"
+                            : "bg-[#FEF3C7] text-[#9C4F17]"
+                        }`}
+                      >
+                        {user.is_active !== false ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs whitespace-nowrap">{formatLastLogin(user.last_login)}</td>
+                    <td className="px-4 py-2.5">{renderActions(user)}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {modalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
+          <div className="w-full sm:max-w-lg rounded-t-[12px] sm:rounded-[12px] bg-white p-5 shadow-xl border border-[#D9E1EA] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-heading font-semibold text-[#102A43]">
+                {editId ? "Edit staff" : "Add staff"}
+              </h2>
+              <button type="button" onClick={closeModal} className="p-1 text-[#627D98] hover:text-[#102A43]" aria-label="Close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm sm:col-span-2">
+                <span className="text-xs font-medium text-[#627D98]">Full name</span>
+                <input
+                  value={form.full_name}
+                  onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
+                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-medium text-[#627D98]">Username</span>
+                <input
+                  value={form.username}
+                  onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-medium text-[#627D98]">Email</span>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-medium text-[#627D98]">Phone</span>
+                <input
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-medium text-[#627D98]">Role</span>
+                <select
+                  value={form.role}
+                  onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
+                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                >
+                  {assignableRoles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-medium text-[#627D98]">Access scope</span>
+                <select
+                  value={form.access_scope}
+                  onChange={(e) => setForm((f) => ({ ...f, access_scope: e.target.value as AccessScope }))}
+                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                >
+                  {ACCESS_SCOPES.map((scope) => (
+                    <option key={scope} value={scope}>
+                      {scope}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {showCreate ? (
+                <label className="block text-sm sm:col-span-2">
+                  <span className="text-xs font-medium text-[#627D98]">Password</span>
+                  <input
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                  />
+                </label>
+              ) : (
+                <label className="inline-flex items-center gap-2 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={form.is_active}
+                    onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
+                    className="h-4 w-4 rounded border-[#C9D6E2] text-[#009877]"
+                  />
+                  Active account
+                </label>
+              )}
+            </div>
+            <div className="mt-5 flex flex-col-reverse sm:flex-row justify-end gap-2">
+              <button type="button" onClick={closeModal} className="rounded-[10px] border border-[#D9E1EA] px-4 py-2 text-sm font-semibold text-[#486581]">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="rounded-[10px] bg-[#009877] px-4 py-2 text-sm font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
+              >
+                {saving ? "Saving…" : editId ? "Save changes" : "Create staff"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {resetUser ? (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
+          <div className="w-full sm:max-w-md rounded-t-[12px] sm:rounded-[12px] bg-white p-5 shadow-xl border border-[#D9E1EA]">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-heading font-semibold text-[#102A43]">Reset password</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetUser(null);
+                  setResetPassword("");
+                }}
+                className="p-1 text-[#627D98] hover:text-[#102A43]"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-2 text-sm text-[#627D98]">
+              Set a new password for <span className="font-medium text-[#102A43]">{resetUser.full_name}</span> (@{resetUser.username}).
+            </p>
+            <label className="mt-4 block text-sm">
+              <span className="text-xs font-medium text-[#627D98]">New password</span>
+              <input
+                type="password"
+                value={resetPassword}
+                onChange={(e) => setResetPassword(e.target.value)}
+                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2"
+                placeholder="Minimum 8 characters"
+              />
+            </label>
+            <div className="mt-5 flex flex-col-reverse sm:flex-row justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setResetUser(null);
+                  setResetPassword("");
+                }}
+                className="rounded-[10px] border border-[#D9E1EA] px-4 py-2 text-sm font-semibold text-[#486581]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleResetPassword()}
+                disabled={saving}
+                className="rounded-[10px] bg-[#0B69B7] px-4 py-2 text-sm font-semibold text-white hover:bg-[#095a9e] disabled:opacity-60"
+              >
+                {saving ? "Saving…" : "Reset password"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </motion.div>
   );
 }

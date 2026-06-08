@@ -1,357 +1,728 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  ArrowLeft,
+  BadgeCheck,
+  Clock3,
+  CreditCard,
+  Download,
+  FileText,
+  Loader2,
+  MessageCircle,
+  RefreshCw,
+  Search,
+  Send,
+  ShieldCheck,
+  Upload,
+} from "lucide-react";
+import toast from "react-hot-toast";
+
+import { ApostilleTimeline } from "@/components/apostille/ApostilleTimeline";
+import { Button } from "@/components/ui/Button";
 import {
   createApostillePaymentOrder,
+  downloadApostilleDocument,
   sendApostilleCustomerMessage,
+  submitApostilleCorrectionUpload,
   submitApostilleFinalDetails,
   trackApostilleCase,
-  verifyApostillePayment,
+  type ApostilleFlaggedDocument,
   type ApostilleTrackCaseResponse,
 } from "@/lib/api";
-const STORAGE_KEY = "apostille_track_credentials";
+import {
+  apostilleStatusTone,
+  downloadApostilleCaseSummaryPdf,
+  formatApostilleStatus,
+  getApostilleCustomerStatusMessage,
+  isApostilleSubmittedPhase,
+  openRazorpayCheckout,
+  resolveApostilleTimelineIndex,
+} from "@/lib/apostille-ui";
 
-function loadRazorpay(): Promise<void> {
-  if (typeof window === "undefined") return Promise.reject(new Error("browser"));
-  if ((window as unknown as { Razorpay?: unknown }).Razorpay) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-razorpay="true"]') as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Razorpay load error")), { once: true });
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = "https://checkout.razorpay.com/v1/checkout.js";
-    s.async = true;
-    s.dataset.razorpay = "true";
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("Razorpay load error"));
-    document.body.appendChild(s);
-  });
+function formatDate(value?: string | null) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
 }
-
-function statusBadgeClass(status: string) {
-  const s = status.toLowerCase();
-  if (s === "under_review" || s === "draft") return "bg-amber-100 text-amber-900 border-amber-200";
-  if (s === "approved" || s === "completed") return "bg-emerald-100 text-emerald-900 border-emerald-200";
-  if (s.includes("payment") || s === "paid") return "bg-sky-100 text-sky-900 border-sky-200";
-  if (s === "processing" || s === "dispatched") return "bg-indigo-100 text-indigo-900 border-indigo-200";
-  return "bg-slate-100 text-slate-800 border-slate-200";
-}
-
-const STEPS = ["Pre-Check", "Under Review", "Approved", "Payment", "Processing", "Completed"];
 
 export default function TrackApostillePage() {
-  const [fileNumber, setFileNumber] = useState("");
-  const [email, setEmail] = useState("");
+  const searchParams = useSearchParams();
+  const [fileNumber, setFileNumber] = useState(searchParams.get("file") || "");
+  const [email, setEmail] = useState(searchParams.get("email") || "");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [data, setData] = useState<ApostilleTrackCaseResponse | null>(null);
-  const [messageDraft, setMessageDraft] = useState("");
   const [paying, setPaying] = useState(false);
+  const [submittingFinal, setSubmittingFinal] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [caseData, setCaseData] = useState<ApostilleTrackCaseResponse | null>(null);
+  const [lookupError, setLookupError] = useState("");
 
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { file_number?: string; email?: string };
-      if (parsed.file_number) setFileNumber(parsed.file_number);
-      if (parsed.email) setEmail(parsed.email);
-    } catch {
-      /* ignore */
+  const [deliveryName, setDeliveryName] = useState("");
+  const [deliveryLine1, setDeliveryLine1] = useState("");
+  const [deliveryLine2, setDeliveryLine2] = useState("");
+  const [deliveryCity, setDeliveryCity] = useState("");
+  const [deliveryPostcode, setDeliveryPostcode] = useState("");
+  const [deliveryCountry, setDeliveryCountry] = useState("United Kingdom");
+  const [deliveryInstructions, setDeliveryInstructions] = useState("");
+  const [supportingDoc, setSupportingDoc] = useState<File | null>(null);
+  const [idDoc, setIdDoc] = useState<File | null>(null);
+  const [messageText, setMessageText] = useState("");
+  const [uploadingDocKey, setUploadingDocKey] = useState<string | null>(null);
+  const [downloadingDocId, setDownloadingDocId] = useState<number | null>(null);
+  const [downloadingSummary, setDownloadingSummary] = useState(false);
+
+  const pendingDocuments = useMemo(() => {
+    if (!caseData) return [] as ApostilleFlaggedDocument[];
+    const reuploadedKeys = new Set(
+      (caseData.reuploaded_documents || [])
+        .concat((caseData.flagged_documents || []).filter((doc) => doc.status === "reuploaded" || doc.reuploaded))
+        .map((doc) => `${doc.document_type || ""}:${doc.document_name || ""}`.toLowerCase()),
+    );
+    const isStillPending = (doc: ApostilleFlaggedDocument) => {
+      if (doc.status === "reuploaded" || doc.reuploaded) return false;
+      const key = `${doc.document_type || ""}:${doc.document_name || ""}`.toLowerCase();
+      return !reuploadedKeys.has(key);
+    };
+    if (caseData.pending_documents?.length) {
+      return caseData.pending_documents.filter(isStillPending);
     }
-  }, []);
+    return (caseData.flagged_documents || []).filter(isStillPending);
+  }, [caseData]);
 
-  const persist = useCallback((fn: string, em: string) => {
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ file_number: fn, email: em }));
-    } catch {
-      /* ignore */
+  const reuploadedDocuments = useMemo(() => {
+    if (!caseData) return [] as ApostilleFlaggedDocument[];
+    if (caseData.reuploaded_documents?.length) return caseData.reuploaded_documents;
+    return (caseData.flagged_documents || []).filter((doc) => doc.status === "reuploaded" || doc.reuploaded);
+  }, [caseData]);
+
+  const timelineIndex = useMemo(
+    () => (caseData ? resolveApostilleTimelineIndex(caseData) : 0),
+    [caseData],
+  );
+
+  const caseSummary = useMemo(() => caseData?.case_summary, [caseData]);
+  const isSubmittedPhase = useMemo(() => (caseData ? isApostilleSubmittedPhase(caseData) : false), [caseData]);
+  const statusMessage = useMemo(
+    () => (caseData ? getApostilleCustomerStatusMessage(caseData) : null),
+    [caseData],
+  );
+
+  const canPay = caseData && ["approved", "payment_pending"].includes((caseData.status || "").toLowerCase()) && !caseData.payment_verified;
+  const showFinalForm = caseData?.payment_verified && !caseData.final_submission_completed;
+  const showCorrection = ["rejected", "correction_requested"].includes((caseData?.status || "").toLowerCase());
+
+  const loadCase = useCallback(async (fn?: string, em?: string) => {
+    const lookupFile = (fn ?? fileNumber).trim();
+    const lookupEmail = (em ?? email).trim().toLowerCase();
+    if (!lookupFile || !lookupEmail) {
+      setLookupError("Enter your file number and email.");
+      return;
     }
-  }, []);
-
-  const refresh = useCallback(async () => {
-    if (!fileNumber.trim() || !email.trim()) return;
-    const d = await trackApostilleCase(fileNumber.trim(), email.trim());
-    setData(d);
-  }, [fileNumber, email]);
-
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    setError("");
-    setData(null);
+    setLoading(true);
+    setLookupError("");
     try {
-      setLoading(true);
-      persist(fileNumber.trim(), email.trim());
-      const d = await trackApostilleCase(fileNumber.trim(), email.trim());
-      setData(d);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load case.");
+      const data = await trackApostilleCase(lookupFile, lookupEmail);
+      setCaseData(data);
+      setDeliveryName((prev) => prev || data.full_name || "");
+    } catch (error) {
+      setCaseData(null);
+      setLookupError(error instanceof Error ? error.message : "Case not found.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [email, fileNumber]);
 
-  const onSendMessage = async () => {
-    if (!data || !messageDraft.trim()) return;
-    try {
-      await sendApostilleCustomerMessage(fileNumber.trim(), email.trim(), messageDraft.trim());
-      setMessageDraft("");
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send message.");
+  useEffect(() => {
+    const presetFile = searchParams.get("file");
+    const presetEmail = searchParams.get("email");
+    if (presetFile && presetEmail) {
+      setFileNumber(presetFile);
+      setEmail(presetEmail);
+      void loadCase(presetFile, presetEmail);
     }
-  };
+  }, [loadCase, searchParams]);
 
-  const onPay = async () => {
-    if (!data) return;
+  const handlePayment = async () => {
+    if (!caseData) return;
+    setPaying(true);
     try {
-      setPaying(true);
-      const order = await createApostillePaymentOrder(fileNumber.trim(), email.trim());
-      await loadRazorpay();
-      const RZ = (window as unknown as { Razorpay: new (opts: Record<string, unknown>) => { open: () => void } }).Razorpay;
-      const instance = new RZ({
-        key: order.key_id,
-        amount: order.amount,
-        currency: order.currency,
-        order_id: order.order_id,
-        name: "FlyOCI",
-        description: `Apostille ${data.file_number}`,
-        handler: async (payment: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
-          try {
-            await verifyApostillePayment(
-              fileNumber.trim(),
-              email.trim(),
-              payment.razorpay_order_id,
-              payment.razorpay_payment_id,
-              payment.razorpay_signature,
-            );
-            await refresh();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Payment verification failed.");
-          }
+      const order = await createApostillePaymentOrder(caseData.file_number, email);
+      await openRazorpayCheckout(
+        {
+          key: order.key_id,
+          amount: order.amount,
+          currency: order.currency,
+          name: "FlyOCI Apostille",
+          description: `Apostille service — ${caseData.file_number}`,
+          order_id: order.order_id,
+          prefill: { email, name: caseData.full_name },
         },
-        prefill: { email: email.trim() },
-        theme: { color: "#0B69B7" },
-      });
-      instance.open();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start payment.");
+        async (payment) => {
+          const { verifyApostillePayment } = await import("@/lib/api");
+          await verifyApostillePayment(
+            caseData.file_number,
+            email,
+            payment.razorpay_order_id,
+            payment.razorpay_payment_id,
+            payment.razorpay_signature,
+          );
+          toast.success("Payment successful.");
+          await loadCase();
+        },
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message !== "Payment cancelled.") {
+        toast.error(error.message);
+      }
     } finally {
       setPaying(false);
     }
   };
 
-  const onFinalSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!data) return;
-    const form = event.currentTarget;
-    const fd = new FormData(form);
-    fd.append("file_number", fileNumber.trim());
-    fd.append("email", email.trim());
+  const handleFinalSubmit = async () => {
+    if (!caseData) return;
+    if (!deliveryName.trim() || !deliveryLine1.trim() || !deliveryCity.trim() || !deliveryPostcode.trim()) {
+      toast.error("Please complete delivery details.");
+      return;
+    }
+    setSubmittingFinal(true);
     try {
-      await submitApostilleFinalDetails(fd);
-      form.reset();
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Submission failed.");
+      const formData = new FormData();
+      formData.append("file_number", caseData.file_number);
+      formData.append("email", email);
+      formData.append("delivery_name", deliveryName.trim());
+      formData.append("delivery_address_line1", deliveryLine1.trim());
+      formData.append("delivery_address_line2", deliveryLine2.trim());
+      formData.append("delivery_city", deliveryCity.trim());
+      formData.append("delivery_postcode", deliveryPostcode.trim());
+      formData.append("delivery_country", deliveryCountry.trim());
+      formData.append("delivery_special_instructions", deliveryInstructions.trim());
+      if (supportingDoc) formData.append("supporting_document", supportingDoc);
+      if (idDoc) formData.append("identification_document", idDoc);
+      await submitApostilleFinalDetails(formData);
+      toast.success("Final submission received.");
+      await loadCase();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not submit final details.");
+    } finally {
+      setSubmittingFinal(false);
     }
   };
 
-  const stepIndex = (() => {
-    if (!data) return 0;
-    const s = data.status.toLowerCase();
-    if (s === "under_review" || s === "draft") return 1;
-    if (s === "approved") return 2;
-    if (s.includes("payment") || s === "paid" || s === "payment_received") return 3;
-    if (s === "final_submission_pending") return 4;
-    if (s === "processing" || s === "dispatched") return 4;
-    if (s === "completed") return 5;
-    return 1;
-  })();
+  const handleCorrectionUpload = async (doc: ApostilleFlaggedDocument, file: File) => {
+    if (!caseData) return;
+    const docKey = `${doc.document_type || ""}:${doc.document_name || ""}`;
+    setUploadingDocKey(docKey);
+    try {
+      const formData = new FormData();
+      formData.append("file_number", caseData.file_number);
+      formData.append("email", email);
+      formData.append("flagged_document_type", doc.document_type || "other");
+      formData.append("flagged_document_name", doc.document_name || doc.document_type || "Document");
+      formData.append("document", file);
+      const updated = await submitApostilleCorrectionUpload(formData);
+      setCaseData(updated);
+      toast.success(
+        updated.all_corrections_submitted
+          ? "All requested documents uploaded. We will review shortly."
+          : "Document uploaded. Please upload remaining items if listed.",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setUploadingDocKey(null);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!caseData || !messageText.trim()) return;
+    setSendingMessage(true);
+    try {
+      await sendApostilleCustomerMessage(caseData.file_number, email, messageText.trim());
+      setMessageText("");
+      toast.success("Message sent.");
+      await loadCase();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not send message.");
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  const handleDocumentDownload = async (docId: number, fileName?: string) => {
+    if (!caseData) return;
+    setDownloadingDocId(docId);
+    try {
+      await downloadApostilleDocument(caseData.file_number, email, docId, fileName);
+      toast.success("Download started.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not download document.");
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
+
+  const handleDownloadCaseSummary = async () => {
+    if (!caseData) return;
+    setDownloadingSummary(true);
+    try {
+      await downloadApostilleCaseSummaryPdf(caseData);
+      toast.success("Case summary PDF is downloading.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not download case summary.");
+    } finally {
+      setDownloadingSummary(false);
+    }
+  };
 
   return (
-    <section className="min-h-[70vh] bg-bg-page px-4 pb-24 pt-24 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-3xl">
-        <h1 className="text-3xl font-heading font-bold text-primary">Track Apostille</h1>
-        <p className="mt-2 text-sm text-slate-600">Enter your file number and the email used on the pre-check form.</p>
+    <div className="min-h-screen bg-[linear-gradient(180deg,#f3f8ff_0%,#ffffff_60%)]">
+      <div className="mx-auto max-w-7xl px-4 pb-16 pt-24 sm:px-6 lg:px-8">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <Link href="/apostille-services" className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#1d6fd1] hover:underline">
+            <ArrowLeft className="h-4 w-4" />
+            Apostille Services
+          </Link>
+          <Link href="/apostille-pre-check" className="text-sm font-semibold text-[#486581] hover:text-[#1d6fd1]">
+            New pre-check →
+          </Link>
+        </div>
 
-        <form className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={onSubmit}>
-          <div className="flex-1">
-            <label className="text-xs font-semibold text-slate-600">File number</label>
-            <input
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-              value={fileNumber}
-              onChange={(e) => setFileNumber(e.target.value)}
-              placeholder="FLY-APO-2026-AB12"
-              required
-            />
-          </div>
-          <div className="flex-1">
-            <label className="text-xs font-semibold text-slate-600">Email</label>
-            <input
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="inline-flex items-center justify-center rounded-full bg-[#0B69B7] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            {loading ? "Loading…" : "Load"}
-          </button>
-        </form>
-        {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
-
-        {data ? (
-          <div className="mt-10 space-y-8">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(data.status)}`}>{data.status.replace(/_/g, " ")}</span>
-              <span className="text-sm text-slate-600">Updated {data.updated_at ? new Date(data.updated_at).toLocaleString() : "—"}</span>
-            </div>
-
-            <div className="rounded-2xl border border-[#dce8fa] bg-white p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Progress</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {STEPS.map((label, i) => (
-                  <span
-                    key={label}
-                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                      i <= stepIndex ? "bg-[#0B69B7] text-white" : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-4 rounded-2xl border border-[#dce8fa] bg-white p-5 text-sm sm:grid-cols-2">
-              <div>
-                <p className="text-xs font-semibold text-slate-500">File number</p>
-                <p className="font-mono font-semibold text-slate-900">{data.file_number}</p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-slate-500">Name on file</p>
-                <p className="text-slate-900">{data.full_name}</p>
-              </div>
-              <div className="sm:col-span-2">
-                <p className="text-xs font-semibold text-slate-500">Review note</p>
-                <p className="text-slate-800">{data.review_note || "—"}</p>
-              </div>
-              {data.quoted_fee ? (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-[#d7e5f9] bg-white p-5 shadow-[0_14px_36px_rgba(20,60,106,0.1)] sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-semibold text-slate-500">Quoted fee</p>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {data.quote_currency} {data.quoted_fee}
-                  </p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#1d6fd1]">Track Apostille</p>
+                  <h1 className="mt-1 font-heading text-2xl font-bold text-primary sm:text-3xl">Check Your Application Status</h1>
+                  <p className="mt-1 text-sm text-[#627d98]">Use your FlyOCI file number and the email used during pre-check.</p>
                 </div>
-              ) : null}
+                {caseData ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadCase()}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#c9ddff] bg-[#f8fbff] px-3 py-2 text-xs font-semibold text-[#1d6fd1] hover:bg-[#eef5ff]"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                <input
+                  value={fileNumber}
+                  onChange={(e) => setFileNumber(e.target.value)}
+                  placeholder="File number e.g. FO-AP-..."
+                  className="rounded-xl border border-[#d8e6fc] px-4 py-3 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15"
+                />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email used at submission"
+                  className="rounded-xl border border-[#d8e6fc] px-4 py-3 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15"
+                />
+                <Button onClick={() => void loadCase()} isLoading={loading} className="w-full sm:w-auto">
+                  <Search className="mr-2 h-4 w-4" />
+                  Track
+                </Button>
+              </div>
+              {lookupError ? <p className="mt-3 text-sm font-medium text-rose-600">{lookupError}</p> : null}
             </div>
 
-            {(data.status === "payment_pending" || data.status === "approved") && data.quoted_fee && !data.payment_verified ? (
-              <button
-                type="button"
-                disabled={paying}
-                onClick={() => void onPay()}
-                className="rounded-full bg-[#0B69B7] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {paying ? "Opening…" : "Pay now"}
-              </button>
-            ) : null}
-
-            {data.status === "final_submission_pending" && data.payment_verified && !data.final_submission_completed ? (
-              <form onSubmit={onFinalSubmit} className="space-y-3 rounded-2xl border border-[#dce8fa] bg-white p-5">
-                <h2 className="text-lg font-semibold text-primary">Delivery details</h2>
-                <input name="delivery_name" required placeholder="Full name" className="w-full rounded-lg border px-3 py-2" />
-                <input name="delivery_address_line1" required placeholder="Address line 1" className="w-full rounded-lg border px-3 py-2" />
-                <input name="delivery_address_line2" placeholder="Address line 2" className="w-full rounded-lg border px-3 py-2" />
-                <input name="delivery_city" required placeholder="City" className="w-full rounded-lg border px-3 py-2" />
-                <input name="delivery_postcode" required placeholder="Postcode" className="w-full rounded-lg border px-3 py-2" />
-                <input name="delivery_country" required placeholder="Country" className="w-full rounded-lg border px-3 py-2" />
-                <textarea name="delivery_special_instructions" placeholder="Special instructions" className="w-full rounded-lg border px-3 py-2" rows={2} />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <label className="text-xs text-slate-600">
-                    Supporting document (optional)
-                    <input name="supporting_document" type="file" className="mt-1 w-full text-xs" />
-                  </label>
-                  <label className="text-xs text-slate-600">
-                    ID document (optional)
-                    <input name="identification_document" type="file" className="mt-1 w-full text-xs" />
-                  </label>
-                </div>
-                <button type="submit" className="rounded-full bg-[#0B69B7] px-5 py-2 text-sm font-semibold text-white">
-                  Submit final details
-                </button>
-              </form>
-            ) : null}
-
-            <div>
-              <h2 className="text-lg font-semibold text-primary">Documents</h2>
-              <ul className="mt-2 list-inside list-disc text-sm text-slate-700">
-                {data.documents.map((d) => (
-                  <li key={d.id}>{d.name}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-semibold text-primary">Status log</h2>
-              <ul className="mt-2 space-y-2 text-xs text-slate-600">
-                {data.status_logs.slice(-20).map((log, i) => (
-                  <li key={`${log.timestamp}-${i}`}>
-                    <span className="font-semibold text-slate-800">{log.action}</span> — {log.timestamp} ({log.actor})
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h2 className="text-lg font-semibold text-primary">Messages</h2>
-              <div className="mt-3 max-h-80 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-                {data.messages.map((m, idx) => {
-                  const fromCustomer = (m.sender || "").toLowerCase() === "customer";
-                  return (
-                    <div key={`${m.created_at}-${idx}`} className={`flex ${fromCustomer ? "justify-end" : "justify-start"}`}>
-                      <div
-                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-                          fromCustomer ? "bg-[#0B69B7] text-white" : "bg-white text-slate-800 border border-slate-200"
-                        }`}
-                      >
-                        {m.subject ? <p className="text-xs font-semibold opacity-90">{m.subject}</p> : null}
-                        <p className="whitespace-pre-wrap">{m.message}</p>
-                        <p className={`mt-1 text-[10px] ${fromCustomer ? "text-blue-100" : "text-slate-400"}`}>
-                          {m.created_at ? new Date(m.created_at).toLocaleString() : ""}
-                        </p>
+            <AnimatePresence mode="wait">
+              {caseData ? (
+                <motion.div
+                  key={caseData.file_number}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="space-y-5"
+                >
+                  <div className="rounded-3xl border border-[#d7e5f9] bg-white p-5 shadow-[0_12px_30px_rgba(20,60,106,0.08)] sm:p-6">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-[#1d6fd1]">Case summary</p>
+                        <p className="mt-1 font-mono text-xl font-bold text-[#0d1f3c]">{caseData.file_number}</p>
+                        <p className="mt-1 text-sm text-[#486581]">{caseData.full_name}</p>
+                        {(caseSummary?.reference_number || caseData.reference_number) ? (
+                          <p className="mt-1 text-sm text-[#627d98]">
+                            Reference: <span className="font-semibold text-[#243b53]">{caseSummary?.reference_number || caseData.reference_number}</span>
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <span className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${apostilleStatusTone(caseData.status)}`}>
+                          {statusMessage?.title || caseSummary?.stage_label || formatApostilleStatus(caseData.status)}
+                        </span>
+                        {isSubmittedPhase ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadCaseSummary()}
+                            disabled={downloadingSummary}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-[#c9ddff] bg-[#f8fbff] px-3 py-2 text-xs font-semibold text-[#1d6fd1] hover:bg-[#eef5ff] disabled:opacity-60"
+                          >
+                            {downloadingSummary ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Download className="h-3.5 w-3.5" />
+                            )}
+                            Download PDF
+                          </button>
+                        ) : null}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-              <div className="mt-3 flex gap-2">
-                <textarea
-                  value={messageDraft}
-                  onChange={(e) => setMessageDraft(e.target.value)}
-                  placeholder="Write a message to the team…"
-                  className="min-h-[72px] flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => void onSendMessage()}
-                  className="self-end rounded-full bg-slate-800 px-4 py-2 text-sm font-semibold text-white"
-                >
-                  Send
-                </button>
+
+                    {isSubmittedPhase && statusMessage ? (
+                      <>
+                        <div className="mt-5 rounded-2xl border border-[#cfe2ff] bg-[#f8fbff] px-4 py-4">
+                          <p className="text-sm font-bold text-[#1d4d81]">{statusMessage.title}</p>
+                          <p className="mt-2 text-sm leading-relaxed text-[#486581]">{statusMessage.message}</p>
+                        </div>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-[#e8eef8] bg-[#fafcff] px-3 py-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-[#627d98]">{statusMessage.submittedLabel}</p>
+                            <p className="mt-1 text-sm font-semibold text-[#243b53]">{statusMessage.submittedValue}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#e8eef8] bg-[#fafcff] px-3 py-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-[#627d98]">{statusMessage.deliveryLabel}</p>
+                            <p className="mt-1 text-sm font-semibold text-[#243b53]">{statusMessage.deliveryValue}</p>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-xl border border-[#e8eef8] bg-[#fafcff] px-3 py-3">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-[#627d98]">Status</p>
+                          <p className="mt-1 text-sm font-semibold text-[#243b53]">
+                            {caseSummary?.stage_label || formatApostilleStatus(caseData.status)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-[#e8eef8] bg-[#fafcff] px-3 py-3">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-[#627d98]">Quoted fee</p>
+                          <p className="mt-1 text-sm font-semibold text-[#243b53]">
+                            {caseData.quoted_fee ? `${caseData.quote_currency} ${caseData.quoted_fee}` : "Pending review"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {caseData.review_note && !isSubmittedPhase ? (
+                    <div className="rounded-2xl border border-[#cfe2ff] bg-[#f8fbff] p-4 sm:p-5">
+                      <div className="flex items-center gap-2 text-sm font-bold text-[#1d4d81]">
+                        <BadgeCheck className="h-4 w-4 text-[#1d6fd1]" />
+                        Review note from FlyOCI
+                      </div>
+                      <p className="mt-2 text-sm leading-relaxed text-[#486581] whitespace-pre-wrap">{caseData.review_note}</p>
+                    </div>
+                  ) : null}
+
+                  {canPay ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
+                            <CreditCard className="h-4 w-4" />
+                            Payment required to continue
+                          </p>
+                          <p className="mt-1 text-sm text-amber-800">
+                            Approved fee: <strong>{caseData.quote_currency} {caseData.quoted_fee}</strong>
+                          </p>
+                        </div>
+                        <Button onClick={() => void handlePayment()} isLoading={paying}>
+                          Pay Securely
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {showCorrection ? (
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 sm:p-5">
+                      <p className="text-sm font-bold text-rose-800">Documents requested by FlyOCI</p>
+                      <p className="mt-1 text-sm text-rose-700">
+                        Upload each corrected document below. Names and instructions match what our team requested.
+                      </p>
+                      {reuploadedDocuments.length > 0 ? (
+                        <div className="mt-4 space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Already uploaded</p>
+                          {reuploadedDocuments.map((doc, index) => {
+                            const docLabel = doc.document_name || doc.document_type?.replace(/_/g, " ") || `Document ${index + 1}`;
+                            const docKey = `done:${doc.document_type || ""}:${doc.document_name || ""}:${index}`;
+                            return (
+                              <div key={docKey} className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="font-semibold text-[#0d1f3c]">{docLabel}</p>
+                                  <span className="rounded-full border border-emerald-200 bg-white px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                                    Uploaded
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+
+                      {pendingDocuments.length > 0 ? (
+                        <div className="mt-4 space-y-3">
+                          {pendingDocuments.map((doc, index) => {
+                            const docLabel = doc.document_name || doc.document_type?.replace(/_/g, " ") || `Document ${index + 1}`;
+                            const docKey = `${doc.document_type || ""}:${doc.document_name || ""}:${index}`;
+                            const isUploading = uploadingDocKey === `${doc.document_type || ""}:${doc.document_name || ""}`;
+                            const alreadyUploaded = doc.status === "reuploaded" || doc.reuploaded;
+                            return (
+                              <div key={docKey} className="rounded-xl border border-rose-200/80 bg-white p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-[#0d1f3c]">{docLabel}</p>
+                                    {doc.issue_reason ? (
+                                      <p className="mt-1 text-sm text-[#486581]">
+                                        <span className="font-medium">Issue:</span> {doc.issue_reason}
+                                      </p>
+                                    ) : null}
+                                    {doc.required_action ? (
+                                      <p className="mt-1 text-sm text-[#627d98]">
+                                        <span className="font-medium">Action:</span> {doc.required_action}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                  <span
+                                    className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                      alreadyUploaded
+                                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                        : "border-amber-200 bg-amber-50 text-amber-800"
+                                    }`}
+                                  >
+                                    {alreadyUploaded ? "Uploaded" : "Upload required"}
+                                  </span>
+                                </div>
+                                {!alreadyUploaded ? (
+                                  <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#1d6fd1] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1558c0]">
+                                    <Upload className="h-3.5 w-3.5" />
+                                    {isUploading ? "Uploading..." : `Upload ${docLabel}`}
+                                    <input
+                                      type="file"
+                                      accept=".pdf,.jpg,.jpeg,.png"
+                                      className="hidden"
+                                      disabled={isUploading}
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0];
+                                        if (file) void handleCorrectionUpload(doc, file);
+                                        event.currentTarget.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-rose-700">
+                          Please review the note above and upload corrected documents using final submission if payment is already complete.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {showFinalForm ? (
+                    <div className="rounded-3xl border border-[#d7e5f9] bg-white p-5 shadow-[0_10px_28px_rgba(20,60,106,0.08)] sm:p-6">
+                      <div className="flex items-center gap-2">
+                        <Upload className="h-5 w-5 text-[#1d6fd1]" />
+                        <h2 className="font-heading text-xl font-bold text-primary">Complete Final Submission</h2>
+                      </div>
+                      <p className="mt-1 text-sm text-[#627d98]">Payment received. Add delivery details and any supporting documents.</p>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <label className="sm:col-span-2">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">Delivery name *</span>
+                          <input value={deliveryName} onChange={(e) => setDeliveryName(e.target.value)} className="w-full rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15" />
+                        </label>
+                        <label className="sm:col-span-2">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">Address line 1 *</span>
+                          <input value={deliveryLine1} onChange={(e) => setDeliveryLine1(e.target.value)} className="w-full rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15" />
+                        </label>
+                        <label className="sm:col-span-2">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">Address line 2</span>
+                          <input value={deliveryLine2} onChange={(e) => setDeliveryLine2(e.target.value)} className="w-full rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15" />
+                        </label>
+                        <label>
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">City *</span>
+                          <input value={deliveryCity} onChange={(e) => setDeliveryCity(e.target.value)} className="w-full rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15" />
+                        </label>
+                        <label>
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">Postcode *</span>
+                          <input value={deliveryPostcode} onChange={(e) => setDeliveryPostcode(e.target.value)} className="w-full rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15" />
+                        </label>
+                        <label className="sm:col-span-2">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">Country</span>
+                          <input value={deliveryCountry} onChange={(e) => setDeliveryCountry(e.target.value)} className="w-full rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15" />
+                        </label>
+                        <label className="sm:col-span-2">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">Special instructions</span>
+                          <textarea value={deliveryInstructions} onChange={(e) => setDeliveryInstructions(e.target.value)} rows={2} className="w-full rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15" />
+                        </label>
+                        <label>
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">Supporting document</span>
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => setSupportingDoc(e.target.files?.[0] || null)} className="block w-full text-xs text-[#486581] file:mr-2 file:rounded-lg file:border-0 file:bg-[#eef5ff] file:px-2 file:py-1.5 file:text-xs file:font-semibold file:text-[#1d6fd1]" />
+                        </label>
+                        <label>
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#486581]">ID document</span>
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => setIdDoc(e.target.files?.[0] || null)} className="block w-full text-xs text-[#486581] file:mr-2 file:rounded-lg file:border-0 file:bg-[#eef5ff] file:px-2 file:py-1.5 file:text-xs file:font-semibold file:text-[#1d6fd1]" />
+                        </label>
+                      </div>
+                      <div className="mt-4">
+                        <Button onClick={() => void handleFinalSubmit()} isLoading={submittingFinal}>
+                          Submit Final Details
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {!isSubmittedPhase ? (
+                  <div className="grid gap-5 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-[#d7e5f9] bg-white p-4 sm:p-5">
+                      <div className="flex items-center gap-2 text-sm font-bold text-[#0d1f3c]">
+                        <FileText className="h-4 w-4 text-[#1d6fd1]" />
+                        Uploaded documents
+                      </div>
+                      {caseData.documents.length ? (
+                        <ul className="mt-3 space-y-2">
+                          {caseData.documents.map((doc) => (
+                            <li key={doc.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#e8eef8] bg-[#fafcff] px-3 py-2 text-sm text-[#486581]">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1d6fd1]" />
+                                <div className="min-w-0">
+                                  <p className="font-medium text-[#243b53]">{doc.document_type_label || doc.name || `Document #${doc.id}`}</p>
+                                  {doc.name && doc.document_type_label ? (
+                                    <p className="truncate text-xs text-[#627d98]">{doc.name}</p>
+                                  ) : null}
+                                  {doc.uploaded_at ? (
+                                    <p className="text-[11px] text-[#8fa3bc]">Uploaded {formatDate(doc.uploaded_at)}</p>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {doc.downloadable !== false ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDocumentDownload(doc.id, doc.name)}
+                                  disabled={downloadingDocId === doc.id}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-[#c9ddff] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#1d6fd1] hover:bg-[#eef5ff] disabled:opacity-60"
+                                >
+                                  {downloadingDocId === doc.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Download className="h-3 w-3" />
+                                  )}
+                                  Download
+                                </button>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-sm text-[#627d98]">No documents listed yet.</p>
+                      )}
+                    </div>
+
+                    <div className="rounded-2xl border border-[#d7e5f9] bg-white p-4 sm:p-5">
+                      <div className="flex items-center gap-2 text-sm font-bold text-[#0d1f3c]">
+                        <Clock3 className="h-4 w-4 text-[#1d6fd1]" />
+                        Activity log
+                      </div>
+                      {caseData.status_logs.length ? (
+                        <ul className="mt-3 max-h-56 space-y-2 overflow-auto pr-1">
+                          {caseData.status_logs.slice().reverse().map((log, index) => (
+                            <li key={`${log.timestamp}-${index}`} className="rounded-lg border border-[#e8eef8] bg-[#fafcff] px-3 py-2">
+                              <p className="text-xs font-semibold text-[#243b53]">{log.action.replace(/_/g, " ")}</p>
+                              <p className="text-[11px] text-[#627d98]">{formatDate(log.timestamp)}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-sm text-[#627d98]">No activity yet.</p>
+                      )}
+                    </div>
+                  </div>
+                  ) : null}
+
+                  <div className="rounded-2xl border border-[#d7e5f9] bg-white p-4 sm:p-5">
+                    <div className="flex items-center gap-2 text-sm font-bold text-[#0d1f3c]">
+                      <MessageCircle className="h-4 w-4 text-[#1d6fd1]" />
+                      Messages with FlyOCI
+                    </div>
+                    {caseData.messages.length ? (
+                      <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
+                        {caseData.messages.map((msg, index) => (
+                          <div
+                            key={`${msg.created_at}-${index}`}
+                            className={`rounded-xl px-3 py-2 text-sm ${
+                              msg.sender === "customer"
+                                ? "ml-8 border border-[#d8e6fc] bg-[#f8fbff] text-[#486581]"
+                                : "mr-8 border border-[#dce8fa] bg-white text-[#243b53]"
+                            }`}
+                          >
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-[#627d98]">{msg.sender}</p>
+                            <p className="mt-1 whitespace-pre-wrap">{msg.message}</p>
+                            <p className="mt-1 text-[10px] text-[#8fa3bc]">{formatDate(msg.created_at)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-[#627d98]">No messages yet. Ask our team a question below.</p>
+                    )}
+                    <div className="mt-4 flex gap-2">
+                      <input
+                        value={messageText}
+                        onChange={(e) => setMessageText(e.target.value)}
+                        placeholder="Type your message..."
+                        className="flex-1 rounded-xl border border-[#d8e6fc] px-3 py-2.5 text-sm outline-none focus:border-[#1d6fd1] focus:ring-2 focus:ring-[#1d6fd1]/15"
+                      />
+                      <Button onClick={() => void handleSendMessage()} isLoading={sendingMessage} disabled={!messageText.trim()}>
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : loading ? (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center rounded-2xl border border-[#d7e5f9] bg-white py-16">
+                  <Loader2 className="h-6 w-6 animate-spin text-[#1d6fd1]" />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
+
+          <aside className="space-y-4">
+            <div className="rounded-2xl border border-[#d7e5f9] bg-white p-5 shadow-[0_10px_28px_rgba(20,60,106,0.08)]">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#1d6fd1]">Case progress</p>
+              <div className="mt-3">
+                <ApostilleTimeline activeIndex={timelineIndex} compact />
               </div>
             </div>
-          </div>
-        ) : null}
+
+            <div className="rounded-2xl border border-[#d7e5f9] bg-[#f8fbff] p-4 text-sm">
+              <div className="flex items-center gap-2 font-semibold text-[#243b53]">
+                <ShieldCheck className="h-4 w-4 text-[#1d6fd1]" />
+                What you can do here
+              </div>
+              <ul className="mt-3 space-y-2 text-[#486581]">
+                <li>• View submitted status and expected delivery</li>
+                <li>• Download your case summary PDF</li>
+                <li>• Pay securely after approval</li>
+                <li>• Message our team about your case</li>
+              </ul>
+            </div>
+
+            <div className="rounded-2xl border border-[#d7e5f9] bg-white p-4 text-sm text-[#627d98]">
+              Need help? <Link href="/contact-apostille-support" className="font-semibold text-[#1d6fd1] hover:underline">Contact Apostille support</Link>
+              {" "}or read the <Link href="/apostille-faq" className="font-semibold text-[#1d6fd1] hover:underline">FAQ</Link>.
+            </div>
+          </aside>
+        </div>
       </div>
-    </section>
+    </div>
   );
 }

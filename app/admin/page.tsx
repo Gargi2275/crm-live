@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { StatCard } from "@/components/ui/console/StatCard";
 import {
   Users,
@@ -15,6 +16,8 @@ import {
   TrendingUp,
   Target,
   RefreshCw,
+  ClipboardList,
+  CheckCircle2,
 } from "lucide-react";
 import {
   XAxis,
@@ -34,10 +37,13 @@ import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   getAdminDashboardOverview,
   getStaffPerformanceBadge,
+  hasFlyOciConsoleAccess,
+  isStaffOwnRevenueDashboard,
   listAdminApplications,
   listAdminTasks,
   patchAdminTask,
   patchAdminApplication,
+  staffIdsMatch,
   type AdminApplication,
   type AdminDashboardOverview,
   type AdminTaskItem,
@@ -64,10 +70,24 @@ export default function ConsoleDashboard() {
   const roleLabel = userRole ? roleLabelMap[userRole] || userRole : "Staff";
   const isFounderView = userRole === "admin";
   const isOpsView = userRole === "ops_manager";
-  const isStaffView = userRole === "case_processor" || userRole === "reviewer" || userRole === "support_agent";
+  const isStaffConsoleRole =
+    userRole === "case_processor" || userRole === "reviewer" || userRole === "support_agent";
+  const isOwnRevenueDashboard = isStaffOwnRevenueDashboard(dashboardData, userRole);
+  const accessScope = adminUser?.access_scope ?? "all";
   const chartColors = ["#009877", "#33A1FD", "#B87333", "#DCE7F3"];
-const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    if (!adminUser) return;
+    const isStaff = ["case_processor", "reviewer", "support_agent"].includes(adminUser.role ?? "");
+    if (isStaff) {
+      router.replace("/admin/easyfly?defaultTab=pending");
+      return;
+    }
+    if (!hasFlyOciConsoleAccess(accessScope)) {
+      router.replace("/admin/easyfly");
+    }
+  }, [adminUser, accessScope, router]);
 
   const loadDashboard = async () => {
   setLoading(true);
@@ -75,19 +95,19 @@ const [loading, setLoading] = useState(true);
     const shouldLoadTasks = isFounderView || isOpsView;
     const [payload, appPayload, taskPayload] = await Promise.all([
       getAdminDashboardOverview(),
-      listAdminApplications(),
+      isStaffConsoleRole ? Promise.resolve([] as AdminApplication[]) : listAdminApplications(),
       shouldLoadTasks
         ? listAdminTasks({ limit: 500 })
-        : isStaffView && adminUser?.id
+        : isStaffConsoleRole && adminUser?.id
           ? listAdminTasks({ limit: 100, assignedStaffId: adminUser.id })
           : Promise.resolve([] as AdminTaskItem[]),
     ]);
     setDashboardData(payload);
     setApplications(appPayload);
-    if (shouldLoadTasks || isStaffView) {
+    if (shouldLoadTasks || isStaffConsoleRole) {
       setTaskItems(taskPayload);
     }
-    if (isStaffView) {
+    if (isStaffConsoleRole) {
       try {
         const badgePayload = await getStaffPerformanceBadge();
         setStaffBadge(badgePayload.badge);
@@ -102,9 +122,17 @@ const [loading, setLoading] = useState(true);
   }
 };
 
- useEffect(() => {
-  if (adminUser) void loadDashboard();
-}, [adminUser]); // re-runs when auth resolves
+  useEffect(() => {
+    if (adminUser && hasFlyOciConsoleAccess(accessScope)) void loadDashboard();
+  }, [adminUser, accessScope]);
+
+  if (!adminUser || !hasFlyOciConsoleAccess(accessScope)) {
+    return (
+      <div className="flex items-center justify-center h-64 text-[#627D98] text-sm">
+        Redirecting to EasyFly dashboard...
+      </div>
+    );
+  }
 
   const kpiSnapshot = dashboardData?.kpi_snapshot ?? {
     total_leads: 0,
@@ -118,7 +146,6 @@ const [loading, setLoading] = useState(true);
     pending_payments: 0,
     avg_ticket_size: 0,
   };
-  const staffMembers = dashboardData?.staff_members ?? [];
   const dailyRevenue = dashboardData?.daily_revenue ?? [];
   const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
   const serviceRevenueBreakdown = dashboardData?.service_revenue_breakdown ?? [];
@@ -127,38 +154,6 @@ const [loading, setLoading] = useState(true);
   const failedLogins = dashboardData?.failed_logins ?? 0;
 
   const pendingTaskStatuses = useMemo(() => new Set(["new", "in_progress", "blocked"]), []);
-
-  const workloadByStaff = useMemo(() => {
-    const counts: Record<number, { assigned: number; pending: number; completed: number; loadStatus: string }> = {};
-
-    for (const task of taskItems) {
-      if (!task.assigned_staff) continue;
-      const staffId = task.assigned_staff;
-      if (!counts[staffId]) {
-        counts[staffId] = { assigned: 0, pending: 0, completed: 0, loadStatus: "Active" };
-      }
-      counts[staffId].assigned += 1;
-      if (pendingTaskStatuses.has(String(task.status || "").toLowerCase())) {
-        counts[staffId].pending += 1;
-      }
-      if (String(task.status || "").toLowerCase() === "completed") {
-        counts[staffId].completed += 1;
-      }
-    }
-
-    for (const [staffId, summary] of Object.entries(counts)) {
-      if (summary.pending >= 8) {
-        summary.loadStatus = "Overloaded";
-      } else if (summary.pending >= 3) {
-        summary.loadStatus = "Busy";
-      } else {
-        summary.loadStatus = "Active";
-      }
-      counts[Number(staffId)] = summary;
-    }
-
-    return counts;
-  }, [pendingTaskStatuses, taskItems]);
 
   const formatTaskDeadline = (deadline?: string | null) => {
     if (!deadline) {
@@ -177,16 +172,16 @@ const [loading, setLoading] = useState(true);
 
   const healthMetrics = useMemo(
     () => [
-      ["Total Leads Generated", dashboardData?.health_metrics.total_leads ?? 0],
-      ["Leads Converted", dashboardData?.health_metrics.leads_converted ?? 0],
-      ["Conversion %", dashboardData?.health_metrics.conversion ?? "0%"],
-      ["Revenue per Service Type", dashboardData?.health_metrics.revenue_per_service ?? "N/A"],
-      ["Pending Payments", `₹${(dashboardData?.health_metrics.pending_payments ?? 0).toLocaleString("en-IN")}`],
-      ["Refunds/Disputes", `₹${(dashboardData?.health_metrics.refunds_disputes ?? 0).toLocaleString("en-IN")}`],
-      ["Audits Requested", dashboardData?.health_metrics.audits_requested ?? 0],
-      ["Audit Success Ratio", dashboardData?.health_metrics.audit_success_ratio ?? "0%"],
-      ["Avg Processing Time", dashboardData?.health_metrics.avg_processing_time ?? "0h"],
-      ["Customer Satisfaction Rating", dashboardData?.health_metrics.customer_satisfaction ?? "0 / 5"],
+      ["Total Leads Generated", dashboardData?.health_metrics?.total_leads ?? 0],
+      ["Leads Converted", dashboardData?.health_metrics?.leads_converted ?? 0],
+      ["Conversion %", dashboardData?.health_metrics?.conversion ?? "0%"],
+      ["Revenue per Service Type", dashboardData?.health_metrics?.revenue_per_service ?? "N/A"],
+      ["Pending Payments", `₹${(dashboardData?.health_metrics?.pending_payments ?? 0).toLocaleString("en-IN")}`],
+      ["Refunds/Disputes", `₹${(dashboardData?.health_metrics?.refunds_disputes ?? 0).toLocaleString("en-IN")}`],
+      ["Audits Requested", dashboardData?.health_metrics?.audits_requested ?? 0],
+      ["Audit Success Ratio", dashboardData?.health_metrics?.audit_success_ratio ?? "0%"],
+      ["Avg Processing Time", dashboardData?.health_metrics?.avg_processing_time ?? "0h"],
+      ["Customer Satisfaction Rating", dashboardData?.health_metrics?.customer_satisfaction ?? "0 / 5"],
     ],
     [dashboardData],
   );
@@ -229,7 +224,7 @@ const handleOpenCase = (taskId: number) => {
     return;
   }
   // task.application is confirmed as the application ID from the API
-  router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(task.application))}`);
+  router.push(`/admin/my-cases?applicationId=${encodeURIComponent(String(task.application))}`);
 };
 
 
@@ -293,46 +288,33 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
       });
   }, [applications]);
 
-  const staffTodayQueues = useMemo(() => {
-    const myTasks = taskItems.filter((task) => task.assigned_staff === adminUser?.id);
-    const now = Date.now();
+  const staffTaskSummary = useMemo(() => {
+    const myTasks = taskItems.filter((task) => staffIdsMatch(task.assigned_staff, adminUser?.id));
+    const pending = myTasks.filter((task) =>
+      pendingTaskStatuses.has(String(task.status || "").toLowerCase()),
+    );
+    const completed = myTasks.filter(
+      (task) => String(task.status || "").toLowerCase() === "completed",
+    );
 
-    const deadlineValue = (task: AdminTaskItem) => {
-      if (!task.deadline) {
-        return Number.POSITIVE_INFINITY;
-      }
-
-      const parsedDeadline = new Date(task.deadline).getTime();
-      return Number.isNaN(parsedDeadline) ? Number.POSITIVE_INFINITY : parsedDeadline;
+    const completionTs = (task: AdminTaskItem) => {
+      const raw = task.completed_at || task.updated_at || task.created_at;
+      if (!raw) return 0;
+      const t = new Date(raw).getTime();
+      return Number.isNaN(t) ? 0 : t;
     };
 
-    const isUrgentTask = (task: AdminTaskItem) => {
-      const priority = String(task.priority || "").toLowerCase();
-      const status = String(task.status || "").toLowerCase();
-      const overdue = deadlineValue(task) < now;
-
-      return priority === "urgent" || priority === "high" || status === "blocked" || overdue;
-    };
-
-    const urgentNow = [...myTasks]
-      .filter(isUrgentTask)
-      .sort((left, right) => deadlineValue(left) - deadlineValue(right))
-      .slice(0, 5);
-
-    const nextActionRequired = [...myTasks]
-      .filter((task) => {
-        const status = String(task.status || "").toLowerCase();
-        return status === "new" || status === "in_progress" || status === "blocked";
-      })
-      .sort((left, right) => deadlineValue(left) - deadlineValue(right))
+    const recentCompletions = [...completed]
+      .sort((a, b) => completionTs(b) - completionTs(a))
       .slice(0, 5);
 
     return {
-      myTasks,
-      urgentNow,
-      nextActionRequired,
+      assigned: myTasks.length,
+      pending: pending.length,
+      completed: completed.length,
+      recentCompletions,
     };
-  }, [adminUser?.id, taskItems]);
+  }, [adminUser?.id, pendingTaskStatuses, taskItems]);
 
   const renderStaffTaskCard = (task: AdminTaskItem, showActions = true) => {
     const status = String(task.status || "").toLowerCase();
@@ -429,6 +411,145 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
   );
 }
 
+  if (isOwnRevenueDashboard) {
+    const staffRevenue = dashboardData?.my_revenue?.kpi_snapshot ?? kpiSnapshot;
+    const myAssignedTasks = taskItems.filter((task) => staffIdsMatch(task.assigned_staff, adminUser?.id));
+    const recentCases = [...myAssignedTasks]
+      .filter((task) => pendingTaskStatuses.has(String(task.status || "").toLowerCase()))
+      .sort((a, b) => {
+        const left = new Date(a.deadline || a.updated_at || a.created_at).getTime();
+        const right = new Date(b.deadline || b.updated_at || b.created_at).getTime();
+        return left - right;
+      })
+      .slice(0, 8);
+
+    return (
+      <div className="animate-in fade-in zoom-in-95 duration-500 max-w-[1300px] mx-auto space-y-6 font-body">
+        <div>
+          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">My Dashboard</h1>
+          <p className="text-[#486581] text-sm mt-1">{roleLabel} · your cases and revenue only</p>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
+            <p className="text-xs text-[#627D98]">Pending</p>
+            <p className="mt-1 text-2xl font-heading font-semibold text-[#9C4F17]">{staffTaskSummary.pending}</p>
+          </div>
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
+            <p className="text-xs text-[#627D98]">Assigned</p>
+            <p className="mt-1 text-2xl font-heading font-semibold text-[#102A43]">{staffTaskSummary.assigned}</p>
+          </div>
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
+            <p className="text-xs text-[#627D98]">Completed</p>
+            <p className="mt-1 text-2xl font-heading font-semibold text-[#006F57]">{staffTaskSummary.completed}</p>
+          </div>
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
+            <p className="text-xs text-[#627D98]">Revenue today</p>
+            <p className="mt-1 text-xl font-heading font-semibold text-[#B87333]">₹{Number(staffRevenue.revenue_today || 0).toLocaleString("en-IN")}</p>
+          </div>
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
+            <p className="text-xs text-[#627D98]">Revenue (30d)</p>
+            <p className="mt-1 text-xl font-heading font-semibold text-[#102A43]">₹{Number(staffRevenue.revenue_30d || 0).toLocaleString("en-IN")}</p>
+          </div>
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
+            <p className="text-xs text-[#627D98]">Revenue (all time)</p>
+            <p className="mt-1 text-xl font-heading font-semibold text-[#102A43]">₹{Number(staffRevenue.revenue_total || 0).toLocaleString("en-IN")}</p>
+          </div>
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-[#F8FCFF] p-4">
+            <p className="text-xs text-[#627D98]">Performance</p>
+            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffBadge || "—"}</p>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="text-lg font-heading font-semibold text-[#102A43] flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-[#0B69B7]" />
+              Recent cases
+            </h2>
+            <Link href="/admin/my-cases" className="text-sm font-semibold text-[#0B69B7] hover:underline">
+              View all my cases
+            </Link>
+          </div>
+          {recentCases.length === 0 ? (
+            <p className="text-sm text-[#627D98]">No pending cases assigned to you.</p>
+          ) : (
+            <div className="space-y-3">
+              {recentCases.map((task) => renderStaffTaskCard(task, true))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="text-lg font-heading font-semibold text-[#102A43] flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-[#006F57]" />
+              Recently completed
+            </h2>
+            <Link href="/admin/my-cases" className="text-sm font-semibold text-[#0B69B7] hover:underline">
+              View all completed
+            </Link>
+          </div>
+          {staffTaskSummary.recentCompletions.length === 0 ? (
+            <p className="text-sm text-[#627D98]">No completed tasks yet. Tasks auto-complete when you submit audit or advance the case.</p>
+          ) : (
+            <div className="space-y-3">
+              {staffTaskSummary.recentCompletions.map((task) => renderStaffTaskCard(task, false))}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white rounded-[12px] border border-[#D9E1EA] p-5">
+            <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-1">My revenue (last 7 days)</h2>
+            <p className="text-xs text-[#627D98] mb-4">{dashboardData?.staff_revenue_summary?.attribution_note || "Revenue from your assigned cases only."}</p>
+            <div className="h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={dailyRevenue}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                  <XAxis dataKey="day" tick={{ fill: "#486581", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#486581", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", color: "#102A43", borderRadius: "12px" }} />
+                  <Bar dataKey="actual" fill="#009877" radius={[6, 6, 0, 0]} name="My revenue" />
+                  <Line type="monotone" dataKey="expected" stroke="#33A1FD" strokeWidth={2} name="3-day avg" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-5">
+            <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">My revenue split</h2>
+            {serviceRevenueBreakdown.length === 0 ? (
+              <p className="text-sm text-[#627D98]">No attributed revenue yet.</p>
+            ) : (
+              <>
+                <div className="h-[220px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={85}>
+                        {serviceRevenueBreakdown.map((_, index) => (
+                          <Cell key={index} fill={chartColors[index % chartColors.length]} />
+                        ))}
+                      </Pie>
+                      <Legend />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", color: "#102A43", borderRadius: "12px" }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-3 space-y-2 text-xs text-[#486581]">
+                  <p>Order: ₹{Number(staffRevenue.order_revenue || 0).toLocaleString("en-IN")}</p>
+                  <p>Audit: ₹{Number(staffRevenue.audit_revenue || 0).toLocaleString("en-IN")}</p>
+                  <p>Full payment: ₹{Number(staffRevenue.full_revenue || 0).toLocaleString("en-IN")}</p>
+                  <p>Paid cases (30d): {staffRevenue.paid_cases_30d ?? 0}</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 max-w-[1500px] mx-auto space-y-6 font-body">
       <div className="flex justify-between items-center mb-2">
@@ -438,79 +559,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
         </div>
       </div>
 
-      {isStaffView && (
-        <>
-          <div className="rounded-[14px] border border-[#D9E1EA] bg-[#F8FCFF] p-5 sm:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.16em] text-[#627D98]">My Work Today</p>
-                <h2 className="mt-1 text-[22px] font-heading font-semibold text-[#102A43]">Operations Queue</h2>
-                <p className="mt-2 text-sm text-[#486581] max-w-2xl">Work through assigned cases. Complete the required checklist inside each case. Case stages update automatically after each task is completed.</p>
-              </div>
-              <div className="rounded-[12px] border border-[#D9E1EA] bg-white px-4 py-3 min-w-[220px]">
-                <p className="text-xs text-[#627D98]">Performance Badge</p>
-                <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffBadge || "Needs Improvement"}</p>
-              </div>
-            </div>
-
-            <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-3">
-                <p className="text-xs text-[#627D98]">Urgent now</p>
-                <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffTodayQueues.urgentNow.length}</p>
-              </div>
-              <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-3">
-                <p className="text-xs text-[#627D98]">Assigned to me</p>
-                <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffTodayQueues.myTasks.length}</p>
-              </div>
-              <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-3">
-                <p className="text-xs text-[#627D98]">Next action required</p>
-                <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffTodayQueues.nextActionRequired.length}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <div className="xl:col-span-1 bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-              <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-3">Urgent now</h2>
-              <div className="space-y-3">
-                {staffTodayQueues.urgentNow.map((task) => renderStaffTaskCard(task))}
-                {staffTodayQueues.urgentNow.length === 0 && <p className="text-sm text-[#627D98]">No urgent items right now.</p>}
-              </div>
-            </div>
-
-            <div className="xl:col-span-2 bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-              <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-3">Assigned to me</h2>
-              <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
-                {staffTodayQueues.myTasks.map((task) => renderStaffTaskCard(task))}
-                {staffTodayQueues.myTasks.length === 0 && <p className="text-sm text-[#627D98]">No active work items found.</p>}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-            <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-3">Next action required</h2>
-            <div className="space-y-3">
-              {staffTodayQueues.nextActionRequired.map((task) => renderStaffTaskCard(task))}
-              {staffTodayQueues.nextActionRequired.length === 0 && <p className="text-sm text-[#627D98]">No follow-up actions are waiting.</p>}
-            </div>
-          </div>
-
-          <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[#102A43] font-heading font-semibold">Accountability Panel</h3>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35">Live</span>
-            </div>
-            <div className="space-y-1">
-              {accountabilityFeed.map((item) => (
-                <p key={item.id} className="text-xs text-[#627D98]">{item.text}</p>
-              ))}
-              {accountabilityFeed.length === 0 && <p className="text-xs text-[#627D98]">No recent activity.</p>}
-            </div>
-          </div>
-        </>
-      )}
-
-      {!isStaffView && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-7 gap-4 mb-6">
+      {!isOwnRevenueDashboard && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-7 gap-4 mb-6">
         <StatCard 
           title="Total Leads" 
           value={kpiSnapshot.total_leads}
@@ -578,15 +627,20 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
 
 {isOpsView && (
   <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-    <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">
-      My Assigned Tasks
-    </h2>
+    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+      <h2 className="text-lg font-heading font-semibold text-[#102A43]">
+        My Assigned Tasks
+      </h2>
+      <Link href="/admin/my-cases" className="text-sm font-semibold text-[#0B69B7] hover:underline">
+        My cases (active & completed)
+      </Link>
+    </div>
     <div className="space-y-3">
-      {taskItems.filter(t => t.assigned_staff === adminUser?.id).length === 0 ? (
-        <p className="text-sm text-[#627D98]">No tasks currently assigned to you.</p>
+      {taskItems.filter((t) => staffIdsMatch(t.assigned_staff, adminUser?.id) && pendingTaskStatuses.has(String(t.status || "").toLowerCase())).length === 0 ? (
+        <p className="text-sm text-[#627D98]">No pending tasks assigned to you. Check My Active Cases for completed work.</p>
       ) : (
         taskItems
-          .filter(t => t.assigned_staff === adminUser?.id)
+          .filter((t) => staffIdsMatch(t.assigned_staff, adminUser?.id) && pendingTaskStatuses.has(String(t.status || "").toLowerCase()))
           .map((task) => (
             <div key={task.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
               <div>
@@ -613,7 +667,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
   </div>
 )}
 
-      {!isFounderView && !isOpsView && !isStaffView && (
+      {!isFounderView && !isOpsView && !isOwnRevenueDashboard && (
         <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
           <p className="text-sm text-[#486581]">
             Read-only mode active for this role. Strategic reports remain restricted to Admin / CEO and Operations Manager.
@@ -761,87 +815,23 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
 
       {isFounderView ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] overflow-hidden">
-            <div className="p-5 border-b border-[0.5px] border-[#D9E1EA]">
-              <h2 className="text-lg font-heading font-semibold text-[#102A43]">Team Performance Grid</h2>
+          <Link
+            href="/admin/team-performance"
+            className="lg:col-span-2 bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5 hover:border-[#009877]/40 hover:shadow-sm transition-all group"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-heading font-semibold text-[#102A43] group-hover:text-[#006F57]">
+                  Team Performance
+                </h2>
+                <p className="text-sm text-[#627D98] mt-1">
+                  Full team grid — accuracy, revenue, cases generated, assigned, completed, and pending.
+                  Filter by today, last 7 days, last 30 days, or all time.
+                </p>
+              </div>
+              <span className="shrink-0 text-sm font-semibold text-[#009877]">Open →</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left align-middle">
-                <thead className="bg-[#F5F7FA] text-[#486581] font-heading font-medium">
-                  <tr>
-                    <th className="px-5 py-3 font-medium">Staff Name</th>
-                    <th className="px-5 py-3 font-medium text-center">Assigned</th>
-                    <th className="px-5 py-3 font-medium text-center">Completed</th>
-                    <th className="px-5 py-3 font-medium text-center">Pending</th>
-                    <th className="px-5 py-3 font-medium text-center">Avg Time/Task</th>
-                    <th className="px-5 py-3 font-medium text-center">SLA Breaches</th>
-                    <th className="px-5 py-3 font-medium text-center">Accuracy Score</th>
-                    <th className="px-5 py-3 font-medium text-center">Audits P/F</th>
-                  </tr>
-                </thead>
-              <tbody className="divide-y divide-[#E5EAF0]">
-  {staffMembers
-    .filter((staff) => String(staff.role || "").toLowerCase() !== "admin")
-    .map((staff) => {
-      const live = workloadByStaff[staff.id];
-      // Use live task counts if available, fall back to API data
-      const assigned = live?.assigned ?? staff.assigned;
-      const completed = live?.completed ?? staff.completed;
-      const pending = live?.pending ?? staff.pending;
-
-      return (
-        <tr key={staff.id} className="hover:bg-[#F8FAFC] transition-colors">
-          <td className="px-5 py-3 text-[#102A43] font-medium">
-            {staff.name}
-            <span className="ml-2 text-[11px] text-[#627D98] font-normal">{staff.role}</span>
-          </td>
-          <td className="px-5 py-3 text-center font-semibold text-[#0B69B7]">
-            {assigned}
-          </td>
-          <td className="px-5 py-3 text-center font-semibold text-[#006F57]">
-            {completed}
-          </td>
-          <td className="px-5 py-3 text-center font-semibold text-[#9C4F17]">
-            {pending}
-          </td>
-          <td className="px-5 py-3 text-center text-[#486581]">
-            {staff.avgTime}
-          </td>
-          <td className="px-5 py-3 text-center">
-            <span className={staff.slaBreach > 0 ? "text-[#B42318] font-semibold" : "text-[#486581]"}>
-              {staff.slaBreach}
-            </span>
-          </td>
-          <td className="px-5 py-3 text-center">
-            <span className={`font-semibold ${
-              staff.accuracy >= 90
-                ? "text-[#006F57]"
-                : staff.accuracy >= 70
-                ? "text-[#9C4F17]"
-                : "text-[#B42318]"
-            }`}>
-              {staff.accuracy}%
-            </span>
-          </td>
-          <td className="px-5 py-3 text-center">
-            <span className="text-[#006F57] font-semibold">{staff.auditsPassed}</span>
-            <span className="text-[#627D98] mx-0.5">/</span>
-            <span className="text-[#B42318] font-semibold">{staff.auditsFailed}</span>
-          </td>
-        </tr>
-      );
-    })}
-  {staffMembers.filter((s) => String(s.role || "").toLowerCase() !== "admin").length === 0 && (
-    <tr>
-      <td colSpan={8} className="px-5 py-6 text-center text-sm text-[#627D98]">
-        No staff members found.
-      </td>
-    </tr>
-  )}
-</tbody>
-              </table>
-            </div>
-          </div>
+          </Link>
 
           <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
             <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">Security & Compliance</h2>
@@ -864,49 +854,9 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
             </div>
           </div>
         </div>
-      ) : isStaffView ? (
-        <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
-          <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">My Daily Worklist</h2>
-          <div className="mb-4 rounded-[12px] border border-[#D9E1EA] bg-[#F8FCFF] px-4 py-3">
-            <p className="text-xs text-[#627D98]">My Performance Badge</p>
-            <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{staffBadge || "Needs Improvement"}</p>
-          </div>
-          <div className="space-y-3">
-
-            
-            {staffWorklist.map((task) => (
-              <div key={task.id} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[#102A43] text-sm font-medium">{task.title}</p>
-                  <p className="text-xs text-[#627D98]">{task.subtitle}</p>
-                </div>
-                <div className="flex gap-2 flex-wrap justify-end">
-                  <button className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full" onClick={() => handleOpenCase(task.id)}>Open Case</button>
-                  <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full" onClick={() => void handleMarkProgress(task)}>Mark Progress</button>
-                  <button className="text-xs bg-[#B87333]/12 text-[#9C4F17] border-[0.5px] border-[#B87333]/35 px-2 py-1 rounded-full" onClick={() => void handleEscalate(task)}>Escalate</button>
-                  <button 
-  className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full" 
-  onClick={() => void handleMarkComplete(task)}
->
-  Mark Complete
-</button>
-                </div>
-              </div>
-            ))}
-
-
-            {staffWorklist.length === 0 && <p className="text-sm text-[#627D98]">No active work items found.</p>}
-          </div>
-          <h3 className="text-[#102A43] font-heading font-semibold mt-6 mb-2">Accountability Panel</h3>
-          <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 space-y-1">
-            {accountabilityFeed.map((item) => (
-              <p key={item.id} className="text-xs text-[#627D98]">{item.text}</p>
-            ))}
-            {accountabilityFeed.length === 0 && <p className="text-xs text-[#627D98]">No recent activity.</p>}
-          </div>
-        </div>
       ) : null}
 
+      {!isOwnRevenueDashboard && (
       <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-5">
         <h2 className="text-lg font-heading font-semibold text-[#102A43] mb-4">Monthly Revenue Trend</h2>
         <div className="h-[220px]">
@@ -921,6 +871,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
           </ResponsiveContainer>
         </div>
       </div>
+      )}
     </div>
   );
 }

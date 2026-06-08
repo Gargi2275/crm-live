@@ -11,12 +11,10 @@ import {
   apostilleTrustBadges,
   apostilleWhyFlyOci,
 } from "@/lib/data/apostille";
+import { buildPageMetadata } from "@/lib/seo";
+import { PAGE_SEO } from "@/lib/seo-pages";
 
-export const metadata = {
-  title: "Apostille Services UK and India | Free Pre-Check Before Payment | FlyOCI",
-  description:
-    "Get your documents apostilled with FlyOCI. Free pre-check before payment. Support for UK and Indian documents including birth certificates, marriage certificates, degree certificates, affidavits, and more.",
-};
+export const metadata = buildPageMetadata(PAGE_SEO.apostilleServices);
 
 export default function ApostilleServicesPage() {
   return (

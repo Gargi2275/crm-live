@@ -1,457 +1,836 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { deleteAdminLogs, getAdminLogs, type AdminLogItem, type AdminLogsResponse } from "@/lib/admin-auth";
-import { ArrowUp, Logs, RefreshCw, Search, ShieldAlert, Trash2 } from "lucide-react";
+import {
+  deleteAdminLogs,
+  getAdminLogs,
+  manageAdminIpBlock,
+  updateAdminIpSecurity,
+  type AdminIpSecurityPayload,
+  type AdminLogItem,
+  type AdminLogsResponse,
+} from "@/lib/admin-auth";
+import {
+  Ban,
+  Filter,
+  Logs,
+  Mail,
+  RefreshCw,
+  Shield,
+  Trash2,
+  X,
+} from "lucide-react";
+
+type EventFilter = "all" | "login" | "failed_attempt" | "website_visit" | "event" | "email";
+type LogsPanel = "security" | "filters";
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+const DELETE_BATCH_SIZE = 200;
+const SELECT_ALL_BATCH_SIZE = 500;
+
+type LogSelection = { source: AdminLogItem["source"]; record_id: number };
 
 export default function AdminLogsPage() {
   const [data, setData] = useState<AdminLogsResponse | null>(null);
+  const [ipSecurity, setIpSecurity] = useState<AdminIpSecurityPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activePanel, setActivePanel] = useState<LogsPanel | null>(null);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [eventType, setEventType] = useState<"all" | "login" | "failed_attempt" | "website_visit" | "event">("all");
+  const [eventType, setEventType] = useState<EventFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [offset, setOffset] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [selectAllAcrossTable, setSelectAllAcrossTable] = useState(false);
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [selectedItems, setSelectedItems] = useState<Map<string, LogSelection>>(new Map());
   const [deleting, setDeleting] = useState(false);
-  const [showBackToTop, setShowBackToTop] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [thresholdInput, setThresholdInput] = useState("25");
+  const [savingThreshold, setSavingThreshold] = useState(false);
+  const [ipActionLoading, setIpActionLoading] = useState<string | null>(null);
+  const [manualBlockIp, setManualBlockIp] = useState("");
 
-  const load = async (params?: {
-    nextOffset?: number;
-    nextSearch?: string;
-    nextEventType?: typeof eventType;
-    nextDateFrom?: string;
-    nextDateTo?: string;
-  }) => {
+  const hasFilters =
+    appliedSearch.trim() !== "" ||
+    eventType !== "all" ||
+    dateFrom !== "" ||
+    dateTo !== "";
+
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const nextOffset = params?.nextOffset ?? offset;
-      const nextSearch = params?.nextSearch ?? appliedSearch;
-      const nextEventType = params?.nextEventType ?? eventType;
-      const nextDateFrom = params?.nextDateFrom ?? dateFrom;
-      const nextDateTo = params?.nextDateTo ?? dateTo;
       const payload = await getAdminLogs({
-        search: nextSearch,
-        eventType: nextEventType,
-        dateFrom: nextDateFrom || undefined,
-        dateTo: nextDateTo || undefined,
+        search: appliedSearch,
+        eventType,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
         limit: pageSize,
-        offset: nextOffset,
+        offset,
       });
       setData(payload);
-      setOffset(nextOffset);
-      setSelectedIds([]);
+      if (payload.ip_security) {
+        setIpSecurity(payload.ip_security);
+        setThresholdInput(String(payload.ip_security.daily_request_threshold));
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load logs.");
     } finally {
       setLoading(false);
     }
+  }, [appliedSearch, dateFrom, dateTo, eventType, offset, pageSize]);
+
+  const handlePageSizeChange = (nextSize: number) => {
+    setPageSize(nextSize);
+    setOffset(0);
+    setSelectedItems(new Map());
+  };
+
+  const selectionCount = selectedItems.size;
+  const pageRows = data?.results ?? [];
+
+  const clearSelection = () => setSelectedItems(new Map());
+
+  const toggleSelectRow = (row: AdminLogItem) => {
+    setSelectedItems((prev) => {
+      const next = new Map(prev);
+      if (next.has(row.id)) next.delete(row.id);
+      else next.set(row.id, { source: row.source, record_id: row.record_id });
+      return next;
+    });
+  };
+
+  const toggleSelectCurrentPage = () => {
+    if (!pageRows.length) return;
+    const allOnPageSelected = pageRows.every((row) => selectedItems.has(row.id));
+    setSelectedItems((prev) => {
+      const next = new Map(prev);
+      for (const row of pageRows) {
+        if (allOnPageSelected) next.delete(row.id);
+        else next.set(row.id, { source: row.source, record_id: row.record_id });
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = async () => {
+    setSelectingAll(true);
+    try {
+      const map = new Map<string, LogSelection>();
+      let fetchOffset = 0;
+      let total = 0;
+      do {
+        const payload = await getAdminLogs({
+          search: appliedSearch,
+          eventType,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+          limit: SELECT_ALL_BATCH_SIZE,
+          offset: fetchOffset,
+        });
+        total = payload.pagination.total;
+        for (const row of payload.results) {
+          map.set(row.id, { source: row.source, record_id: row.record_id });
+        }
+        fetchOffset += SELECT_ALL_BATCH_SIZE;
+      } while (fetchOffset < total);
+
+      setSelectedItems(map);
+      toast.success(`Selected ${map.size} log(s) matching filters.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to select all logs.");
+    } finally {
+      setSelectingAll(false);
+    }
   };
 
   useEffect(() => {
     void load();
-  }, []); // initial load only
+  }, [load]);
 
-  useEffect(() => {
-    const handle = window.setTimeout(() => {
-      const normalized = search.trim();
-      setAppliedSearch(normalized);
-      setSelectAllAcrossTable(false);
-      void load({
-        nextOffset: 0,
-        nextSearch: normalized,
-        nextEventType: eventType,
-        nextDateFrom: dateFrom,
-        nextDateTo: dateTo,
-      });
-    }, 300);
-    return () => window.clearTimeout(handle);
-  }, [search, eventType, dateFrom, dateTo, pageSize]);
-
-  useEffect(() => {
-    const onScroll = () => setShowBackToTop(window.scrollY > 350);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  const rows = useMemo(() => data?.results || [], [data?.results]);
-  const allSelected = rows.length > 0 && rows.every((row) => selectAllAcrossTable || selectedIds.includes(row.id));
-
-  const eventBadge = (row: AdminLogItem) => {
-    switch (row.event_type) {
-      case "login":
-        return "bg-[#009877]/10 text-[#006F57] border border-[#009877]/25";
-      case "failed_attempt":
-        return "bg-[#B42318]/10 text-[#B42318] border border-[#B42318]/25";
-      case "website_visit":
-        return "bg-[#0B69B7]/10 text-[#0B69B7] border border-[#0B69B7]/25";
-      default:
-        return "bg-[#627D98]/10 text-[#486581] border border-[#627D98]/25";
-    }
+  const applyFilters = () => {
+    setAppliedSearch(search.trim());
+    setOffset(0);
+    clearSelection();
   };
 
-  const toggleSelection = (id: string) => {
-    if (selectAllAcrossTable) {
-      setSelectAllAcrossTable(false);
-      setSelectedIds(rows.map((row) => row.id).filter((rowId) => rowId !== id));
-      return;
-    }
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
-  };
-
-  const toggleSelectAllVisible = () => {
-    if (selectAllAcrossTable) {
-      setSelectAllAcrossTable(false);
-      setSelectedIds([]);
-      return;
-    }
-    if (allSelected) {
-      setSelectedIds((prev) => prev.filter((id) => !rows.some((row) => row.id === id)));
-      return;
-    }
-    setSelectedIds((prev) => Array.from(new Set([...prev, ...rows.map((row) => row.id)])));
-  };
-
-  const clearSelection = () => {
-    setSelectedIds([]);
-    setSelectAllAcrossTable(false);
-  };
-
-  const toggleSelectAllAcrossTable = () => {
-    if (selectAllAcrossTable) {
-      setSelectAllAcrossTable(false);
-      setSelectedIds([]);
-      return;
-    }
-    setSelectAllAcrossTable(true);
-    setSelectedIds([]);
+  const clearFilters = () => {
+    setSearch("");
+    setAppliedSearch("");
+    setEventType("all");
+    setDateFrom("");
+    setDateTo("");
+    setOffset(0);
+    clearSelection();
   };
 
   const handleDeleteSelected = async () => {
-    const selectedRows = rows.filter((row) => selectedIds.includes(row.id));
-    const selectedCount = selectAllAcrossTable ? (data?.pagination.total || 0) : selectedRows.length;
-    if (!selectedCount) {
-      toast.error("Select at least one log row to delete.");
-      return;
-    }
-    if (!window.confirm(`Delete ${selectedCount} selected log entries from database?`)) {
-      return;
-    }
+    const items = Array.from(selectedItems.values());
+    if (!items.length) return;
+    if (!window.confirm(`Delete ${items.length} selected log(s)? This cannot be undone.`)) return;
 
     setDeleting(true);
     try {
-      let deleteItems: Array<{ source: AdminLogItem["source"]; record_id: number }> = [];
-
-      if (selectAllAcrossTable) {
-        const batchLimit = 500;
-        let batchOffset = 0;
-        let hasMore = true;
-        while (hasMore) {
-          const batch = await getAdminLogs({
-            search: appliedSearch,
-            eventType,
-            dateFrom: dateFrom || undefined,
-            dateTo: dateTo || undefined,
-            limit: batchLimit,
-            offset: batchOffset,
-          });
-          deleteItems.push(
-            ...(batch.results || []).map((row) => ({
-              source: row.source,
-              record_id: row.record_id,
-            }))
-          );
-          hasMore = Boolean(batch.pagination?.has_more);
-          batchOffset += batchLimit;
-        }
-      } else {
-        deleteItems = selectedRows.map((row) => ({
-          source: row.source,
-          record_id: row.record_id,
-        }));
+      let totalDeleted = 0;
+      for (let i = 0; i < items.length; i += DELETE_BATCH_SIZE) {
+        const chunk = items.slice(i, i + DELETE_BATCH_SIZE);
+        const result = await deleteAdminLogs(chunk);
+        totalDeleted += result.total_deleted;
       }
-
-      const payload = await deleteAdminLogs(deleteItems);
-      toast.success(`Deleted ${payload.total_deleted} logs.`);
-      await load({ nextOffset: 0, nextSearch: appliedSearch, nextEventType: eventType });
-      setSelectAllAcrossTable(false);
+      toast.success(`Deleted ${totalDeleted} log row(s).`);
+      clearSelection();
+      await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete selected logs.");
+      toast.error(error instanceof Error ? error.message : "Failed to delete logs.");
     } finally {
       setDeleting(false);
     }
   };
 
+  const handleSaveThreshold = async () => {
+    const value = Number(thresholdInput);
+    if (!Number.isFinite(value) || value < 1) {
+      toast.error("Enter a valid threshold (1 or more).");
+      return;
+    }
+    setSavingThreshold(true);
+    try {
+      const payload = await updateAdminIpSecurity({ daily_request_threshold: value });
+      setIpSecurity(payload);
+      toast.success(`Daily IP threshold set to ${value}.`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save threshold.");
+    } finally {
+      setSavingThreshold(false);
+    }
+  };
+
+  const handleBlockIp = async (ip: string) => {
+    setIpActionLoading(ip);
+    try {
+      const payload = await manageAdminIpBlock({
+        action: "block",
+        ip_address: ip,
+        reason: `Blocked from Logs module (>${ipSecurity?.daily_request_threshold ?? 25}/day)`,
+      });
+      setIpSecurity(payload);
+      toast.success(`${ip} blocked.`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to block IP.");
+    } finally {
+      setIpActionLoading(null);
+    }
+  };
+
+  const handleUnblockIp = async (ip: string) => {
+    setIpActionLoading(ip);
+    try {
+      const payload = await manageAdminIpBlock({ action: "unblock", ip_address: ip });
+      setIpSecurity(payload);
+      toast.success(`${ip} unblocked.`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to unblock IP.");
+    } finally {
+      setIpActionLoading(null);
+    }
+  };
+
+  const kpiButtons = useMemo(
+    () => [
+      { key: "all" as const, label: "Total", value: data?.summary.total ?? 0, tone: "text-[#102A43]" },
+      { key: "login" as const, label: "Logins", value: data?.summary.login_count ?? 0, tone: "text-[#0B69B7]" },
+      {
+        key: "failed_attempt" as const,
+        label: "Failed",
+        value: data?.summary.failed_attempt_count ?? 0,
+        tone: "text-[#B42318]",
+      },
+      {
+        key: "website_visit" as const,
+        label: "Visits",
+        value: data?.summary.website_visit_count ?? 0,
+        tone: "text-[#006F57]",
+      },
+      { key: "event" as const, label: "Events", value: data?.summary.event_count ?? 0, tone: "text-[#9C4F17]" },
+      { key: "email" as const, label: "Emails Sent", value: data?.summary.email_total ?? 0, tone: "text-[#6B21A8]" },
+    ],
+    [data?.summary],
+  );
+
+  const emailKpis = useMemo(
+    () => ({
+      total: data?.summary.email_total ?? 0,
+      toStaff: data?.summary.email_to_staff ?? 0,
+      toUser: data?.summary.email_to_user ?? 0,
+      failed: data?.summary.email_failed ?? 0,
+    }),
+    [data?.summary],
+  );
+
+  const formatTimestamp = (value: string | null) => {
+    if (!value) return "—";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
+  };
+
+  const togglePanel = (panel: LogsPanel) => {
+    setActivePanel((current) => (current === panel ? null : panel));
+  };
+
+  const blockedCount = ipSecurity?.blocked_ips?.length ?? 0;
+
+  const totalRows = data?.pagination.total ?? 0;
+  const rowStart = totalRows === 0 ? 0 : offset + 1;
+  const rowEnd = offset + (data?.results.length ?? 0);
+
   return (
-    <div className="animate-in fade-in zoom-in-95 duration-500 max-w-[1500px] mx-auto space-y-4 font-body">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-[22px] font-heading font-semibold text-[#102A43] flex items-center gap-2">
-            <Logs className="w-5 h-5 text-[#486581]" /> Logs Module
-          </h1>
-          <p className="mt-1 text-sm text-[#627D98]">
-            Login logs, website visit logs, failed attempts, and other events with IP address and timestamps.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search className="w-4 h-4 text-[#627D98] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name, event, IP, page..."
-              className="bg-white border border-[#D9E1EA] rounded-[10px] pl-9 pr-3 py-2 text-sm text-[#102A43] min-w-[240px]"
-            />
-          </div>
-          <select
-            value={eventType}
-            onChange={(event) => setEventType(event.target.value as typeof eventType)}
-            className="bg-white border border-[#D9E1EA] rounded-[10px] px-3 py-2 text-sm text-[#102A43]"
-            aria-label="Event type filter"
-          >
-            <option value="all">All events</option>
-            <option value="login">Login logs</option>
-            <option value="failed_attempt">Failed attempts</option>
-            <option value="website_visit">Website visits</option>
-            <option value="event">Other events</option>
-          </select>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(event) => setDateFrom(event.target.value)}
-            className="bg-white border border-[#D9E1EA] rounded-[10px] px-3 py-2 text-sm text-[#102A43]"
-            aria-label="From date"
-            title="From date"
-          />
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(event) => setDateTo(event.target.value)}
-            className="bg-white border border-[#D9E1EA] rounded-[10px] px-3 py-2 text-sm text-[#102A43]"
-            aria-label="To date"
-            title="To date"
-          />
-        
-          <button
-            type="button"
-            onClick={toggleSelectAllAcrossTable}
-            disabled={loading || (data?.pagination.total || 0) === 0}
-            className={`inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-sm font-semibold border ${
-              selectAllAcrossTable
-                ? "bg-[#EFF7FF] text-[#0B69B7] border-[#B7D7F7]"
-                : "bg-white text-[#334E68] border-[#D9E1EA] hover:bg-[#F5F7FA]"
-            } disabled:opacity-50`}
-          >
-            {selectAllAcrossTable ? "Unselect Table" : "Select All Rows"}
-          </button>
-          <button
-            type="button"
-            onClick={clearSelection}
-            disabled={loading || (selectedIds.length === 0 && !selectAllAcrossTable)}
-            className="inline-flex items-center gap-2 bg-white border border-[#D9E1EA] rounded-[10px] px-3 py-2 text-sm font-semibold text-[#334E68] hover:bg-[#F5F7FA] disabled:opacity-50"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleDeleteSelected()}
-            disabled={loading || deleting || (selectedIds.length === 0 && !selectAllAcrossTable)}
-            className="inline-flex items-center gap-2 bg-[#B42318] border border-[#B42318] rounded-[10px] px-3 py-2 text-sm font-semibold text-white hover:bg-[#9F2618] disabled:opacity-60"
-          >
-            <Trash2 className="w-4 h-4" /> Delete ({selectAllAcrossTable ? (data?.pagination.total || 0) : selectedIds.length})
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-        <button
-          type="button"
-          onClick={() => setEventType("all")}
-          className={`text-left bg-white rounded-[12px] border p-4 ${eventType === "all" ? "border-[#0B69B7]" : "border-[#D9E1EA]"}`}
-        >
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-[#B45309]" />
-            <p className="text-sm font-heading font-semibold text-[#102A43]">Total</p>
-          </div>
-          <p className="mt-2 text-2xl font-heading font-semibold text-[#102A43]">{loading ? "—" : data?.summary.total ?? 0}</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setEventType("login")}
-          className={`text-left bg-white rounded-[12px] border p-4 ${eventType === "login" ? "border-[#006F57]" : "border-[#D9E1EA]"}`}
-        >
-          <p className="text-sm font-heading font-semibold text-[#102A43]">Login</p>
-          <p className="mt-2 text-2xl font-heading font-semibold text-[#006F57]">{loading ? "—" : data?.summary.login_count ?? 0}</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setEventType("failed_attempt")}
-          className={`text-left bg-white rounded-[12px] border p-4 ${eventType === "failed_attempt" ? "border-[#B42318]" : "border-[#D9E1EA]"}`}
-        >
-          <p className="text-sm font-heading font-semibold text-[#102A43]">Failed Attempts</p>
-          <p className="mt-2 text-2xl font-heading font-semibold text-[#B42318]">{loading ? "—" : data?.summary.failed_attempt_count ?? 0}</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setEventType("website_visit")}
-          className={`text-left bg-white rounded-[12px] border p-4 ${eventType === "website_visit" ? "border-[#0B69B7]" : "border-[#D9E1EA]"}`}
-        >
-          <p className="text-sm font-heading font-semibold text-[#102A43]">Website Visits</p>
-          <p className="mt-2 text-2xl font-heading font-semibold text-[#0B69B7]">{loading ? "—" : data?.summary.website_visit_count ?? 0}</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setEventType("event")}
-          className={`text-left bg-white rounded-[12px] border p-4 ${eventType === "event" ? "border-[#486581]" : "border-[#D9E1EA]"}`}
-        >
-          <p className="text-sm font-heading font-semibold text-[#102A43]">Other Events</p>
-          <p className="mt-2 text-2xl font-heading font-semibold text-[#486581]">{loading ? "—" : data?.summary.event_count ?? 0}</p>
-        </button>
-      </div>
-
-      <div className="bg-white rounded-[12px] border border-[#D9E1EA] overflow-hidden">
-        <div className="hidden md:grid grid-cols-12 gap-3 px-4 py-3 border-b border-[#E5EAF0] bg-[#F8FAFC] text-[11px] font-semibold uppercase tracking-wide text-[#627D98]">
-          <div className="col-span-1">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={toggleSelectAllVisible}
-              aria-label="Select all visible logs"
-            />
-          </div>
-          <div className="col-span-2">Name</div>
-          <div className="col-span-2">Event Type</div>
-          <div className="col-span-2">Event</div>
-          <div className="col-span-2">Page</div>
-          <div className="col-span-1">IP Address</div>
-          <div className="col-span-1">Date</div>
-          <div className="col-span-2">Time</div>
-        </div>
-
-        {loading ? (
-          <div className="p-4 text-sm text-[#627D98]">Loading logs...</div>
-        ) : rows.length === 0 ? (
-          <div className="p-4 text-sm text-[#627D98]">No logs found for current search/filter.</div>
-        ) : (
-          <div className="divide-y divide-[#E5EAF0]">
-            {rows.map((row) => (
-              <div key={row.id} className="px-4 py-3">
-                <div className="md:hidden space-y-1 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold text-[#102A43]">{row.name || "Unknown"}</p>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(row.id)}
-                      onChange={() => toggleSelection(row.id)}
-                      aria-label={`Select log ${row.id}`}
-                    />
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${eventBadge(row)}`}>
-                      {row.event_type.replace("_", " ")}
-                    </span>
-                    <span className="text-[#486581]">{row.event}</span>
-                  </div>
-                  <p className="text-[#627D98] break-words">Page: {row.website_visit_page || "—"}</p>
-                  <p className="text-[#627D98]">IP: {row.ip_address || "—"}</p>
-                  <p className="text-[#627D98]">
-                    Date: {row.timestamp ? new Date(row.timestamp).toLocaleDateString() : "—"} | Time: {row.timestamp ? new Date(row.timestamp).toLocaleTimeString() : "—"}
-                  </p>
-                </div>
-
-                <div className="hidden md:grid grid-cols-12 gap-3 items-start">
-                  <div className="col-span-1 pt-1">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(row.id)}
-                      onChange={() => toggleSelection(row.id)}
-                      aria-label={`Select log ${row.id}`}
-                    />
-                  </div>
-                  <div className="col-span-2 text-sm font-semibold text-[#102A43] break-words">{row.name || "Unknown"}</div>
-                  <div className="col-span-2">
-                    <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${eventBadge(row)}`}>
-                      {row.event_type.replace("_", " ")}
-                    </span>
-                  </div>
-                  <div className="col-span-2 text-sm text-[#334E68] break-words">{row.event || "—"}</div>
-                  <div className="col-span-2 text-sm text-[#486581] break-words">{row.website_visit_page || "—"}</div>
-                  <div className="col-span-1 text-sm text-[#486581]">{row.ip_address || "—"}</div>
-                  <div className="col-span-1 text-sm text-[#627D98]">
-                    {row.timestamp ? new Date(row.timestamp).toLocaleDateString() : "—"}
-                  </div>
-                  <div className="col-span-2 text-sm text-[#627D98]">
-                    {row.timestamp ? new Date(row.timestamp).toLocaleTimeString() : "—"}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-[#627D98]">
-          Showing {rows.length} of {data?.pagination.total ?? 0} logs
-          {" "}• Page {Math.floor(offset / pageSize) + 1}
-          {appliedSearch ? ` for "${appliedSearch}"` : ""}.
-        </p>
+    <div className="space-y-3 font-body min-w-0 max-w-full">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={loading || offset <= 0}
-            onClick={() => void load({ nextOffset: Math.max(offset - pageSize, 0), nextDateFrom: dateFrom, nextDateTo: dateTo })}
-            className="inline-flex items-center rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold text-[#334E68] disabled:opacity-50"
-          >
-            Previous
-          </button>
-          <select
-            value={String(pageSize)}
-            onChange={(event) => {
-              setOffset(0);
-              setPageSize(Number(event.target.value));
+          <Logs className="w-6 h-6 text-[#009877]" />
+          <h1 className="text-2xl font-heading font-semibold text-[#102A43]">Logs Module</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 flex-1 justify-end min-w-0">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applyFilters();
             }}
-            className="bg-white border border-[#D9E1EA] rounded-[10px] px-3 py-2 text-sm text-[#102A43]"
-            aria-label="Rows per page"
-          >
-            {[10, 20, 50, 100].map((size) => (
-              <option key={size} value={size}>{size} rows</option>
-            ))}
-          </select>
+            placeholder="Search name, IP, page…"
+            className="w-full min-w-[180px] max-w-sm rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm"
+          />
           <button
             type="button"
-            onClick={() => void load({ nextOffset: offset, nextDateFrom: dateFrom, nextDateTo: dateTo })}
-            className="inline-flex items-center gap-2 bg-white border border-[#D9E1EA] rounded-[10px] px-3 py-2 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+            onClick={() => togglePanel("security")}
+            className={`inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-sm font-semibold transition-colors ${
+              activePanel === "security"
+                ? "border-[#009877] bg-[#009877]/10 text-[#006F57]"
+                : "border-[#D9E1EA] bg-white text-[#102A43] hover:bg-[#F5F7FA]"
+            }`}
           >
-            <RefreshCw className="w-4 h-4" /> Refresh
+            <Shield className="w-4 h-4" />
+            Security
+            {blockedCount > 0 ? (
+              <span className="rounded-full bg-[#B42318] px-1.5 text-[10px] text-white">{blockedCount}</span>
+            ) : null}
           </button>
           <button
             type="button"
-            disabled={loading || !data?.pagination.has_more}
-            onClick={() => void load({ nextOffset: offset + pageSize, nextDateFrom: dateFrom, nextDateTo: dateTo })}
-            className="inline-flex items-center rounded-[10px] border border-[#B7D7F7] bg-[#EFF7FF] px-3 py-2 text-sm font-semibold text-[#0B69B7] disabled:opacity-50"
+            onClick={() => togglePanel("filters")}
+            className={`inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-sm font-semibold transition-colors ${
+              activePanel === "filters" || hasFilters
+                ? "border-[#009877] bg-[#009877]/10 text-[#006F57]"
+                : "border-[#D9E1EA] bg-white text-[#102A43] hover:bg-[#F5F7FA]"
+            }`}
           >
-            Next
+            <Filter className="w-4 h-4" />
+            Filters
+            {hasFilters ? <span className="rounded-full bg-[#009877] px-1.5 text-[10px] text-white">on</span> : null}
           </button>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+          {selectionCount > 0 ? (
+            <span className="text-xs font-semibold text-[#0B69B7]">{selectionCount} selected</span>
+          ) : null}
         </div>
       </div>
 
-      {showBackToTop ? (
-        <button
-          type="button"
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-[#0B69B7] px-4 py-2 text-sm font-semibold text-white shadow-lg hover:bg-[#095A99]"
-        >
-          <ArrowUp className="w-4 h-4" /> Top
-        </button>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        {kpiButtons.map((kpi) => (
+          <button
+            key={kpi.key}
+            type="button"
+            onClick={() => {
+              setEventType(kpi.key);
+              setOffset(0);
+            }}
+            className={`text-left rounded-[10px] border p-3 transition-colors ${
+              eventType === kpi.key ? "border-[#009877] bg-[#009877]/10" : "border-[#D9E1EA] bg-white hover:border-[#33A1FD]/40"
+            }`}
+          >
+            <p className="text-xs text-[#627D98]">{kpi.label}</p>
+            <p className={`text-xl font-semibold mt-1 ${kpi.tone}`}>{loading ? "—" : kpi.value}</p>
+          </button>
+        ))}
+      </div>
+
+      {/* Email delivery KPI strip */}
+      {(emailKpis.total > 0 || eventType === "email") ? (
+        <div className="flex flex-wrap gap-2 rounded-[10px] border border-[#E9D5FF] bg-[#FAF5FF] p-3">
+          <Mail className="w-4 h-4 text-[#7C3AED] shrink-0 mt-0.5" />
+          <span className="text-xs font-semibold text-[#6B21A8] mr-1">Email Delivery:</span>
+          <span className="text-xs text-[#627D98]">Total <span className="font-semibold text-[#102A43]">{emailKpis.total}</span></span>
+          <span className="text-xs text-[#D9E1EA]">·</span>
+          <span className="text-xs text-[#627D98]">To Staff <span className="font-semibold text-[#0B69B7]">{emailKpis.toStaff}</span></span>
+          <span className="text-xs text-[#D9E1EA]">·</span>
+          <span className="text-xs text-[#627D98]">To Customer <span className="font-semibold text-[#006F57]">{emailKpis.toUser}</span></span>
+          <span className="text-xs text-[#D9E1EA]">·</span>
+          <span className="text-xs text-[#627D98]">Failed <span className={`font-semibold ${emailKpis.failed > 0 ? "text-[#B42318]" : "text-[#102A43]"}`}>{emailKpis.failed}</span></span>
+        </div>
       ) : null}
+
+      {activePanel === "security" ? (
+        <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4 space-y-3">
+          <p className="text-sm font-semibold text-[#102A43]">IP threshold & blocking</p>
+          <p className="text-xs text-[#627D98]">
+            Over-limit IPs trigger admin alert + email. Blocked IPs cannot use the public site or API.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="block text-sm">
+              <span className="text-xs text-[#627D98]">Requests per IP / day</span>
+              <input
+                type="number"
+                min={1}
+                value={thresholdInput}
+                onChange={(e) => setThresholdInput(e.target.value)}
+                className="mt-1 w-32 rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void handleSaveThreshold()}
+              disabled={savingThreshold}
+              className="rounded-[10px] bg-[#009877] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {savingThreshold ? "Saving…" : "Save threshold"}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-end gap-2 pt-1 border-t border-[#E5EAF0]">
+            <label className="block text-sm flex-1 min-w-[200px]">
+              <span className="text-xs text-[#627D98]">Block IP manually</span>
+              <input
+                type="text"
+                value={manualBlockIp}
+                onChange={(e) => setManualBlockIp(e.target.value)}
+                placeholder="e.g. 203.0.113.45"
+                className="mt-1 w-full max-w-xs rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm font-mono bg-white"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={!manualBlockIp.trim() || ipActionLoading !== null}
+              onClick={() => {
+                const ip = manualBlockIp.trim();
+                void handleBlockIp(ip).then(() => setManualBlockIp(""));
+              }}
+              className="inline-flex items-center gap-1 rounded-[10px] bg-[#B42318] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              <Ban className="w-4 h-4" />
+              Block IP
+            </button>
+          </div>
+
+          {(ipSecurity?.blocked_ips?.length ?? 0) > 0 ? (
+            <div className="rounded-[10px] border border-[#FECDCA] bg-[#FEE4E2]/30 p-3">
+              <p className="text-xs font-semibold text-[#B42318] mb-2">Currently blocked</p>
+              <div className="flex flex-wrap gap-2">
+                {ipSecurity?.blocked_ips.map((b) => (
+                  <span
+                    key={b.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-[#FECDCA] bg-white px-3 py-1 text-xs font-mono"
+                  >
+                    {b.ip_address}
+                    <button
+                      type="button"
+                      disabled={ipActionLoading === b.ip_address}
+                      onClick={() => void handleUnblockIp(b.ip_address)}
+                      className="font-semibold text-[#0B69B7] hover:underline disabled:opacity-60"
+                    >
+                      Unblock
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-[#627D98]">No IPs are blocked right now.</p>
+          )}
+
+          {(ipSecurity?.ip_counts_today?.length ?? 0) > 0 ? (
+            <div className="overflow-x-auto overflow-y-hidden rounded-[10px] border border-[#E5EAF0] [scrollbar-gutter:stable]">
+              <p className="text-xs font-semibold text-[#486581] px-3 py-2 bg-[#F8FAFC] border-b border-[#E5EAF0]">
+                IPs seen today
+              </p>
+              <table className="w-full text-xs min-w-[520px]">
+                <thead className="bg-[#F8FAFC] text-[#486581]">
+                  <tr>
+                    <th className="px-3 py-2 text-left">IP</th>
+                    <th className="px-3 py-2 text-center">Count</th>
+                    <th className="px-3 py-2 text-center">Status</th>
+                    <th className="px-3 py-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5EAF0]">
+                  {ipSecurity?.ip_counts_today.map((row) => (
+                    <tr key={row.ip_address}>
+                      <td className="px-3 py-2 font-mono text-[#102A43]">{row.ip_address}</td>
+                      <td className="px-3 py-2 text-center font-semibold">{row.count_today}</td>
+                      <td className="px-3 py-2 text-center">
+                        {row.is_blocked ? (
+                          <span className="text-[#B42318] font-semibold">Blocked</span>
+                        ) : row.over_threshold ? (
+                          <span className="text-[#9C4F17] font-semibold">Over limit</span>
+                        ) : (
+                          <span className="text-[#627D98]">OK</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {row.is_blocked ? (
+                          <button
+                            type="button"
+                            disabled={ipActionLoading === row.ip_address}
+                            onClick={() => void handleUnblockIp(row.ip_address)}
+                            className="text-xs font-semibold text-[#0B69B7] hover:underline disabled:opacity-60"
+                          >
+                            Unblock
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={ipActionLoading === row.ip_address}
+                            onClick={() => void handleBlockIp(row.ip_address)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-[#B42318] hover:underline disabled:opacity-60"
+                          >
+                            <Ban className="w-3 h-3" />
+                            Block
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {activePanel === "filters" ? (
+        <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-[#102A43]">Log filters</p>
+            {hasFilters ? (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-[#486581]"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear filters
+              </button>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <label className="block text-sm">
+              <span className="text-xs text-[#627D98]">Event type</span>
+              <select
+                value={eventType}
+                onChange={(e) => setEventType(e.target.value as EventFilter)}
+                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
+              >
+                <option value="all">All events</option>
+                <option value="login">Login</option>
+                <option value="failed_attempt">Failed attempt</option>
+                <option value="website_visit">Website visit</option>
+                <option value="event">Other events</option>
+                <option value="email">Email delivery</option>
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="text-xs text-[#627D98]">Date from</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-xs text-[#627D98]">Date to</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={applyFilters}
+                className="w-full rounded-[10px] bg-[#009877] px-3 py-2 text-sm font-semibold text-white hover:bg-[#007B61]"
+              >
+                Apply filters
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-[#E5EAF0] pt-4 flex flex-wrap items-center gap-2">
+            <p className="text-xs text-[#627D98] w-full sm:w-auto sm:mr-2">
+              {selectionCount > 0 ? `${selectionCount} selected` : "No rows selected"}
+            </p>
+            <button
+              type="button"
+              onClick={() => void selectAllFiltered()}
+              disabled={selectingAll || loading || totalRows === 0}
+              className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-50"
+            >
+              {selectingAll ? "Selecting…" : "Select all"}
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              disabled={selectionCount === 0}
+              className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA] disabled:opacity-50"
+            >
+              Clear selection
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDeleteSelected()}
+              disabled={deleting || selectionCount === 0}
+              className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#B42318] px-3 py-2 text-xs font-semibold text-white hover:bg-[#9B2C1A] disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {deleting ? "Deleting…" : `Delete selected (${selectionCount})`}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="bg-white rounded-[12px] border border-[#D9E1EA] overflow-hidden w-full min-w-0">
+        <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]">
+          <table className="w-max min-w-full text-sm">
+            <thead className="bg-[#F8FAFC] text-[#486581]">
+              <tr>
+                <th className="px-3 py-2 w-10 sticky left-0 z-10 bg-[#F8FAFC]">
+                  <PageSelectAllCheckbox
+                    rows={pageRows}
+                    selectedItems={selectedItems}
+                    onToggle={toggleSelectCurrentPage}
+                    disabled={loading}
+                  />
+                </th>
+                <th className="px-3 py-2 text-left whitespace-nowrap min-w-[140px]">Time</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap min-w-[120px]">Name</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap min-w-[100px]">Event</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap min-w-[110px]">IP</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap min-w-[120px]">Page</th>
+                <th className="px-3 py-2 text-left whitespace-nowrap min-w-[160px]">Target</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap min-w-[88px]">IP action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E5EAF0]">
+              {(data?.results ?? []).map((row) => (
+                <LogTableRow
+                  key={row.id}
+                  row={row}
+                  selected={selectedItems.has(row.id)}
+                  onToggle={() => toggleSelectRow(row)}
+                  formatTimestamp={formatTimestamp}
+                  isBlocked={ipSecurity?.blocked_ips.some((b) => b.ip_address === row.ip_address) ?? false}
+                  ipLoading={ipActionLoading === row.ip_address}
+                  onBlock={() => void handleBlockIp(row.ip_address)}
+                  onUnblock={() => void handleUnblockIp(row.ip_address)}
+                />
+              ))}
+              {!loading && (data?.results.length ?? 0) === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-[#627D98]">
+                    No logs match your filters.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-3 sm:px-4 py-3 border-t border-[#E5EAF0] text-xs text-[#627D98] bg-[#FAFBFC]">
+          <span className="shrink-0">
+            {loading
+              ? "Loading…"
+              : totalRows === 0
+                ? "No rows"
+                : `Showing ${rowStart}–${rowEnd} of ${totalRows}`}
+          </span>
+          <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end w-full sm:w-auto min-w-0">
+            <button
+              type="button"
+              disabled={offset <= 0 || loading}
+              onClick={() => setOffset((o) => Math.max(0, o - pageSize))}
+              className="rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-sm font-semibold text-[#102A43] disabled:opacity-50 hover:bg-[#F5F7FA]"
+            >
+              Previous
+            </button>
+            <label className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2 py-1">
+              <span className="text-[#627D98] whitespace-nowrap">Rows</span>
+              <select
+                value={pageSize}
+                disabled={loading}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className="rounded-[6px] border-0 bg-transparent py-0.5 pr-6 text-sm font-semibold text-[#102A43] focus:ring-0 cursor-pointer disabled:opacity-50"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!data?.pagination.has_more || loading}
+              onClick={() => setOffset((o) => o + pageSize)}
+              className="rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-sm font-semibold text-[#102A43] disabled:opacity-50 hover:bg-[#F5F7FA]"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
+function PageSelectAllCheckbox({
+  rows,
+  selectedItems,
+  onToggle,
+  disabled,
+}: {
+  rows: AdminLogItem[];
+  selectedItems: Map<string, LogSelection>;
+  onToggle: () => void;
+  disabled?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const allSelected = rows.length > 0 && rows.every((row) => selectedItems.has(row.id));
+  const someSelected = rows.some((row) => selectedItems.has(row.id));
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [allSelected, someSelected]);
+
+  return (
+    <input
+      ref={inputRef}
+      type="checkbox"
+      checked={allSelected}
+      disabled={disabled || rows.length === 0}
+      onChange={onToggle}
+      aria-label="Select all rows on this page"
+      className="cursor-pointer disabled:cursor-not-allowed"
+    />
+  );
+}
+
+function LogTableRow({
+  row,
+  selected,
+  onToggle,
+  formatTimestamp,
+  isBlocked,
+  ipLoading,
+  onBlock,
+  onUnblock,
+}: {
+  row: AdminLogItem;
+  selected: boolean;
+  onToggle: () => void;
+  formatTimestamp: (v: string | null) => string;
+  isBlocked: boolean;
+  ipLoading: boolean;
+  onBlock: () => void;
+  onUnblock: () => void;
+}) {
+  const hasIp = Boolean(row.ip_address?.trim());
+  const isEmail = row.source === "email_delivery_log";
+
+  if (isEmail) {
+    const isDelivered = row.email_status === "sent";
+    return (
+      <tr className="hover:bg-[#FAF5FF] align-top group">
+        <td className="px-3 py-2 sticky left-0 z-[1] bg-white group-hover:bg-[#FAF5FF]">
+          <input type="checkbox" checked={selected} onChange={onToggle} />
+        </td>
+        <td className="px-3 py-2 text-[#486581] whitespace-nowrap">{formatTimestamp(row.timestamp)}</td>
+        <td className="px-3 py-2 text-[#102A43] text-xs">{row.name}</td>
+        <td className="px-3 py-2">
+          <span className="text-[10px] uppercase rounded-full border border-[#E9D5FF] px-2 py-0.5 bg-[#FAF5FF] text-[#6B21A8]">email</span>
+          <p className="text-xs mt-0.5">
+            <span className={`font-semibold ${isDelivered ? "text-[#006F57]" : "text-[#B42318]"}`}>
+              {isDelivered ? "delivered" : "failed"}
+            </span>
+            {row.email_recipient_type ? (
+              <span className="text-[#627D98]"> · {row.email_recipient_type}</span>
+            ) : null}
+          </p>
+        </td>
+        <td className="px-3 py-2 text-xs text-[#486581] max-w-[200px] truncate" colSpan={2}>{row.email_subject || "—"}</td>
+        <td className="px-3 py-2 text-xs text-[#486581]">
+          {row.email_context_label ? <span className="inline-block rounded-full bg-[#F5F7FA] border px-2 py-0.5 text-[10px] mr-1">{row.email_context_label}</span> : null}
+          {row.email_application_reference ? <span className="text-[#102A43]">{row.email_application_reference}</span> : null}
+          {row.email_error ? <p className="text-[#B42318] mt-0.5 text-[10px]">{row.email_error}</p> : null}
+        </td>
+        <td className="px-3 py-2 text-right text-xs text-[#627D98]">{row.email_triggered_by || "—"}</td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="hover:bg-[#F8FAFC] align-top group">
+      <td className="px-3 py-2 sticky left-0 z-[1] bg-white group-hover:bg-[#F8FAFC]">
+        <input type="checkbox" checked={selected} onChange={onToggle} />
+      </td>
+      <td className="px-3 py-2 text-[#486581] whitespace-nowrap">{formatTimestamp(row.timestamp)}</td>
+      <td className="px-3 py-2 text-[#102A43]">{row.name}</td>
+      <td className="px-3 py-2">
+        <span className="text-[10px] uppercase rounded-full border px-2 py-0.5 bg-[#F5F7FA]">{row.event_type}</span>
+        <p className="text-xs text-[#627D98] mt-0.5">{row.event}</p>
+      </td>
+      <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{row.ip_address || "—"}</td>
+      <td className="px-3 py-2 text-xs text-[#486581] whitespace-nowrap min-w-[120px]">{row.website_visit_page || "—"}</td>
+      <td className="px-3 py-2 text-xs text-[#486581] min-w-[180px] max-w-[320px]">{row.target || "—"}</td>
+      <td className="px-3 py-2 text-right">
+        {hasIp ? (
+          isBlocked ? (
+            <button
+              type="button"
+              disabled={ipLoading}
+              onClick={onUnblock}
+              className="text-xs font-semibold text-[#0B69B7] hover:underline disabled:opacity-60"
+            >
+              Unblock
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={ipLoading}
+              onClick={onBlock}
+              className="text-xs font-semibold text-[#B42318] hover:underline disabled:opacity-60"
+            >
+              Block
+            </button>
+          )
+        ) : (
+          "—"
+        )}
+      </td>
+    </tr>
+  );
+}

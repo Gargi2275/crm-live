@@ -22,6 +22,7 @@ const config: Config = {
       },
       fontFamily: {
         heading: [
+          "var(--font-sans)",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",
@@ -34,6 +35,7 @@ const config: Config = {
           "sans-serif",
         ],
         body: [
+          "var(--font-sans)",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",

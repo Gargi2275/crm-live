@@ -57,8 +57,8 @@ export function ConsentCheckboxes({
             {includeAuditFeeAcknowledgement ? (
               <li>
                 I acknowledge the audit fee and understand it is credited against my final service fee if I proceed with
-                an OCI service (New OCI, OCI Renewal, or OCI Update). Audit credit does not apply to e-Visa or Passport
-                Renewal.
+                an OCI service (New OCI, OCI Renewal, or OCI Update) within 30 days of payment. Audit credit does not apply
+                to e-Visa or Passport Renewal.
               </li>
             ) : null}
           </>

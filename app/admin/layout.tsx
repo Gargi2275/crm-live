@@ -253,8 +253,10 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
     return null;
   }
 
+  const adminAccessReady = accessChecked || adminUser?.role === "admin";
+
   // Block render until access check completes — prevents flash of unauthorized page
-  if (!accessChecked && !isPublicAdminAuthRoute) {
+  if (!adminAccessReady && !isPublicAdminAuthRoute) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F7FA]">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#D9E1EA] border-t-[#009877]" />

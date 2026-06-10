@@ -87,7 +87,7 @@ export default async function Home() {
   ];
 
   return (
-    <>
+    <div className="font-body">
       <HeroSection />
 
       {/* SECTION 1: What We Do */}
@@ -112,10 +112,10 @@ export default async function Home() {
         <span className="w-2 h-2 rounded-full bg-[#155fc4] animate-pulse" />
         Our process
       </div>
-      <h2 className="font-heading font-bold text-primary mb-4" style={{fontFamily: "'DM Serif Display', serif", fontSize: 'clamp(2rem,4vw,2.75rem)', lineHeight: 1.2, color: '#0b2a6b'}}>
-        Simple. Structured. <em className="italic" style={{color: '#155fc4'}}>No surprises.</em>
+      <h2 className="font-heading text-[clamp(2rem,4vw,2.75rem)] font-black leading-tight text-[#0b2a6b] mb-4">
+        Simple. Structured. <em className="not-italic text-[#155fc4]">No surprises.</em>
       </h2>
-      <p className="text-lg max-w-2xl" style={{color: '#506080'}}>
+      <p className="font-body text-lg max-w-2xl text-[#506080]">
         We keep the process structured so you always know what happens next.
       </p>
     </FadeInUp>
@@ -135,17 +135,17 @@ export default async function Home() {
             {/* Number block */}
             <div className="relative w-12 h-12 mb-5">
               <div className="absolute inset-0 rounded-xl" style={{background: '#eef4ff', transform: 'rotate(10deg)'}} />
-              <div className="absolute inset-0 flex items-center justify-center text-2xl font-bold" style={{fontFamily: "'DM Serif Display', serif", color: '#155fc4'}}>
+              <div className="absolute inset-0 flex items-center justify-center font-heading text-2xl font-black text-[#155fc4]">
                 {i + 1}
               </div>
             </div>
             <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{color: '#155fc4'}}>
               {['Start here', 'Expert review', 'We handle it'][i]}
             </p>
-            <h3 className="font-bold mb-2" style={{fontFamily: "'DM Serif Display', serif", fontSize: '1.2rem', color: '#0b2a6b', lineHeight: 1.3}}>
+            <h3 className="font-heading text-[1.2rem] font-bold leading-snug text-[#0b2a6b] mb-2">
               {step.title}
             </h3>
-            <p className="text-sm leading-relaxed" style={{color: '#507090'}}>
+            <p className="font-body text-sm leading-relaxed text-[#507090]">
               {step.description}
             </p>
             {/* Arrow connector */}
@@ -171,8 +171,8 @@ export default async function Home() {
               </svg>
             </div>
             <div>
-              <p className="text-sm font-semibold mb-1" style={{color: '#0b2a6b'}}>Document Audit Fee: GBP 15</p>
-              <p className="text-sm leading-relaxed" style={{color: '#507090'}}>
+              <p className="font-heading text-sm font-semibold mb-1 text-[#0b2a6b]">Document Audit Fee: GBP 15</p>
+              <p className="font-body text-sm leading-relaxed text-[#507090]">
                 The audit fee is fully adjusted against your full service fee when you proceed within 30 days.
               </p>
             </div>
@@ -188,8 +188,8 @@ export default async function Home() {
               </svg>
             </div>
             <div>
-              <p className="text-sm font-semibold mb-1" style={{color: '#0b2a6b'}}>Clear Delivery</p>
-              <p className="text-sm leading-relaxed" style={{color: '#507090'}}>
+              <p className="font-heading text-sm font-semibold mb-1 text-[#0b2a6b]">Clear Delivery</p>
+              <p className="font-body text-sm leading-relaxed text-[#507090]">
                 You receive guidance and updates on email and WhatsApp from document review to completion.
               </p>
               <p className="text-xs font-semibold mt-2" style={{color: '#155fc4'}}>Live updates</p>
@@ -266,6 +266,6 @@ export default async function Home() {
           </FadeInUp>
         </div>
       </section>
-    </>
+    </div>
   );
 }

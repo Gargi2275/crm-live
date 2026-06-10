@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { StatCard } from "@/components/ui/console/StatCard";
 import {
@@ -47,13 +47,14 @@ import {
   type AdminApplication,
   type AdminDashboardOverview,
   type AdminTaskItem,
+  type StaffRevenueKpi,
 } from "@/lib/admin-auth";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
 export default function ConsoleDashboard() {
   const router = useRouter();
-  const { adminUser } = useAdminAuth();
+  const { adminUser, isBootstrapped } = useAdminAuth();
   const [period, setPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [applications, setApplications] = useState<AdminApplication[]>([]);
@@ -75,76 +76,89 @@ export default function ConsoleDashboard() {
   const isOwnRevenueDashboard = isStaffOwnRevenueDashboard(dashboardData, userRole);
   const accessScope = adminUser?.access_scope ?? "all";
   const chartColors = ["#009877", "#33A1FD", "#B87333", "#DCE7F3"];
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const loadRequestIdRef = useRef(0);
 
-  useEffect(() => {
-    if (!adminUser) return;
-    const isStaff = ["case_processor", "reviewer", "support_agent"].includes(adminUser.role ?? "");
-    if (isStaff) {
-      router.replace("/admin/easyfly?defaultTab=pending");
-      return;
+  const loadDashboard = useCallback(async (options?: { background?: boolean }) => {
+    const requestId = ++loadRequestIdRef.current;
+    if (!options?.background) {
+      setLoading(true);
     }
-    if (!hasFlyOciConsoleAccess(accessScope)) {
-      router.replace("/admin/easyfly");
-    }
-  }, [adminUser, accessScope, router]);
 
-  const loadDashboard = async () => {
-  setLoading(true);
-  try {
-    const shouldLoadTasks = isFounderView || isOpsView;
-    const [payload, appPayload, taskPayload] = await Promise.all([
-      getAdminDashboardOverview(),
-      isStaffConsoleRole ? Promise.resolve([] as AdminApplication[]) : listAdminApplications(),
-      shouldLoadTasks
-        ? listAdminTasks({ limit: 500 })
-        : isStaffConsoleRole && adminUser?.id
-          ? listAdminTasks({ limit: 100, assignedStaffId: adminUser.id })
-          : Promise.resolve([] as AdminTaskItem[]),
-    ]);
-    setDashboardData(payload);
-    setApplications(appPayload);
-    if (shouldLoadTasks || isStaffConsoleRole) {
-      setTaskItems(taskPayload);
-    }
-    if (isStaffConsoleRole) {
-      try {
-        const badgePayload = await getStaffPerformanceBadge();
-        setStaffBadge(badgePayload.badge);
-      } catch {
-        setStaffBadge(null);
+    try {
+      const shouldLoadTasks = isFounderView || isOpsView;
+      const [payload, appPayload, taskPayload] = await Promise.all([
+        getAdminDashboardOverview(),
+        isStaffConsoleRole ? Promise.resolve([] as AdminApplication[]) : listAdminApplications(),
+        shouldLoadTasks
+          ? listAdminTasks({ limit: 500 })
+          : isStaffConsoleRole && adminUser?.id
+            ? listAdminTasks({ limit: 100, assignedStaffId: adminUser.id })
+            : Promise.resolve([] as AdminTaskItem[]),
+      ]);
+
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+
+      setDashboardData(payload);
+      setApplications(appPayload);
+      if (shouldLoadTasks || isStaffConsoleRole) {
+        setTaskItems(taskPayload);
+      }
+      if (isStaffConsoleRole) {
+        try {
+          const badgePayload = await getStaffPerformanceBadge();
+          if (requestId === loadRequestIdRef.current) {
+            setStaffBadge(badgePayload.badge);
+          }
+        } catch {
+          if (requestId === loadRequestIdRef.current) {
+            setStaffBadge(null);
+          }
+        }
+      }
+    } catch (error) {
+      if (requestId === loadRequestIdRef.current) {
+        toast.error(error instanceof Error ? error.message : "Failed to load dashboard overview.");
+      }
+    } finally {
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
       }
     }
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : "Failed to load dashboard overview.");
-  } finally {
-    setLoading(false);  // ← this is what was missing
-  }
-};
+  }, [adminUser?.id, isFounderView, isOpsView, isStaffConsoleRole]);
 
   useEffect(() => {
-    if (adminUser && hasFlyOciConsoleAccess(accessScope)) void loadDashboard();
-  }, [adminUser, accessScope]);
+    if (!isBootstrapped || !adminUser) {
+      return;
+    }
 
-  if (!adminUser || !hasFlyOciConsoleAccess(accessScope)) {
-    return (
-      <div className="flex items-center justify-center h-64 text-[#627D98] text-sm">
-        Redirecting to EasyFly dashboard...
-      </div>
-    );
-  }
+    if (!hasFlyOciConsoleAccess(accessScope)) {
+      router.replace("/admin/easyfly");
+      return;
+    }
 
-  const kpiSnapshot = dashboardData?.kpi_snapshot ?? {
-    total_leads: 0,
-    todays_leads: 0,
-    converted: 0,
-    conversion: "0%",
-    revenue_today: 0,
-    order_revenue_today: 0,
-    audit_revenue_today: 0,
-    full_payment_revenue_today: 0,
-    pending_payments: 0,
-    avg_ticket_size: 0,
+    setAuthReady(true);
+    void loadDashboard();
+
+    return () => {
+      loadRequestIdRef.current += 1;
+    };
+  }, [isBootstrapped, adminUser?.id, adminUser?.role, accessScope, loadDashboard]);
+
+  const kpiSnapshot = {
+    total_leads: dashboardData?.kpi_snapshot?.total_leads ?? 0,
+    todays_leads: dashboardData?.kpi_snapshot?.todays_leads ?? 0,
+    converted: dashboardData?.kpi_snapshot?.converted ?? 0,
+    conversion: dashboardData?.kpi_snapshot?.conversion ?? "0%",
+    revenue_today: dashboardData?.kpi_snapshot?.revenue_today ?? 0,
+    order_revenue_today: dashboardData?.kpi_snapshot?.order_revenue_today ?? 0,
+    audit_revenue_today: dashboardData?.kpi_snapshot?.audit_revenue_today ?? 0,
+    full_payment_revenue_today: dashboardData?.kpi_snapshot?.full_payment_revenue_today ?? 0,
+    pending_payments: dashboardData?.kpi_snapshot?.pending_payments ?? 0,
+    avg_ticket_size: dashboardData?.kpi_snapshot?.avg_ticket_size ?? 0,
   };
   const dailyRevenue = dashboardData?.daily_revenue ?? [];
   const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
@@ -234,7 +248,7 @@ const handleMarkProgress = async (task: { id: number; applicationId: number; ref
     await patchAdminApplication(task.applicationId, {
       notes: appendTimestampedNote(task.notes, `Progress updated by staff for ${task.reference}`),
     });
-    await loadDashboard();
+    await loadDashboard({ background: true });
     toast.success(`Progress updated for ${task.reference}`);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : "Failed to update progress.");
@@ -249,7 +263,7 @@ const handleEscalate = async (task: { id: number; applicationId: number; referen
       correction_cause: "staff_error",
       notes: appendTimestampedNote(task.notes, `Escalated by staff for review: ${task.reference}`),
     });
-    await loadDashboard();
+    await loadDashboard({ background: true });
     toast.success(`Escalation recorded for ${task.reference}`);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : "Failed to escalate case.");
@@ -262,7 +276,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
     await patchAdminApplication(task.applicationId, {
       notes: appendTimestampedNote(task.notes, `Task completed by staff for ${task.reference}`),
     });
-    await loadDashboard();
+    await loadDashboard({ background: true });
     toast.success(`Task marked complete for ${task.reference}`);
   } catch (error) {
     toast.error(error instanceof Error ? error.message : "Failed to mark task complete.");
@@ -403,22 +417,34 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
     );
   };
 
-  if (loading) {
-  return (
-    <div className="flex items-center justify-center h-64 text-[#627D98] text-sm">
-      Loading dashboard...
-    </div>
-  );
-}
+  if (!isBootstrapped || !authReady || loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh] text-[#627D98] text-sm">
+        <div className="flex flex-col items-center gap-3">
+          <RefreshCw className="w-5 h-5 animate-spin text-[#009877]" />
+          <span>Loading dashboard...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (isOwnRevenueDashboard) {
-    const staffRevenue = dashboardData?.my_revenue?.kpi_snapshot ?? kpiSnapshot;
+    const staffRevenue: StaffRevenueKpi = dashboardData?.my_revenue?.kpi_snapshot ?? {
+      revenue_today: 0,
+      revenue_30d: 0,
+      revenue_total: 0,
+      order_revenue: 0,
+      audit_revenue: 0,
+      full_revenue: 0,
+      paid_cases_total: 0,
+      paid_cases_30d: 0,
+    };
     const myAssignedTasks = taskItems.filter((task) => staffIdsMatch(task.assigned_staff, adminUser?.id));
     const recentCases = [...myAssignedTasks]
       .filter((task) => pendingTaskStatuses.has(String(task.status || "").toLowerCase()))
       .sort((a, b) => {
-        const left = new Date(a.deadline || a.updated_at || a.created_at).getTime();
-        const right = new Date(b.deadline || b.updated_at || b.created_at).getTime();
+        const left = new Date(a.deadline || a.updated_at || a.created_at || 0).getTime();
+        const right = new Date(b.deadline || b.updated_at || b.created_at || 0).getTime();
         return left - right;
       })
       .slice(0, 8);

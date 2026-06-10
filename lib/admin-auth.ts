@@ -26,6 +26,14 @@ const ACTION_DASHBOARD_ROLES = new Set<StaffRole>([
 ]);
 
 export function getPostLoginPath(role: StaffRole | string, scope: AccessScope): string {
+  if (scope === "exclude_easyfly") {
+    return "/admin";
+  }
+  if (scope === "easyfly_only") {
+    return ACTION_DASHBOARD_ROLES.has(role as StaffRole)
+      ? "/admin/easyfly/action"
+      : "/admin/easyfly";
+  }
   if (ACTION_DASHBOARD_ROLES.has(role as StaffRole)) {
     return "/admin/easyfly/action";
   }

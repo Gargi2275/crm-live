@@ -915,7 +915,8 @@ export const uploadDocument = async (
   checklistItemId: string | number,
   file: File,
   referenceNumber: string,
-  documentType?: string
+  documentType?: string,
+  documentName?: string
 ): Promise<UploadDocumentResponse> => {
   try {
     const formData = new FormData();
@@ -926,6 +927,9 @@ export const uploadDocument = async (
     formData.append('reference_number', referenceNumber);
     if (documentType && documentType.trim()) {
       formData.append('document_type', documentType.trim());
+    }
+    if (documentName && documentName.trim()) {
+      formData.append('document_name', documentName.trim());
     }
     formData.append('file', file);
 

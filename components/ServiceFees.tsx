@@ -6,7 +6,7 @@ export function ServiceFees() {
       <div className="w-full px-3 sm:px-4 lg:px-3">
         <div className="text-center mb-10">
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-heading font-bold text-primary mb-3">Our Services & Fees</h2>
-          <p className="text-textMuted text-sm sm:text-base md:text-lg   ">
+          <p className="font-body text-textMuted text-sm sm:text-base md:text-lg">
             We keep our pricing transparent and simple. Government fees (where applicable) are clearly shown.
           </p>
         </div>
@@ -18,7 +18,7 @@ export function ServiceFees() {
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£50</p>
+            <p className="text-xl sm:text-2xl font-heading font-bold tabular-nums text-primary mt-1">£50</p>
             <span className="bg-[#e6f4ee] text-[#0f5c38] text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">£35 with audit credit</span>
             <p className="text-xs text-[#0f5c38] mt-2">Save £15 with audit</p>
 
@@ -36,7 +36,7 @@ export function ServiceFees() {
             <div className="border-t border-[#cfe9de] mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£88</p>
+            <p className="text-xl sm:text-2xl font-heading font-bold tabular-nums text-primary mt-1">£88</p>
             <span className="bg-[#e6f4ee] text-[#0f5c38] text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">£73 with audit credit</span>
             <p className="text-xs text-[#0f5c38] mt-2">Save £15 with audit</p>
 
@@ -53,7 +53,7 @@ export function ServiceFees() {
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£78</p>
+            <p className="text-xl sm:text-2xl font-heading font-bold tabular-nums text-primary mt-1">£78</p>
             <span className="bg-[#e6f4ee] text-[#0f5c38] text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">£63 with audit credit</span>
             <p className="text-xs text-[#0f5c38] mt-2">Save £15 with audit</p>
 
@@ -70,7 +70,7 @@ export function ServiceFees() {
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£88</p>
+            <p className="text-xl sm:text-2xl font-heading font-bold tabular-nums text-primary mt-1">£88</p>
             <span className="bg-gray-100 text-gray-400 text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">No credit</span>
             <p className="text-xs text-gray-400 mt-2">Government fee included</p>
 
@@ -87,7 +87,7 @@ export function ServiceFees() {
             <div className="border-t border-gray-200 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-xl sm:text-2xl font-mono font-bold text-primary mt-1">£150</p>
+            <p className="text-xl sm:text-2xl font-heading font-bold tabular-nums text-primary mt-1">£150</p>
             <span className="bg-gray-100 text-gray-400 text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">No credit</span>
             <p className="text-xs text-gray-400 mt-2">Government fee included</p>
 
@@ -104,7 +104,7 @@ export function ServiceFees() {
             <div className="border-t border-gray-300 mt-4 pt-4" />
 
             <p className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Our Fee</p>
-            <p className="text-xl sm:text-2xl font-mono font-bold text-gray-500 mt-1">Price on request</p>
+            <p className="text-xl sm:text-2xl font-heading font-bold text-gray-500 mt-1">Price on request</p>
             <span className="bg-gray-100 text-gray-400 text-xs px-3 py-1 rounded-full inline-flex w-fit mt-3">No credit</span>
             <p className="text-xs text-gray-400 mt-2">Share your case for an exact quote</p>
 

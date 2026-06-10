@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Eye, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, Eye, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 import toast from "react-hot-toast";
@@ -28,7 +28,7 @@ import {
   verifyPassportRenewalQuotePayment,
   verifyFullPayment,
 } from "@/lib/api";
-import { mergeHydratedDocuments, type StoredDocumentState } from "@/lib/document-upload-ui";
+import { mergeHydratedDocuments, buildChecklistUploadIdMap, documentsFromAuditChecklistItems, inferBackendDocumentTypeFromChecklistId, looksLikeUploadedFileName, resolveChecklistDisplayTitle, type StoredDocumentState } from "@/lib/document-upload-ui";
 import { useRouter } from "next/navigation";
 type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "apostille" | "undecided";
 type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "passport-quote-pending" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
@@ -258,7 +258,6 @@ const SERVICES: Array<{
   { id: "oci-renewal", name: "OCI Renewal / Transfer", description: "Passport change and renewal checks", price: "£78", backendId: 5 },
   { id: "oci-update", name: "OCI Update (Gratis)", description: "Mandatory update and portal handling", price: "£50", backendId: 6 },
   { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal support for UK or US residents", price: "Price on request", backendId: 7 },
-  { id: "apostille", name: "Apostille Services", description: "Document legalization and apostille handling support", price: "£65", backendId: 8 },
 ];
 
 const ADD_ONS = [
@@ -436,6 +435,7 @@ const serviceLabelMap: Record<ServiceId, string> = {
 const emptyDocStatus = (): Record<string, DocumentState> => ({});
 const OCI_AUDIT_DRAFT_KEY_PREFIX = "flyoci:oci-audit-draft-v2";
 const OCI_AUDIT_DRAFT_KEY_LEGACY = "flyoci:oci-audit-draft-v1";
+const AUDIT_CREDIT_VALIDITY_DAYS = 30;
 const OCI_DRAFT_ALLOWED_STAGES: FlowStage[] = ["service", "questions", "checklist", "upload", "summary"];
 const VALID_AUDIT_DOCUMENT_TYPES = new Set([
   "passport",
@@ -628,6 +628,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [supportUploads, setSupportUploads] = useState<Record<string, string>>({});
   const [supportNotes, setSupportNotes] = useState("");
   const [openMistakesId, setOpenMistakesId] = useState<string | null>(null);
+  const [expandedChecklistDocIds, setExpandedChecklistDocIds] = useState<Record<string, boolean>>({});
   const [addOns, setAddOns] = useState<string[]>([]);
   const [auditOutcome, setAuditOutcome] = useState<AuditOutcome | null>(null);
   const [auditSubmitted, setAuditSubmitted] = useState(false);
@@ -656,6 +657,9 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [passportCaseReference, setPassportCaseReference] = useState<string>("");
   const [passportQuoteAcknowledged, setPassportQuoteAcknowledged] = useState(false);
   const [skipAuditDisclaimerAccepted, setSkipAuditDisclaimerAccepted] = useState(false);
+  const [auditPaymentTab, setAuditPaymentTab] = useState<"take-audit" | "skip-audit" | null>(null);
+  const [uploadedDocsSummaryOpen, setUploadedDocsSummaryOpen] = useState(false);
+  const [passportFlowSummaryOpen, setPassportFlowSummaryOpen] = useState(false);
   const [messageRequestedDocIds, setMessageRequestedDocIds] = useState<string[]>([]);
   const [applicationStartError, setApplicationStartError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -1481,12 +1485,35 @@ useEffect(() => {
       setAddOns(parsed.addOns.filter((item): item is string => typeof item === "string"));
     }
 
-    if (Array.isArray(parsed.generatedChecklist)) {
-      setGeneratedChecklist(parsed.generatedChecklist as DocumentItem[]);
-    }
+    const draftAnswers = {
+      ...emptyAnswers,
+      ...(parsed.lastChecklistAnswers && typeof parsed.lastChecklistAnswers === "object" ? parsed.lastChecklistAnswers : {}),
+      ...(parsed.answers && typeof parsed.answers === "object" ? parsed.answers : {}),
+    };
 
     if (parsed.lastChecklistAnswers && typeof parsed.lastChecklistAnswers === "object") {
       setLastChecklistAnswers({ ...emptyAnswers, ...parsed.lastChecklistAnswers });
+    }
+
+    if (isValidService) {
+      const rebuiltChecklist = defaultDocuments(parsedService as ServiceId, draftAnswers);
+      if (rebuiltChecklist.length > 0) {
+        setGeneratedChecklist(rebuiltChecklist);
+      } else if (Array.isArray(parsed.generatedChecklist)) {
+        const sanitized = (parsed.generatedChecklist as DocumentItem[]).filter(
+          (item) => !looksLikeUploadedFileName(item.title)
+        );
+        if (sanitized.length > 0) {
+          setGeneratedChecklist(sanitized);
+        }
+      }
+    } else if (Array.isArray(parsed.generatedChecklist)) {
+      const sanitized = (parsed.generatedChecklist as DocumentItem[]).filter(
+        (item) => !looksLikeUploadedFileName(item.title)
+      );
+      if (sanitized.length > 0) {
+        setGeneratedChecklist(sanitized);
+      }
     }
     setHasDraftProgress(true);
   } catch {
@@ -1595,6 +1622,13 @@ useEffect(() => {
         // Restore audit id and checklist from backend
         const resolvedAuditId = app.latest_audit_id ?? null;
         let restoredChecklistCount = 0;
+        const resumeAnswers = { ...emptyAnswers, ...(lastChecklistAnswers || answers) };
+        const questionnaireChecklist = resolvedService ? defaultDocuments(resolvedService, resumeAnswers) : [];
+
+        if (questionnaireChecklist.length > 0) {
+          setGeneratedChecklist(questionnaireChecklist);
+        }
+
         if (resolvedAuditId) {
           setAuditId(Number(resolvedAuditId));
           try {
@@ -1602,10 +1636,28 @@ useEffect(() => {
             const result = normalizePayload<{ checklist_items?: AuditChecklistItem[] }>(raw);
             if (Array.isArray(result.checklist_items) && result.checklist_items.length > 0) {
               restoredChecklistCount = result.checklist_items.length;
-              applyChecklistFromAudit(result.checklist_items);
+              applyChecklistFromAudit(result.checklist_items, {
+                preferredChecklist: questionnaireChecklist,
+                questionnaireAnswers: resumeAnswers,
+                service: resolvedService,
+              });
             }
           } catch {
             // non-fatal: checklist may still load from saved draft
+          }
+        } else if (questionnaireChecklist.length > 0 && hasUploadedDocs) {
+          try {
+            const refForDocuments = String(app.reference_number ?? resumeReference ?? "").trim();
+            const docsRaw = await getApplicationDocuments(refForDocuments);
+            const docsPayload = normalizePayload<any>(docsRaw);
+            const docs = Array.isArray(docsPayload)
+              ? docsPayload
+              : Array.isArray(docsPayload?.documents)
+                ? docsPayload.documents
+                : [];
+            setDocuments((current) => mergeHydratedDocuments(current, docs, questionnaireChecklist));
+          } catch {
+            // Non-fatal for resume document hydration.
           }
         }
 
@@ -2121,12 +2173,15 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       }
 
       const checklistItemId = checklistItemIdByDocId[id] ?? id;
-      const inferredDocumentType = (() => {
-        const normalizedId = String(id || "").trim().toLowerCase();
-        if (!normalizedId) return "";
-        const candidateType = normalizedId.startsWith("required-") ? normalizedId.slice("required-".length) : normalizedId;
-        return VALID_AUDIT_DOCUMENT_TYPES.has(candidateType) ? candidateType : "";
-      })();
+      const checklistTitle = checklist.find((item) => item.id === id)?.title || "";
+      const inferredDocumentType =
+        inferBackendDocumentTypeFromChecklistId(id) ||
+        (() => {
+          const normalizedId = String(id || "").trim().toLowerCase();
+          if (!normalizedId) return "";
+          const candidateType = normalizedId.startsWith("required-") ? normalizedId.slice("required-".length) : normalizedId;
+          return VALID_AUDIT_DOCUMENT_TYPES.has(candidateType) ? candidateType : "";
+        })();
 
       const auditIdForUpload = Number(auditId || record.latest_audit_id || 0);
 
@@ -2135,7 +2190,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         checklistItemId as string,
         file,
         resolvedReferenceNumber,
-        inferredDocumentType
+        inferredDocumentType,
+        checklistTitle
       );
       const payload = normalizePayload<any>(raw);
       const uploadedDoc = payload?.document || payload?.checklist_item || payload;
@@ -2240,10 +2296,58 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     return "single";
   };
 
-  const applyChecklistFromAudit = (items: AuditChecklistItem[]) => {
+  const applyChecklistFromAudit = (
+    items: AuditChecklistItem[],
+    options?: {
+      preferredChecklist?: DocumentItem[];
+      questionnaireAnswers?: Answers;
+      service?: ServiceId | null;
+    }
+  ) => {
+    const questionnaireChecklist =
+      options?.service && options?.questionnaireAnswers
+        ? defaultDocuments(options.service, options.questionnaireAnswers)
+        : [];
+
+    const sanitizedPreferred = (options?.preferredChecklist || generatedChecklist).filter(
+      (item) => !looksLikeUploadedFileName(item.title)
+    );
+
+    const baseChecklist =
+      questionnaireChecklist.length > 0
+        ? questionnaireChecklist
+        : sanitizedPreferred.length > 0
+          ? sanitizedPreferred
+          : [];
+
+    if (baseChecklist.length > 0) {
+      const mergedChecklist = baseChecklist.map((item) => ({ ...item }));
+      setGeneratedChecklist(mergedChecklist);
+      setChecklistItemIdByDocId(buildChecklistUploadIdMap(mergedChecklist, items));
+      if (items.length > 0) {
+        setDocuments((current) => ({
+          ...current,
+          ...documentsFromAuditChecklistItems(items, mergedChecklist),
+        }));
+      }
+      setChecklistGenerationError(null);
+      return;
+    }
+
     const normalizedChecklist: DocumentItem[] = items.map((item, index) => {
-      const docId = String(item.doc_id || item.id || item.checklist_item_id || item.item_id || `doc-${index + 1}`);
-      const title = String(item.document_name || item.title || item.document_type || `Document ${index + 1}`);
+      const documentType = String(item.document_type || "").trim();
+      const stableId = String(
+        item.doc_id ||
+          (documentType ? `required-${documentType}` : "") ||
+          item.checklist_item_id ||
+          item.id ||
+          item.item_id ||
+          `doc-${index + 1}`
+      );
+      const title = resolveChecklistDisplayTitle(item, undefined);
+      const rawDescription = String(item.description || "").trim();
+      const description = looksLikeUploadedFileName(rawDescription) ? "" : rawDescription;
+
       const commonMistakes = Array.isArray(item.common_mistakes)
         ? item.common_mistakes
         : item.common_mistakes
@@ -2251,9 +2355,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
           : [];
 
       return {
-        id: docId,
+        id: stableId,
         title,
-        description: String(item.description || ""),
+        description,
         required: item.required !== false,
         mistakes: commonMistakes.join(" "),
         sample: "",
@@ -2263,13 +2367,14 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       };
     });
 
-    const nextMap: Record<string, string | number> = {};
-    for (const item of normalizedChecklist) {
-      nextMap[item.id] = item.id;
-    }
-
     setGeneratedChecklist(normalizedChecklist);
-    setChecklistItemIdByDocId(nextMap);
+    setChecklistItemIdByDocId(buildChecklistUploadIdMap(normalizedChecklist, items));
+    if (items.length > 0) {
+      setDocuments((current) => ({
+        ...current,
+        ...documentsFromAuditChecklistItems(items, normalizedChecklist),
+      }));
+    }
     setChecklistGenerationError(null);
   };
 
@@ -2277,6 +2382,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     const app = await syncApplicationFromBackend(referenceNumber);
     const appId = app.id;
     const refNum = app.reference_number;
+    const questionnaireChecklist = selectedService ? defaultDocuments(selectedService, answerSet) : [];
 
     let nextAuditId = auditId;
     if (!nextAuditId) {
@@ -2288,11 +2394,19 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       }
       nextAuditId = createdAuditId;
       setAuditId(createdAuditId);
-      applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : []);
+      applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : [], {
+        preferredChecklist: questionnaireChecklist,
+        questionnaireAnswers: answerSet,
+        service: selectedService,
+      });
     } else {
       const raw = await getAuditStatus(nextAuditId);
       const result = normalizePayload<{ checklist_items?: AuditChecklistItem[] }>(raw);
-      applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : []);
+      applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : [], {
+        preferredChecklist: questionnaireChecklist,
+        questionnaireAnswers: answerSet,
+        service: selectedService,
+      });
     }
 
     setApplicationId(appId);
@@ -2357,6 +2471,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       return;
     }
     setMessageRequestedDocIds([]);
+    setAuditPaymentTab(null);
+    setUploadedDocsSummaryOpen(false);
+    setPassportFlowSummaryOpen(false);
     setStage("summary");
     setBannerMessage("Review your upload summary and audit fee.");
   };
@@ -3101,42 +3218,41 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                   : doc.specialRequirement === "affidavit"
                   ? "Affidavit needed"
                   : null;
+              const isExpanded = Boolean(expandedChecklistDocIds[doc.id]);
               return (
                 <div key={doc.id} className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-base font-semibold text-primary">{doc.title}</p>
-                        <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${doc.required ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-                          {doc.required ? "Required" : "Optional"}
-                        </span>
-                        {specialLabel ? (
-                          <span className="rounded-full border border-primary/30 bg-bg-blue px-2.5 py-0.5 text-[11px] font-semibold text-primary">
-                            {specialLabel}
-                          </span>
-                        ) : null}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedChecklistDocIds((current) => ({
+                          ...current,
+                          [doc.id]: !current[doc.id],
+                        }))
+                      }
+                      className="min-w-0 flex-1 text-left"
+                      aria-expanded={isExpanded}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-base font-semibold text-primary">{doc.title}</p>
+                            <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${doc.required ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                              {doc.required ? "Required" : "Optional"}
+                            </span>
+                            {specialLabel ? (
+                              <span className="rounded-full border border-primary/30 bg-bg-blue px-2.5 py-0.5 text-[11px] font-semibold text-primary">
+                                {specialLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                          {!isExpanded ? (
+                            <p className="mt-1 text-xs text-slate-500">Tap to view details and upload</p>
+                          ) : null}
+                        </div>
+                        <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                       </div>
-                      <p className="mt-1 text-sm text-slate-600">{doc.description}</p>
-                      {flaggedMatch ? (
-                        <p className="mt-1 text-xs font-medium text-amber-800">Flagged document: {flaggedDocLabel}</p>
-                      ) : null}
-                      {flaggedMatch?.document_name && uploadedFileName ? (
-                        <p className="mt-0.5 text-xs text-slate-500">Uploaded file: {uploadedFileName}</p>
-                      ) : null}
-                      {flaggedMatch?.issue_reason ? (
-                        <p className="mt-1 text-xs text-amber-800">Issue: {flaggedMatch.issue_reason}</p>
-                      ) : null}
-                      {flaggedMatch?.required_action ? (
-                        <p className="mt-1 text-xs text-amber-800">Action: {flaggedMatch.required_action}</p>
-                      ) : null}
-                      <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-500">
-                        {doc.sampleUrl ? (
-                          <a href={doc.sampleUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">View sample</a>
-                        ) : null}
-                        {doc.sampleUrl ? <span>•</span> : null}
-                        <button type="button" onClick={() => setOpenMistakesId(openMistakesId === doc.id ? null : doc.id)} className="text-slate-600 hover:underline">Common mistakes</button>
-                      </div>
-                    </div>
+                    </button>
                     {(() => {
                       // FLYOCI-FIX: BUG-REUPLOAD-7
                       if (isSubmittedUnderReview) {
@@ -3162,6 +3278,29 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                       );
                     })()}
                   </div>
+
+                  {isExpanded ? (
+                    <>
+                      <p className="mt-3 text-sm text-slate-600">{doc.description}</p>
+                      {flaggedMatch ? (
+                        <p className="mt-1 text-xs font-medium text-amber-800">Flagged document: {flaggedDocLabel}</p>
+                      ) : null}
+                      {flaggedMatch?.document_name && uploadedFileName ? (
+                        <p className="mt-0.5 text-xs text-slate-500">Uploaded file: {uploadedFileName}</p>
+                      ) : null}
+                      {flaggedMatch?.issue_reason ? (
+                        <p className="mt-1 text-xs text-amber-800">Issue: {flaggedMatch.issue_reason}</p>
+                      ) : null}
+                      {flaggedMatch?.required_action ? (
+                        <p className="mt-1 text-xs text-amber-800">Action: {flaggedMatch.required_action}</p>
+                      ) : null}
+                      <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-500">
+                        {doc.sampleUrl ? (
+                          <a href={doc.sampleUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">View sample</a>
+                        ) : null}
+                        {doc.sampleUrl ? <span>•</span> : null}
+                        <button type="button" onClick={() => setOpenMistakesId(openMistakesId === doc.id ? null : doc.id)} className="text-slate-600 hover:underline">Common mistakes</button>
+                      </div>
 
                   {openMistakesId === doc.id ? (
                     <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -3194,6 +3333,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     <span className="mt-2 block text-sm text-slate-500">
                       Review status: {isSubmittedUnderReview ? "submitted_for_review" : flaggedMatch?.status}
                     </span>
+                  ) : null}
+                    </>
                   ) : null}
                 </div>
               );
@@ -3264,67 +3405,141 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
           <p className="mt-2 text-textMuted">
             {selectedService === "passport-renewal"
               ? "Submit your passport renewal request now. Our team will review your documents and share a Price on request quote in your dashboard within 24-48 working hours."
-              : "We will review your documents and confirm if they are acceptable for submission. Audit fee is fully adjusted in final service fee."}
+              : `We will review your documents and confirm if they are acceptable for submission. The audit fee is fully adjusted against your final service fee when you proceed within ${AUDIT_CREDIT_VALIDITY_DAYS} days.`}
           </p>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
-              <h4 className="font-semibold text-primary">Uploaded documents</h4>
-              <div className="mt-4 space-y-3">
-                {uploadedDocs.map((doc) => (
-                  <div key={doc.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                    <span className="text-slate-700">{doc.title}</span>
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">Uploaded</span>
-                  </div>
-                ))}
-              </div>
+              <button
+                type="button"
+                onClick={() => setUploadedDocsSummaryOpen((open) => !open)}
+                className="flex w-full items-center justify-between gap-3 text-left"
+                aria-expanded={uploadedDocsSummaryOpen}
+              >
+                <div>
+                  <h4 className="font-semibold text-primary">Uploaded documents</h4>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {uploadedDocs.length} of {uploadChecklist.length} uploaded
+                  </p>
+                </div>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${uploadedDocsSummaryOpen ? "rotate-180" : ""}`} />
+              </button>
+              {uploadedDocsSummaryOpen ? (
+                <div className="mt-4 space-y-3">
+                  {uploadedDocs.map((doc) => (
+                    <div key={doc.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                      <span className="text-slate-700">{doc.title}</span>
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">Uploaded</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
             {selectedService === "passport-renewal" ? (
               <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5 text-slate-700">
-                <h4 className="font-semibold text-primary">Price on request flow</h4>
-                <p className="mt-2 text-sm">Your documents are submitted for review. Once our team validates your case details, your quoted fee will appear in your dashboard for secure payment.</p>
-                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
-                  <p className="flex justify-between"><span>Service</span><strong>Indian Passport Renewal</strong></p>
-                  <p className="mt-2 flex justify-between"><span>Pricing</span><strong>Price on request</strong></p>
-                  <p className="mt-2 flex justify-between"><span>Quote turnaround</span><strong>24-48 working hours</strong></p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setPassportFlowSummaryOpen((open) => !open)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                  aria-expanded={passportFlowSummaryOpen}
+                >
+                  <h4 className="font-semibold text-primary">Price on request flow</h4>
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${passportFlowSummaryOpen ? "rotate-180" : ""}`} />
+                </button>
+                {passportFlowSummaryOpen ? (
+                  <>
+                    <p className="mt-2 text-sm">Your documents are submitted for review. Once our team validates your case details, your quoted fee will appear in your dashboard for secure payment.</p>
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                      <p className="flex justify-between"><span>Service</span><strong>Indian Passport Renewal</strong></p>
+                      <p className="mt-2 flex justify-between"><span>Pricing</span><strong>Price on request</strong></p>
+                      <p className="mt-2 flex justify-between"><span>Quote turnaround</span><strong>24-48 working hours</strong></p>
+                    </div>
+                  </>
+                ) : null}
               </div>
             ) : (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
-                <h4 className="font-semibold">Audit fee breakdown</h4>
-                <p className="mt-2 text-sm">This is a one-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update), this amount is deducted from your final fee (e.g., New OCI £88 - £15 = £73 to pay later). Audit credit does not apply to e-Visa or Passport Renewal.</p>
-                <div className="mt-4 space-y-2 text-sm">
-                  <p className="flex justify-between"><span>Audit fee</span><strong>£{auditFee}</strong></p>
-                  <p className="flex justify-between"><span>Credit if you proceed</span><strong>-£{auditFee}</strong></p>
-                  <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>{serviceFee === null ? "Price on request" : `£${serviceFee}`}</strong></p>
-                </div>
-                <div className="mt-5">
-                  <ConsentCheckboxes
-                    mode="payment"
-                    includeAuditFeeAcknowledgement
-                    onAcceptanceChange={setPaymentConsentsAccepted}
-                  />
+              <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
+                <div className="flex gap-2 border-b border-[#dce7f8] pb-3">
+                  <button
+                    type="button"
+                    onClick={() => setAuditPaymentTab((current) => (current === "take-audit" ? null : "take-audit"))}
+                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                      auditPaymentTab === "take-audit"
+                        ? "bg-primary text-white shadow-sm"
+                        : "bg-white text-slate-600 hover:bg-[#eef5ff]"
+                    }`}
+                    aria-expanded={auditPaymentTab === "take-audit"}
+                  >
+                    Take Audit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuditPaymentTab((current) => (current === "skip-audit" ? null : "skip-audit"))}
+                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                      auditPaymentTab === "skip-audit"
+                        ? "bg-rose-600 text-white shadow-sm"
+                        : "bg-white text-slate-600 hover:bg-rose-50"
+                    }`}
+                    aria-expanded={auditPaymentTab === "skip-audit"}
+                  >
+                    Skip Audit
+                  </button>
                 </div>
 
-                <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-                  <p className="font-semibold">Skip audit? You can, but it is not recommended.</p>
-                  <p className="mt-1">
-                    More than 50% of applications have document issues we catch at audit stage. The £15 audit fee is fully deducted from your
-                    OCI service fee (New OCI, OCI Renewal, or OCI Update) if you proceed with us. Audit credit does not apply to e-Visa or Passport Renewal. Are you sure you want to skip?
-                  </p>
-                  <label className="mt-3 flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={skipAuditDisclaimerAccepted}
-                      onChange={(event) => setSkipAuditDisclaimerAccepted(event.target.checked)}
+                {auditPaymentTab === "take-audit" ? (
+                  <div className="mt-4 space-y-4 text-slate-700">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                      <h4 className="font-semibold">Audit fee breakdown</h4>
+                      <p className="mt-2 text-sm">
+                        One-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within {AUDIT_CREDIT_VALIDITY_DAYS} days, this amount is deducted from your final fee (e.g., New OCI £88 - £15 = £73 to pay later). Audit credit does not apply to e-Visa or Passport Renewal.
+                      </p>
+                      <div className="mt-4 space-y-2 text-sm">
+                        <p className="flex justify-between"><span>Audit fee</span><strong>£{auditFee}</strong></p>
+                        <p className="flex justify-between"><span>Credit if you proceed</span><strong>-£{auditFee}</strong></p>
+                        <p className="flex justify-between"><span>Credit validity</span><strong>{AUDIT_CREDIT_VALIDITY_DAYS} days from payment</strong></p>
+                        <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>{serviceFee === null ? "Price on request" : `£${serviceFee}`}</strong></p>
+                      </div>
+                    </div>
+
+                    <ConsentCheckboxes
+                      mode="payment"
+                      includeAuditFeeAcknowledgement
+                      onAcceptanceChange={setPaymentConsentsAccepted}
                     />
-                    <span>I understand that skipping audit can cause delays and extra correction rounds after payment.</span>
-                  </label>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="outline" isLoading={apiLoading} onClick={() => void submitAuditPayment()} disabled={!uploadConsentsAccepted || !paymentConsentsAccepted}>
-                      Take the Audit (Recommended)
+
+                    <Button
+                      isLoading={apiLoading}
+                      onClick={() => void submitAuditPayment()}
+                      disabled={!uploadConsentsAccepted || !paymentConsentsAccepted}
+                    >
+                      Pay £{auditFee} & Submit for Audit
                     </Button>
+                  </div>
+                ) : auditPaymentTab === "skip-audit" ? (
+                  <div className="mt-4 space-y-4 text-slate-700">
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+                      <p className="font-semibold">Skip audit? You can, but it is not recommended.</p>
+                      <p className="mt-2">
+                        More than 50% of applications have document issues we catch at audit stage. The £{auditFee} audit fee is fully deducted from your OCI service fee (New OCI, OCI Renewal, or OCI Update) if you proceed with us within {AUDIT_CREDIT_VALIDITY_DAYS} days. Audit credit does not apply to e-Visa or Passport Renewal.
+                      </p>
+                    </div>
+
+                    <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={skipAuditDisclaimerAccepted}
+                        onChange={(event) => setSkipAuditDisclaimerAccepted(event.target.checked)}
+                      />
+                      <span>I understand that skipping audit can cause delays and extra correction rounds after payment.</span>
+                    </label>
+
+                    <ConsentCheckboxes
+                      mode="payment"
+                      includeAuditFeeAcknowledgement
+                      onAcceptanceChange={setPaymentConsentsAccepted}
+                    />
+
                     <Button
                       variant="outline"
                       isLoading={apiLoading}
@@ -3334,22 +3549,20 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                       Skip & Pay Full Fee
                     </Button>
                   </div>
-                </div>
+                ) : null}
               </div>
             )}
           </div>
 
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-6">
             <Button variant="outline" onClick={() => {
               setReuploadOnlyFlagged(false);
               setMessageRequestedDocIds([]);
               setStage("checklist");
             }}>Back to uploads</Button>
             {selectedService === "passport-renewal" ? (
-              <Button isLoading={apiLoading} onClick={() => void submitPassportRequestForQuote()} disabled={!uploadConsentsAccepted}>Submit Passport Renewal Request</Button>
-            ) : (
-              <Button isLoading={apiLoading} onClick={() => void submitAuditPayment()} disabled={!uploadConsentsAccepted || !paymentConsentsAccepted}>Pay £{auditFee} & Submit for Audit</Button>
-            )}
+              <Button className="ml-3" isLoading={apiLoading} onClick={() => void submitPassportRequestForQuote()} disabled={!uploadConsentsAccepted}>Submit Passport Renewal Request</Button>
+            ) : null}
           </div>
         </div>
       )}
@@ -3431,6 +3644,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
             <p className="font-semibold text-primary">Status</p>
             <p className="mt-1">New application → Audit Pending</p>
             <p className="mt-3">Email confirmation and WhatsApp confirmation will be sent after payment.</p>
+            <p className="mt-3 text-xs text-slate-500">
+              Your audit fee credit is valid for {AUDIT_CREDIT_VALIDITY_DAYS} days from the date of payment when you proceed with an eligible OCI service.
+            </p>
           </div>
           <div className="mt-6 flex items-center gap-3 text-sm text-textMuted">
             <MessageSquare className="h-4 w-4 text-primary" /> Message centre available for queries.
@@ -3743,6 +3959,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 <div className="mt-4 space-y-2 text-sm text-slate-600">
                   <p className="flex justify-between"><span>Service ({paymentSummary.service_label})</span><strong>£{paymentSummary.service_fee.toFixed(2)}</strong></p>
                   <p className="flex justify-between"><span>Audit credit</span><strong>- £{paymentSummary.audit_credit.toFixed(2)}</strong></p>
+                  {paymentSummary.audit_credit > 0 ? (
+                    <p className="text-xs text-slate-500">
+                      Audit credit applies when you pay within {AUDIT_CREDIT_VALIDITY_DAYS} days of your audit fee payment.
+                    </p>
+                  ) : null}
                   {paymentSummary.addons.map((addon) => (
                     <p key={addon.label} className="flex justify-between"><span>{addon.label}</span><strong>£{addon.amount.toFixed(2)}</strong></p>
                   ))}

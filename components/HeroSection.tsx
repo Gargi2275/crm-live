@@ -59,7 +59,7 @@ const HERO_SLIDES: HeroSlide[] = [
   // { src: "/hero-bg/hero-3-travel-collage.jpg" },
   { src: "/hero-bg/hero-4-apostille.jpg" },
   { src: "/hero-bg/hero-5-visa-application.jpg" },
-  { src: "/hero-bg/hero-airplane.jpg", variant: "sky", objectPosition: "42% center" },
+  // { src: "/hero-bg/hero-airplane.jpg", variant: "sky", objectPosition: "42% center" },
 ];
 
 const BACKGROUND_IMAGES = HERO_SLIDES.map((s) => s.src);

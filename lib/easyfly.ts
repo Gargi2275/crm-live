@@ -90,9 +90,9 @@ export type EasyFlyBooking = {
   refundReceivedFromSupplier: boolean;
   givenToCustomer: boolean;
   isReissued: boolean;
-  razorpayOrderId?: string;
-  razorpayPaymentId?: string;
-  razorpaySignature?: string;
+  stripeSessionId?: string;
+  stripePaymentId?: string;
+  stripeSignature?: string;
   paymentStatus?: "pending" | "created" | "paid" | "failed";
   earnings: number;
   paymentLedger?: EasyFlyPaymentLedgerEntry[];
@@ -215,9 +215,9 @@ const toBooking = (booking: EasyFlyBookingApi): EasyFlyBooking => ({
   refundReceivedFromSupplier: booking.refund_received_from_supplier,
   givenToCustomer: booking.given_to_customer,
   isReissued: booking.is_reissued,
-  razorpayOrderId: booking.razorpay_order_id,
-  razorpayPaymentId: booking.razorpay_payment_id,
-  razorpaySignature: booking.razorpay_signature,
+  stripeSessionId: booking.razorpay_order_id,
+  stripePaymentId: booking.razorpay_payment_id,
+  stripeSignature: booking.razorpay_signature,
   paymentStatus: booking.payment_status,
   earnings: booking.earnings,
   paymentLedger: booking.payment_ledger?.map(toLedgerEntry),
@@ -339,8 +339,9 @@ export const createEasyFlyPaymentOrder = async (bookingId: number) => {
   });
   return parseApiResponse<{
     booking_id: number;
-    razorpay_key_id: string;
-    razorpay_order_id: string;
+    stripe_publishable_key?: string;
+    stripe_session_id?: string;
+    checkout_url?: string;
     amount: number;
     currency: string;
     name: string;
@@ -351,9 +352,7 @@ export const createEasyFlyPaymentOrder = async (bookingId: number) => {
 export const confirmEasyFlyPayment = async (
   bookingId: number,
   body: {
-    razorpay_order_id: string;
-    razorpay_payment_id: string;
-    razorpay_signature: string;
+    stripe_session_id: string;
   },
 ) => {
   const response = await adminAuthenticatedFetch(`/admin/easyfly/bookings/${bookingId}/payment/confirm/`, {

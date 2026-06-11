@@ -12,23 +12,12 @@ import {
   verifyPassportRenewalQuotePayment,
   type PassportRenewalQuoteDetailResponse,
 } from "@/lib/api";
-
-type RazorpaySuccessPayload = {
-  razorpay_order_id: string;
-  razorpay_payment_id: string;
-  razorpay_signature: string;
-};
-
-type RazorpayOpenOptions = {
-  key: string;
-  amount: number;
-  currency: string;
-  order_id: string;
-  name: string;
-  description: string;
-  handler: (payload: RazorpaySuccessPayload) => void;
-  modal?: { ondismiss?: () => void };
-};
+import {
+  clearStripeReturnParams,
+  getStripeCheckoutUrl,
+  readStripeReturnParams,
+  redirectToStripeCheckout,
+} from "@/lib/stripe-checkout";
 
 export default function PassportRenewalPayPage() {
   const router = useRouter();
@@ -43,30 +32,6 @@ export default function PassportRenewalPayPage() {
   const [consentsAccepted, setConsentsAccepted] = useState(false);
 
   const status = String(quote?.quote_status || "").toUpperCase();
-
-  const ensureRazorpayLoaded = async (): Promise<void> => {
-    if (typeof window === "undefined") {
-      throw new Error("Razorpay is only available in browser.");
-    }
-    if (window.Razorpay) return;
-
-    await new Promise<void>((resolve, reject) => {
-      const existing = document.querySelector('script[data-razorpay="true"]') as HTMLScriptElement | null;
-      if (existing) {
-        existing.addEventListener("load", () => resolve(), { once: true });
-        existing.addEventListener("error", () => reject(new Error("Failed to load Razorpay SDK.")), { once: true });
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.async = true;
-      script.dataset.razorpay = "true";
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("Failed to load Razorpay SDK."));
-      document.body.appendChild(script);
-    });
-  };
 
   const fetchQuote = async () => {
     if (!reference) return;
@@ -88,6 +53,38 @@ export default function PassportRenewalPayPage() {
     }
     void fetchQuote();
   }, [reference]);
+
+  useEffect(() => {
+    const { sessionId, paymentKind, reference: returnReference } = readStripeReturnParams();
+    if (!sessionId || paymentKind !== "passport-quote") return;
+
+    const refNum = String(returnReference || reference || "").trim();
+    if (!refNum) return;
+
+    let active = true;
+    void (async () => {
+      setPaying(true);
+      setError(null);
+      try {
+        await verifyPassportRenewalQuotePayment(refNum, sessionId);
+        if (!active) return;
+        clearStripeReturnParams();
+        setSuccessMessage("Payment successful. Redirecting to your dashboard...");
+        router.push(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&paid=1`);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Payment verification failed.");
+      } finally {
+        if (active) {
+          setPaying(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [reference, router]);
 
   useEffect(() => {
     if (status !== "PENDING_QUOTE") {
@@ -119,42 +116,7 @@ export default function PassportRenewalPayPage() {
     setError(null);
     try {
       const orderPayload = await createPassportRenewalQuoteOrder(reference);
-      await ensureRazorpayLoaded();
-      const RazorpayCtor = window.Razorpay;
-      if (!RazorpayCtor) {
-        throw new Error("Razorpay SDK unavailable.");
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        const instance = new RazorpayCtor({
-          key: orderPayload.key_id,
-          amount: orderPayload.order.amount,
-          currency: orderPayload.currency,
-          order_id: orderPayload.order.id,
-          name: "FlyOCI",
-          description: "Passport Renewal Quote Payment",
-          handler: async (payload) => {
-            try {
-              await verifyPassportRenewalQuotePayment(
-                reference,
-                payload.razorpay_order_id,
-                payload.razorpay_payment_id,
-                payload.razorpay_signature,
-              );
-              setSuccessMessage("Payment successful. Redirecting to your dashboard...");
-              router.push(`/dashboard/document-audit?reference=${encodeURIComponent(reference)}&paid=1`);
-              resolve();
-            } catch (verifyError) {
-              reject(verifyError);
-            }
-          },
-          modal: {
-            ondismiss: () => reject(new Error("Payment cancelled.")),
-          },
-        });
-
-        instance.open();
-      });
+      redirectToStripeCheckout(getStripeCheckoutUrl(orderPayload));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Passport renewal payment failed.");
     } finally {

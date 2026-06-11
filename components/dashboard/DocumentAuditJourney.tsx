@@ -29,6 +29,7 @@ import {
   verifyFullPayment,
 } from "@/lib/api";
 import { mergeHydratedDocuments, buildChecklistUploadIdMap, documentsFromAuditChecklistItems, inferBackendDocumentTypeFromChecklistId, looksLikeUploadedFileName, resolveChecklistDisplayTitle, type StoredDocumentState } from "@/lib/document-upload-ui";
+import { clearStripeReturnParams, getStripeCheckoutUrl, readStripeReturnParams, redirectToStripeCheckout } from "@/lib/stripe-checkout";
 import { useRouter } from "next/navigation";
 type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "apostille" | "undecided";
 type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "passport-quote-pending" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
@@ -195,23 +196,6 @@ type AuditChecklistItem = {
   required?: boolean;
   sample_url?: string | null;
   special_requirement?: "apostille" | "bilingual" | "affidavit" | null;
-};
-
-type RazorpaySuccessPayload = {
-  razorpay_order_id: string;
-  razorpay_payment_id: string;
-  razorpay_signature: string;
-};
-
-type RazorpayOpenOptions = {
-  key: string;
-  amount: number;
-  currency: string;
-  order_id: string;
-  name: string;
-  description: string;
-  handler: (payload: RazorpaySuccessPayload) => void;
-  modal?: { ondismiss?: () => void };
 };
 
 const QUESTION_LIST: Array<{ id: QuestionId; label: string; options: string[] }> = [
@@ -1038,7 +1022,8 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   }, [applicationRecord?.admin_messages, applicationRecord?.audit_logs]);
   const selectedServiceRecord = SERVICES.find((item) => item.id === selectedService) || null;
   const complexityScore = [answers.journeyType, answers.nameChanged, answers.birthOutsideCore].filter((item) => item === "Yes" || item === "I Already Have One / Conversion").length;
-  const auditFee = selectedService === "undecided" || complexityScore >= 2 ? 20 : 15;
+  const auditFeePenceResolved = applicationRecord?.audit_fee_pence ?? auditFeePenceProp ?? 1500;
+  const auditFee = auditFeePenceResolved / 100;
   const serviceFee = selectedService ? serviceFeeMap[selectedService] : 88;
   const serviceFeeForMath = typeof serviceFee === "number" ? serviceFee : 0;
   const addOnTotal = addOns.reduce((sum, id) => sum + (ADD_ONS.find((item) => item.id === id)?.fee || 0), 0);
@@ -1297,65 +1282,6 @@ const startApplicationIfNeeded = async (
   };
 };
 
-  const ensureRazorpayLoaded = async (): Promise<void> => {
-    if (typeof window === "undefined") {
-      throw new Error("Razorpay is only available in browser.");
-    }
-    if (window.Razorpay) return;
-
-    await new Promise<void>((resolve, reject) => {
-      const existing = document.querySelector('script[data-razorpay="true"]') as HTMLScriptElement | null;
-      if (existing) {
-        existing.addEventListener("load", () => resolve(), { once: true });
-        existing.addEventListener("error", () => reject(new Error("Failed to load Razorpay SDK.")), { once: true });
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.async = true;
-      script.dataset.razorpay = "true";
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("Failed to load Razorpay SDK."));
-      document.body.appendChild(script);
-    });
-  };
-
-  const openRazorpayCheckout = async (
-    options: Omit<RazorpayOpenOptions, "handler">,
-    onSuccess: (payload: RazorpaySuccessPayload) => Promise<void>
-  ): Promise<void> => {
-    await ensureRazorpayLoaded();
-    if (!window.Razorpay) {
-      throw new Error("Razorpay SDK unavailable.");
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const RazorpayCtor = window["Razorpay"];
-      if (!RazorpayCtor) {
-        reject(new Error("Razorpay SDK unavailable."));
-        return;
-      }
-
-      const instance = new RazorpayCtor({
-        ...options,
-        handler: async (payload) => {
-          try {
-            await onSuccess(payload);
-            resolve();
-          } catch (error) {
-            reject(error);
-          }
-        },
-        modal: {
-          ondismiss: () => reject(new Error("Payment cancelled.")),
-        },
-      });
-
-      instance.open();
-    });
-  };
-
 const saveState = (_next: Partial<JourneyStorage>) => {
   if (typeof window === "undefined") return;
 
@@ -1528,6 +1454,56 @@ useEffect(() => {
 }, [resumeReference, startFresh, router]);
 
 useEffect(() => {
+  if (typeof window === "undefined") return;
+
+  const { sessionId, paymentKind, reference } = readStripeReturnParams();
+  if (!sessionId || !paymentKind) return;
+
+  const refNum = String(reference || resumeReference || referenceNumber || applicationRecord?.reference_number || "").trim();
+  if (!refNum) return;
+
+  let active = true;
+  void (async () => {
+    try {
+      setApiLoading(true);
+      if (paymentKind === "audit") {
+        await verifyAuditPayment(refNum, sessionId);
+        if (!active) return;
+        await syncApplicationFromBackend(refNum);
+        if (!active) return;
+        setAuditSubmitted(true);
+        setStage("audit-pending");
+        setBannerMessage("Audit submitted. Awaiting review.");
+        toast.success("Audit payment successful.");
+      } else if (paymentKind === "full") {
+        await verifyFullPayment(refNum, sessionId);
+        if (!active) return;
+        setStage("processing");
+        setBannerMessage("Payment confirmed. Your application is now in process.");
+        toast.success("Full payment successful.");
+      } else if (paymentKind === "passport-quote") {
+        await verifyPassportRenewalQuotePayment(refNum, sessionId);
+        if (!active) return;
+        await syncApplicationFromBackend(refNum);
+        toast.success("Payment successful. Your case is now in progress.");
+      }
+      clearStripeReturnParams();
+    } catch (error) {
+      if (!active) return;
+      toast.error(error instanceof Error ? error.message : "Payment verification failed.");
+    } finally {
+      if (active) {
+        setApiLoading(false);
+      }
+    }
+  })();
+
+  return () => {
+    active = false;
+  };
+}, [referenceNumber, applicationRecord?.reference_number, resumeReference]);
+
+useEffect(() => {
   if (!draftRestored || !loaded || refreshRedirectHandledRef.current) {
     return;
   }
@@ -1617,6 +1593,10 @@ useEffect(() => {
         if (resolvedService) {
           setSelectedService(resolvedService);
           setBannerMessage(`Resuming your ${serviceLabelMap[resolvedService]} application.`);
+        }
+
+        if (hasUploadedDocs) {
+          setUploadConsentsAccepted(true);
         }
 
         // Restore audit id and checklist from backend
@@ -2487,8 +2467,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   };
 
   const submitAuditPayment = async () => {
-    if (!uploadConsentsAccepted || !paymentConsentsAccepted) {
-      toast.error("Please accept the upload and payment consents before continuing.");
+    if (!paymentConsentsAccepted) {
+      toast.error("Please accept the payment consents before continuing.");
       return;
     }
 
@@ -2510,33 +2490,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       setApiLoading(true);
       const raw = await createAuditPaymentOrder(refNum, supportNotes);
       const order = normalizePayload<{
-        order: { id: string; amount: number; currency: string };
+        order: { id: string; amount: number; currency: string; url?: string };
+        checkout_url?: string;
         key_id: string;
         amount_pence: number;
       }>(raw);
 
-      await openRazorpayCheckout(
-        {
-          key: order.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
-          amount: Number(auditFeePenceProp ?? order.amount_pence ?? order.order?.amount ?? 0),
-          currency: order.order?.currency || "GBP",
-          order_id: order.order?.id || "",
-          name: "FlyOCI",
-          description: "Audit Fee Payment",
-        },
-        async (payment) => {
-          await verifyAuditPayment(
-            refNum,
-            payment.razorpay_order_id,
-            payment.razorpay_payment_id,
-            payment.razorpay_signature
-          );
-        }
-      );
-
-      setAuditSubmitted(true);
-      setStage("audit-pending");
-      setBannerMessage("Audit submitted. Awaiting review.");
+      redirectToStripeCheckout(getStripeCheckoutUrl(order));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Audit payment failed.");
     } finally {
@@ -2594,33 +2554,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       setApiLoading(true);
       const raw = await createPassportRenewalQuoteOrder(refNum);
       const order = normalizePayload<{
-        order: { id: string; amount: number; currency: string };
+        order: { id: string; amount: number; currency: string; url?: string };
+        checkout_url?: string;
         key_id: string;
         amount_pence: number;
       }>(raw);
 
-      await openRazorpayCheckout(
-        {
-          key: order.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
-          amount: Number(order.amount_pence || order.order?.amount || 0),
-          currency: order.order?.currency || "GBP",
-          order_id: order.order?.id || "",
-          name: "FlyOCI",
-          description: "Passport Renewal Quote Payment",
-        },
-        async (payment) => {
-          await verifyPassportRenewalQuotePayment(
-            refNum,
-            payment.razorpay_order_id,
-            payment.razorpay_payment_id,
-            payment.razorpay_signature
-          );
-        }
-      );
-
-      await syncApplicationFromBackend(refNum);
-      router.push(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&resume=1`);
-      toast.success("Payment successful. Your case is now in progress.");
+      redirectToStripeCheckout(getStripeCheckoutUrl(order));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Passport quote payment failed.");
     } finally {
@@ -2899,8 +2839,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   };
 
   const skipAuditAndProceedToPayment = async () => {
-    if (!uploadConsentsAccepted || !paymentConsentsAccepted) {
-      toast.error("Please accept the upload and payment consents before continuing.");
+    if (!paymentConsentsAccepted) {
+      toast.error("Please accept the payment consents before continuing.");
       return;
     }
 
@@ -2947,34 +2887,14 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       setApiLoading(true);
       const raw = await createFullPaymentOrder(refNum);
       const order = normalizePayload<{
-        order?: { id: string; amount: number; currency: string };
+        order?: { id: string; amount: number; currency: string; url?: string };
+        checkout_url?: string;
         amount_pence?: number;
         currency: string;
         key_id: string;
       }>(raw);
 
-      await openRazorpayCheckout(
-        {
-          key: order.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
-          amount: Number(amountDuePenceProp ?? order.amount_pence ?? order.order?.amount ?? 0),
-          currency: order.order?.currency || order.currency,
-          order_id: order.order?.id || "",
-          name: "FlyOCI",
-          description: "Full Service Payment",
-        },
-        async (payment) => {
-          await verifyFullPayment(
-            refNum,
-            payment.razorpay_order_id,
-            payment.razorpay_payment_id,
-            payment.razorpay_signature
-          );
-        }
-      );
-
-      router.push(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&resume=1&payment=success`);
-      // Optionally, you can still update state if you want to keep the in-component state in sync
-      setStage("processing");
+      redirectToStripeCheckout(getStripeCheckoutUrl(order));
       setProcessingStep(1);
       setBannerMessage("Service confirmed. Your application is in process.");
     } catch (error) {
@@ -3491,7 +3411,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
                       <h4 className="font-semibold">Audit fee breakdown</h4>
                       <p className="mt-2 text-sm">
-                        One-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within {AUDIT_CREDIT_VALIDITY_DAYS} days, this amount is deducted from your final fee (e.g., New OCI £88 - £15 = £73 to pay later). Audit credit does not apply to e-Visa or Passport Renewal.
+                        One-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within {AUDIT_CREDIT_VALIDITY_DAYS} days, this amount is deducted from your final fee (e.g., New OCI £88 - £{auditFee} = £{Math.max(serviceFeeForMath - auditFee, 0)} to pay later). Audit credit does not apply to e-Visa or Passport Renewal.
                       </p>
                       <div className="mt-4 space-y-2 text-sm">
                         <p className="flex justify-between"><span>Audit fee</span><strong>£{auditFee}</strong></p>
@@ -3510,7 +3430,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     <Button
                       isLoading={apiLoading}
                       onClick={() => void submitAuditPayment()}
-                      disabled={!uploadConsentsAccepted || !paymentConsentsAccepted}
+                      disabled={!paymentConsentsAccepted}
                     >
                       Pay £{auditFee} & Submit for Audit
                     </Button>
@@ -3543,7 +3463,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     <Button
                       variant="outline"
                       isLoading={apiLoading}
-                      disabled={!skipAuditDisclaimerAccepted || apiLoading || !uploadConsentsAccepted || !paymentConsentsAccepted}
+                      disabled={!skipAuditDisclaimerAccepted || apiLoading || !paymentConsentsAccepted}
                       onClick={() => void skipAuditAndProceedToPayment()}
                     >
                       Skip & Pay Full Fee

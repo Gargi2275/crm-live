@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
+  confirmEasyFlyPayment,
   createEasyFlyPaymentLedgerEntry,
   createEasyFlyPaymentOrder,
   deleteEasyFlyBooking,
@@ -20,6 +21,12 @@ import {
   type EasyFlyBooking,
   type EasyFlyPaymentLedgerEntry,
 } from "@/lib/easyfly";
+import {
+  clearStripeReturnParams,
+  getStripeCheckoutUrl,
+  readStripeReturnParams,
+  redirectToStripeCheckout,
+} from "@/lib/stripe-checkout";
 import { adminAuthenticatedFetch } from "@/lib/admin-auth";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
@@ -477,6 +484,30 @@ export default function EasyFlyBookingDetailPage() {
     };
   }, [adminUser?.full_name, adminUser?.username, bookingId]);
 
+  useEffect(() => {
+    const { sessionId, paymentKind } = readStripeReturnParams();
+    if (!sessionId || paymentKind !== "easyfly") return;
+
+    let active = true;
+    void (async () => {
+      try {
+        const updated = await confirmEasyFlyPayment(bookingId, { stripe_session_id: sessionId });
+        if (!active) return;
+        clearStripeReturnParams();
+        setBooking(updated);
+        setForm(mapBookingToForm(updated));
+        toast.success("Stripe payment confirmed.");
+      } catch (paymentError) {
+        if (!active) return;
+        toast.error(paymentError instanceof Error ? paymentError.message : "Payment verification failed.");
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [bookingId]);
+
   if (loading) {
     return (
       <div className="font-body max-w-[1100px] mx-auto space-y-4">
@@ -513,7 +544,7 @@ export default function EasyFlyBookingDetailPage() {
   const updateForm = (patch: Partial<BookingFormState>) => {
     setForm((current) => ({ ...current, ...patch }));
   };
-  const pendingRazorpayAmount = Math.max(0, paymentPending);
+  const pendingStripeAmount = Math.max(0, paymentPending);
   const totalLedgerReceived = paymentLedger.reduce((sum, entry) => sum + (Number.parseFloat(entry.amount) || 0), 0);
   const balancePending = amountPaid - totalLedgerReceived;
   const isFullyPaid = balancePending <= 0;
@@ -652,13 +683,13 @@ export default function EasyFlyBookingDetailPage() {
           ? {
               ...current,
               paymentStatus: "created",
-              razorpayOrderId: order.razorpay_order_id,
+              stripeSessionId: order.stripe_session_id,
             }
           : current,
       );
-      toast.success(`Razorpay order created: ${order.razorpay_order_id}`);
+      redirectToStripeCheckout(getStripeCheckoutUrl(order));
     } catch (paymentError) {
-      toast.error(paymentError instanceof Error ? paymentError.message : "Failed to create Razorpay order.");
+      toast.error(paymentError instanceof Error ? paymentError.message : "Failed to create Stripe checkout.");
     }
   };
 
@@ -1281,14 +1312,14 @@ export default function EasyFlyBookingDetailPage() {
           </span>
         </div>
 
-        {pendingRazorpayAmount > 0 ? (
+        {pendingStripeAmount > 0 ? (
           <button
             type="button"
             onClick={handleCreatePaymentOrder}
             className="inline-flex items-center gap-2 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold text-[#486581] hover:bg-[#F5F7FA]"
           >
             <Plus className="h-4 w-4" />
-            Create Razorpay Order
+            Pay with Stripe
           </button>
         ) : null}
 

@@ -18,39 +18,14 @@ import {
   type ApplicationDetailResponse,
   verifyFullPayment,
 } from "@/lib/api";
-
-type RazorpaySuccessPayload = {
-  razorpay_order_id: string;
-  razorpay_payment_id: string;
-  razorpay_signature: string;
-};
-
-type RazorpayOpenOptions = {
-  key: string;
-  amount: number;
-  currency: string;
-  order_id: string;
-  name: string;
-  description: string;
-  handler: (payload: RazorpaySuccessPayload) => void;
-  modal?: { ondismiss?: () => void };
-};
+import {
+  clearStripeReturnParams,
+  getStripeCheckoutUrl,
+  readStripeReturnParams,
+  redirectToStripeCheckout,
+} from "@/lib/stripe-checkout";
 
 const penceToPounds = (value?: number) => ((value ?? 0) / 100);
-
-async function loadRazorpayScript(): Promise<boolean> {
-  if (typeof window === "undefined") return false;
-  if (window.Razorpay) return true;
-
-  return await new Promise((resolve) => {
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-}
 
 export default function DashboardPaymentPage() {
   const router = useRouter();
@@ -85,6 +60,37 @@ export default function DashboardPaymentPage() {
 
     void loadApplication();
   }, [referenceNumber]);
+
+  useEffect(() => {
+    const { sessionId, paymentKind, reference } = readStripeReturnParams();
+    if (!sessionId || paymentKind !== "full") return;
+
+    const refNum = String(reference || referenceNumber || "").trim();
+    if (!refNum) return;
+
+    let active = true;
+    void (async () => {
+      setPaying(true);
+      setError("");
+      try {
+        await verifyFullPayment(refNum, sessionId);
+        if (!active) return;
+        clearStripeReturnParams();
+        router.push(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&resume=1&payment=success`);
+      } catch (e) {
+        if (!active) return;
+        setError(e instanceof Error ? e.message : "Payment verification failed.");
+      } finally {
+        if (active) {
+          setPaying(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [referenceNumber, router]);
 
   const summary = useMemo(() => {
     const serviceFee = penceToPounds(application?.service_total_pence);
@@ -121,45 +127,10 @@ export default function DashboardPaymentPage() {
     setPaying(true);
 
     try {
-      const scriptLoaded = await loadRazorpayScript();
-      if (!scriptLoaded || !window.Razorpay) {
-        throw new Error("Unable to load Razorpay checkout. Please refresh and try again.");
-      }
-
       const orderPayload = await createFullPaymentOrder(referenceNumber);
-      const order = orderPayload.order;
-
-      if (!order?.id) {
-        throw new Error("Could not create payment order.");
-      }
-
-      const razorpay = new window.Razorpay({
-        key: orderPayload.key_id,
-        amount: order.amount,
-        currency: order.currency,
-        order_id: order.id,
-        name: "FlyOCI",
-        description: `Full service payment - ${referenceNumber}`,
-        handler: async (payment) => {
-          await verifyFullPayment(
-            referenceNumber,
-            payment.razorpay_order_id,
-            payment.razorpay_payment_id,
-            payment.razorpay_signature
-          );
-          router.push(`/dashboard/document-audit?reference=${encodeURIComponent(referenceNumber)}&resume=1&payment=success`);
-        },
-        modal: {
-          ondismiss: () => {
-            setPaying(false);
-          },
-        },
-      });
-
-      razorpay.open();
+      redirectToStripeCheckout(getStripeCheckoutUrl(orderPayload));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Payment failed. Please try again.");
-    } finally {
       setPaying(false);
     }
   };

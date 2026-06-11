@@ -307,6 +307,14 @@ function getDefaultDialCode(options: CountryOption[]): string {
   return options.find((option) => option.country === "United Kingdom")?.dialCode || options[0]?.dialCode || "";
 }
 
+function flagFromCountryCode(cca2: string): string {
+  const code = cca2.trim().toUpperCase();
+  if (code.length !== 2) {
+    return "";
+  }
+  return String.fromCodePoint(...[...code].map((char) => 0x1f1e6 + char.charCodeAt(0) - 65));
+}
+
 function extractCountryOptions(data: Array<{
   name?: { common?: string };
   demonyms?: { eng?: { m?: string; f?: string } };
@@ -320,14 +328,15 @@ function extractCountryOptions(data: Array<{
       country: country.name?.common?.trim() || "",
       nationality: (country.demonyms?.eng?.m || country.demonyms?.eng?.f || country.name?.common || "").trim(),
       dialCode: `${country.idd?.root || ""}${country.idd?.suffixes?.length === 1 ? country.idd.suffixes[0] : ""}`.trim(),
-      flag: country.flag || "",
+      flag: country.flag || flagFromCountryCode(country.cca2 || ""),
       cca2: country.cca2 || "",
     }))
     .filter((entry) => Boolean(entry.country && entry.dialCode))
     .sort((left, right) => left.country.localeCompare(right.country));
 }
 
-const restCountriesApiUrl = "https://restcountries.com/v3.1/all?fields=name,demonyms,cca2,idd,flag";
+// restcountries.com v3.x is deprecated (301 -> legacy.json error). Use world-countries CDN instead.
+const countriesApiUrl = "https://cdn.jsdelivr.net/npm/world-countries@5.1.0/countries.json";
 
 function splitPhoneNumber(combined: string, dialCodes: string[] = [], fallbackCountryCode = ""): {
   countryCode: string;
@@ -485,7 +494,10 @@ export default function RegistrationPage() {
     const loadCountryOptions = async () => {
       try {
         setIsCountryOptionsLoading(true);
-        const response = await fetch(restCountriesApiUrl);
+        const response = await fetch(countriesApiUrl);
+        if (!response.ok) {
+          throw new Error(`Country list request failed (${response.status})`);
+        }
         const payload = await response.json().catch(() => []);
 
         if (cancelled) {

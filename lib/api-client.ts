@@ -163,8 +163,9 @@ export type EVisaPaymentConfirmResponse = ApiEnvelope<{
 
 export type EVisaCreatePaymentOrderResponse = ApiEnvelope<{
   case_number: string;
-  razorpay_key_id: string;
-  razorpay_order_id: string;
+  stripe_publishable_key?: string;
+  stripe_session_id?: string;
+  checkout_url?: string;
   amount: number;
   currency: string;
   order_id: number;
@@ -179,9 +180,7 @@ export type EVisaCreatePaymentOrderResponse = ApiEnvelope<{
 
 export type EVisaPaymentConfirmPayload = {
   payment_reference?: string;
-  razorpay_order_id?: string;
-  razorpay_payment_id?: string;
-  razorpay_signature?: string;
+  stripe_session_id?: string;
 };
 
 export type EVisaUploadResponse = ApiEnvelope<{

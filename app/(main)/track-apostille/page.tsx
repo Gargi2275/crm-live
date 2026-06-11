@@ -39,9 +39,14 @@ import {
   formatApostilleStatus,
   getApostilleCustomerStatusMessage,
   isApostilleSubmittedPhase,
-  openRazorpayCheckout,
   resolveApostilleTimelineIndex,
 } from "@/lib/apostille-ui";
+import {
+  clearStripeReturnParams,
+  getStripeCheckoutUrl,
+  readStripeReturnParams,
+  redirectToStripeCheckout,
+} from "@/lib/stripe-checkout";
 
 function formatDate(value?: string | null) {
   if (!value) return "—";
@@ -136,48 +141,62 @@ export default function TrackApostillePage() {
   }, [email, fileNumber]);
 
   useEffect(() => {
-    const presetFile = searchParams.get("file");
+    const presetFile = searchParams.get("file") || searchParams.get("reference");
     const presetEmail = searchParams.get("email");
-    if (presetFile && presetEmail) {
+    if (presetFile) {
       setFileNumber(presetFile);
+    }
+    if (presetEmail) {
       setEmail(presetEmail);
+    }
+    if (presetFile && presetEmail) {
       void loadCase(presetFile, presetEmail);
     }
   }, [loadCase, searchParams]);
+
+  useEffect(() => {
+    const { sessionId, paymentKind } = readStripeReturnParams();
+    if (!sessionId || paymentKind !== "apostille") return;
+
+    const lookupFile = (searchParams.get("reference") || searchParams.get("file") || fileNumber).trim();
+    const lookupEmail = (searchParams.get("email") || email).trim().toLowerCase();
+    if (!lookupFile || !lookupEmail) return;
+
+    let active = true;
+    void (async () => {
+      setPaying(true);
+      try {
+        const { verifyApostillePayment } = await import("@/lib/api");
+        await verifyApostillePayment(lookupFile, lookupEmail, sessionId);
+        if (!active) return;
+        clearStripeReturnParams();
+        toast.success("Payment successful.");
+        await loadCase(lookupFile, lookupEmail);
+      } catch (error) {
+        if (!active) return;
+        toast.error(error instanceof Error ? error.message : "Payment verification failed.");
+      } finally {
+        if (active) {
+          setPaying(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [email, fileNumber, loadCase, searchParams]);
 
   const handlePayment = async () => {
     if (!caseData) return;
     setPaying(true);
     try {
       const order = await createApostillePaymentOrder(caseData.file_number, email);
-      await openRazorpayCheckout(
-        {
-          key: order.key_id,
-          amount: order.amount,
-          currency: order.currency,
-          name: "FlyOCI Apostille",
-          description: `Apostille service — ${caseData.file_number}`,
-          order_id: order.order_id,
-          prefill: { email, name: caseData.full_name },
-        },
-        async (payment) => {
-          const { verifyApostillePayment } = await import("@/lib/api");
-          await verifyApostillePayment(
-            caseData.file_number,
-            email,
-            payment.razorpay_order_id,
-            payment.razorpay_payment_id,
-            payment.razorpay_signature,
-          );
-          toast.success("Payment successful.");
-          await loadCase();
-        },
-      );
+      redirectToStripeCheckout(getStripeCheckoutUrl(order));
     } catch (error) {
-      if (error instanceof Error && error.message !== "Payment cancelled.") {
+      if (error instanceof Error) {
         toast.error(error.message);
       }
-    } finally {
       setPaying(false);
     }
   };

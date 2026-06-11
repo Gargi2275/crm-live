@@ -214,9 +214,12 @@ export type CreateAuditPaymentOrderResponse = {
     id: string;
     amount: number;
     currency: string;
+    url?: string;
   };
+  checkout_url?: string;
   amount_pence?: number;
   currency: string;
+  publishable_key?: string;
   key_id: string;
 };
 
@@ -242,9 +245,12 @@ export type CreateFullPaymentOrderResponse = {
     id: string;
     amount: number;
     currency: string;
+    url?: string;
   };
+  checkout_url?: string;
   amount_pence?: number;
   currency: string;
+  publishable_key?: string;
   key_id: string;
 };
 
@@ -288,8 +294,11 @@ export type PassportRenewalQuoteOrderResponse = {
     id: string;
     amount: number;
     currency: string;
+    url?: string;
   };
+  checkout_url?: string;
   key_id: string;
+  publishable_key?: string;
   currency: string;
   amount_pence: number;
   amount_major: string;
@@ -682,7 +691,7 @@ export const trackApostilleLegacy = async (
 export const createApostillePaymentOrder = async (
   fileNumber: string,
   email: string
-): Promise<{ order_id: string; amount: number; currency: string; key_id: string }> => {
+): Promise<{ order_id: string; stripe_session_id?: string; checkout_url?: string; amount: number; currency: string; key_id: string }> => {
   const response = await apiCall(`${API_BASE_URL}/apostille/payment/create-order/`, {
     method: 'POST',
     body: JSON.stringify({ file_number: fileNumber, email }),
@@ -691,24 +700,20 @@ export const createApostillePaymentOrder = async (
     throw new Error(await extractErrorMessage(response));
   }
   const raw = await response.json();
-  return (raw?.data || raw) as { order_id: string; amount: number; currency: string; key_id: string };
+  return (raw?.data || raw) as { order_id: string; stripe_session_id?: string; checkout_url?: string; amount: number; currency: string; key_id: string };
 };
 
 export const verifyApostillePayment = async (
   fileNumber: string,
   email: string,
-  razorpay_order_id: string,
-  razorpay_payment_id: string,
-  razorpay_signature: string
+  stripeSessionId: string
 ): Promise<{ status: string }> => {
   const response = await apiCall(`${API_BASE_URL}/apostille/payment/verify/`, {
     method: 'POST',
     body: JSON.stringify({
       file_number: fileNumber,
       email,
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
+      stripe_session_id: stripeSessionId,
     }),
   });
   if (!response.ok) {
@@ -968,7 +973,7 @@ export const getAuditStatus = async (auditId: number): Promise<AuditStatusRespon
 };
 
 /**
- * Creates a Razorpay order for audit fee payment.
+ * Creates a Stripe Checkout session for audit fee payment.
  */
 export const createAuditPaymentOrder = async (
   referenceNumber: string,
@@ -999,18 +1004,14 @@ export const createAuditPaymentOrder = async (
  */
 export const verifyAuditPayment = async (
   referenceNumber: string,
-  orderId: string,
-  paymentId: string,
-  signature: string
+  stripeSessionId: string
 ): Promise<VerifyAuditPaymentResponse> => {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/audit/payment/verify/`, {
       method: 'POST',
       body: JSON.stringify({
         reference_number: referenceNumber,
-        razorpay_order_id: orderId,
-        razorpay_payment_id: paymentId,
-        razorpay_signature: signature,
+        stripe_session_id: stripeSessionId,
       }),
     });
 
@@ -1054,7 +1055,7 @@ export const skipAuditWithDisclaimer = async (
 };
 
 /**
- * Creates a Razorpay order for full service payment.
+ * Creates a Stripe Checkout session for full service payment.
  */
 export const createFullPaymentOrder = async (
   referenceNumber: string
@@ -1083,18 +1084,14 @@ export const createFullPaymentOrder = async (
  */
 export const verifyFullPayment = async (
   referenceNumber: string,
-  orderId: string,
-  paymentId: string,
-  signature: string
+  stripeSessionId: string
 ): Promise<VerifyFullPaymentResponse> => {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/payment/full/verify/`, {
       method: 'POST',
       body: JSON.stringify({
         reference_number: referenceNumber,
-        razorpay_order_id: orderId,
-        razorpay_payment_id: paymentId,
-        razorpay_signature: signature,
+        stripe_session_id: stripeSessionId,
       }),
     });
 
@@ -1175,18 +1172,14 @@ export const createPassportRenewalQuoteOrder = async (
 
 export const verifyPassportRenewalQuotePayment = async (
   referenceNumber: string,
-  orderId: string,
-  paymentId: string,
-  signature: string
+  stripeSessionId: string
 ): Promise<PassportRenewalQuoteVerifyResponse> => {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/passport-renewal/pay/verify/`, {
       method: 'POST',
       body: JSON.stringify({
         reference_number: referenceNumber,
-        razorpay_order_id: orderId,
-        razorpay_payment_id: paymentId,
-        razorpay_signature: signature,
+        stripe_session_id: stripeSessionId,
       }),
     });
 

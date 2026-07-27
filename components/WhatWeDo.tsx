@@ -12,6 +12,7 @@ import {
   Stamp,
 } from "lucide-react";
 import Link from "next/link";
+import { home } from "@/components/home/homeTheme";
 
 const container = {
   hidden: {},
@@ -42,48 +43,48 @@ const serviceTiles: ServiceTile[] = [
     subtitle: "First-time OCI card, fully prepared",
     href: "/services/new-oci",
     icon: FileText,
-    accent: "#1c69dd",
-    glow: "rgba(28,105,221,0.22)",
+    accent: "#33A1FD",
+    glow: "rgba(51,161,253,0.22)",
   },
   {
     title: "OCI renewal & transfer",
     subtitle: "New passport or card renewal",
     href: "/services/oci-renewal",
     icon: RefreshCw,
-    accent: "#2563eb",
-    glow: "rgba(37,99,235,0.2)",
+    accent: "#0F7EE8",
+    glow: "rgba(15,126,232,0.2)",
   },
   {
     title: "Mandatory OCI update",
     subtitle: "Complex process — we handle it",
     href: "/services/oci-update",
     icon: ShieldCheck,
-    accent: "#1558c0",
-    glow: "rgba(21,88,192,0.2)",
+    accent: "#33A1FD",
+    glow: "rgba(51,161,253,0.2)",
   },
   {
     title: "Indian passport renewal",
     subtitle: "For UK & US residents",
     href: "/services/passport-renewal",
     icon: IdCard,
-    accent: "#1d4ed8",
-    glow: "rgba(29,78,216,0.2)",
+    accent: "#0F7EE8",
+    glow: "rgba(15,126,232,0.2)",
   },
   {
     title: "Indian e-Visa",
     subtitle: "1-year & 5-year options prepared and checked",
     href: "/services/indian-evisa",
     icon: Plane,
-    accent: "#0f4cad",
-    glow: "rgba(15,76,173,0.22)",
+    accent: "#33A1FD",
+    glow: "rgba(51,161,253,0.22)",
   },
   {
     title: "Apostille & Attestation",
     subtitle: "UK/US documents legalised for use in India",
     href: "/apostille-services",
     icon: Stamp,
-    accent: "#7c3aed",
-    glow: "rgba(124,58,237,0.22)",
+    accent: "#0F7EE8",
+    glow: "rgba(15,126,232,0.22)",
   },
 ];
 
@@ -97,7 +98,7 @@ function ServiceCard({ tile }: { tile: ServiceTile }) {
         <motion.article
           whileHover={reduceMotion ? undefined : { y: -8, scale: 1.02 }}
           transition={{ type: "spring", stiffness: 320, damping: 22 }}
-          className="relative h-full overflow-hidden rounded-[22px] border border-[#d6e8ff] bg-white p-5 shadow-[0_10px_32px_rgba(22,68,130,0.08)] transition-shadow duration-300 group-hover:shadow-[0_22px_50px_rgba(22,68,130,0.14)]"
+          className="relative h-full overflow-hidden rounded-2xl border border-border bg-white p-5 shadow-card transition-shadow duration-300 group-hover:shadow-[0_18px_48px_rgba(18,84,150,0.14)]"
         >
           <div
             className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
@@ -118,17 +119,17 @@ function ServiceCard({ tile }: { tile: ServiceTile }) {
                 <Icon className="h-5 w-5" />
               </div>
             </motion.div>
-            <span className="rounded-full bg-[#eef5ff] px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-[#1c69dd]">
+            <span className="rounded-full bg-[#ecf6ff] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wider text-accent">
               Service
             </span>
           </div>
 
-          <h3 className="relative mt-4 font-heading text-[15px] font-bold leading-snug text-[#041020] transition-colors group-hover:text-[#1c69dd]">
+          <h3 className="relative mt-4 font-heading text-[15px] font-bold leading-snug text-dark transition-colors group-hover:text-primary">
             {tile.title}
           </h3>
-          <p className="relative mt-2 text-[13px] leading-relaxed text-[#486581]">{tile.subtitle}</p>
+          <p className="relative mt-2 text-[13px] leading-relaxed text-textMuted">{tile.subtitle}</p>
 
-          <div className="relative mt-5 flex items-center gap-2 text-[13px] font-bold text-[#1c69dd]">
+          <div className="relative mt-5 flex items-center gap-2 text-[13px] font-semibold text-primary">
             <span>Explore</span>
             <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1.5" />
           </div>
@@ -147,12 +148,10 @@ export default function WhatWeDo() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] py-12 sm:py-14 lg:py-16">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(51,120,213,0.10),transparent_34%),radial-gradient(circle_at_85%_80%,rgba(124,58,237,0.06),transparent_30%)]" />
-      <div className="pointer-events-none absolute left-[-6rem] top-10 h-56 w-56 rounded-full bg-[#dcecff] blur-3xl motion-safe:animate-pulse" />
-      <div className="pointer-events-none absolute right-[-5rem] bottom-8 h-64 w-64 rounded-full bg-[#e6f1ff] blur-3xl" />
+    <section className={`${home.section} bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)]`}>
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(51,161,253,0.10),transparent_34%),radial-gradient(circle_at_85%_80%,rgba(15,126,232,0.06),transparent_30%)]" />
 
-      <div className="relative mx-auto px-4 sm:px-6 lg:px-8 xl:px-10">
+      <div className={`${home.container} xl:px-10`}>
         <motion.div
           initial={reduceMotion ? false : "hidden"}
           whileInView="visible"
@@ -161,29 +160,27 @@ export default function WhatWeDo() {
           className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] lg:items-start xl:gap-14"
         >
           <motion.div variants={cardItem} className="max-w-2xl">
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#cfe1fb] bg-white px-4 py-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#1b67c8] shadow-[0_10px_24px_rgba(51,120,213,0.08)]">
+            <div className={`${home.chip} mb-5 shadow-[0_10px_24px_rgba(51,161,253,0.08)]`}>
               <Sparkles className="h-3.5 w-3.5" />
               What we do
             </div>
 
-            <h2 className="max-w-xl font-heading text-[clamp(2.1rem,4vw,3.7rem)] font-black leading-[1.03] tracking-[-0.04em] text-[#041020]">
+            <h2 className="max-w-xl font-heading text-[clamp(1.85rem,3.5vw,2.75rem)] font-bold leading-[1.12] tracking-[-0.03em] text-dark">
               Everything you need for India travel &amp; OCI,
-              <span className="mt-1 block bg-gradient-to-r from-[#1b67c8] via-[#2f7fe3] to-[#69a9ff] bg-clip-text text-transparent">
-                in one calm, guided place
-              </span>
+              <span className="mt-1 block text-primary">in one calm, guided place</span>
             </h2>
 
-            <p className="mt-5 max-w-xl text-[16px] font-medium leading-8 text-[#334e68]">
+            <p className="mt-5 max-w-xl font-body text-[15px] leading-relaxed text-textMuted sm:text-base">
               FlyOCI is a specialist online service for UK and US residents of Indian origin. We&apos;re a{" "}
-              <strong className="font-bold text-[#041020]">private, independent service</strong> — not a
+              <strong className="font-semibold text-dark">private, independent service</strong> — not a
               government website. OCI, e-Visa, passport renewal and apostille — all under one roof.
             </p>
 
             <motion.div
               whileHover={reduceMotion ? undefined : { x: 4 }}
-              className="mt-7 inline-flex items-center gap-2 rounded-full border border-[#cfe1fb] bg-[#f4f8ff] px-4 py-2.5 text-[13px] font-bold text-[#102a43] shadow-[0_10px_24px_rgba(51,120,213,0.08)]"
+              className="mt-7 inline-flex items-center gap-2 rounded-full border border-border bg-[#f7fbff] px-4 py-2.5 text-[13px] font-semibold text-dark"
             >
-              <ArrowRight className="h-3.5 w-3.5 text-[#1b67c8]" />
+              <ArrowRight className="h-3.5 w-3.5 text-accent" />
               <span>Specialist support for OCI, e-Visa, passport &amp; apostille</span>
             </motion.div>
           </motion.div>

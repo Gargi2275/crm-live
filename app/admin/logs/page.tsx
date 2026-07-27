@@ -11,23 +11,24 @@ import {
   type AdminLogItem,
   type AdminLogsResponse,
 } from "@/lib/admin-auth";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   Ban,
-  Filter,
   Logs,
   Mail,
   RefreshCw,
   Shield,
   Trash2,
-  X,
 } from "lucide-react";
 
 type EventFilter = "all" | "login" | "failed_attempt" | "website_visit" | "event" | "email";
-type LogsPanel = "security" | "filters";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const DELETE_BATCH_SIZE = 200;
 const SELECT_ALL_BATCH_SIZE = 500;
+
+const filterFieldClass =
+  "mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white";
 
 type LogSelection = { source: AdminLogItem["source"]; record_id: number };
 
@@ -35,9 +36,9 @@ export default function AdminLogsPage() {
   const [data, setData] = useState<AdminLogsResponse | null>(null);
   const [ipSecurity, setIpSecurity] = useState<AdminIpSecurityPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activePanel, setActivePanel] = useState<LogsPanel | null>(null);
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [eventType, setEventType] = useState<EventFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -51,17 +52,11 @@ export default function AdminLogsPage() {
   const [ipActionLoading, setIpActionLoading] = useState<string | null>(null);
   const [manualBlockIp, setManualBlockIp] = useState("");
 
-  const hasFilters =
-    appliedSearch.trim() !== "" ||
-    eventType !== "all" ||
-    dateFrom !== "" ||
-    dateTo !== "";
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const payload = await getAdminLogs({
-        search: appliedSearch,
+        search: debouncedSearch.trim(),
         eventType,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
@@ -78,7 +73,12 @@ export default function AdminLogsPage() {
     } finally {
       setLoading(false);
     }
-  }, [appliedSearch, dateFrom, dateTo, eventType, offset, pageSize]);
+  }, [debouncedSearch, dateFrom, dateTo, eventType, offset, pageSize]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 350);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const handlePageSizeChange = (nextSize: number) => {
     setPageSize(nextSize);
@@ -121,7 +121,7 @@ export default function AdminLogsPage() {
       let total = 0;
       do {
         const payload = await getAdminLogs({
-          search: appliedSearch,
+          search: debouncedSearch.trim(),
           eventType,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
@@ -148,21 +148,42 @@ export default function AdminLogsPage() {
     void load();
   }, [load]);
 
-  const applyFilters = () => {
-    setAppliedSearch(search.trim());
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setOffset(0);
+    clearSelection();
+  };
+
+  const handleEventTypeChange = (value: EventFilter) => {
+    setEventType(value);
+    setOffset(0);
+    clearSelection();
+  };
+
+  const handleDateFromChange = (value: string) => {
+    setDateFrom(value);
+    setOffset(0);
+    clearSelection();
+  };
+
+  const handleDateToChange = (value: string) => {
+    setDateTo(value);
     setOffset(0);
     clearSelection();
   };
 
   const clearFilters = () => {
     setSearch("");
-    setAppliedSearch("");
+    setDebouncedSearch("");
     setEventType("all");
     setDateFrom("");
     setDateTo("");
     setOffset(0);
     clearSelection();
   };
+
+  const activeFilterCount =
+    (eventType !== "all" ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
 
   const handleDeleteSelected = async () => {
     const items = Array.from(selectedItems.values());
@@ -276,86 +297,100 @@ export default function AdminLogsPage() {
     return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
   };
 
-  const togglePanel = (panel: LogsPanel) => {
-    setActivePanel((current) => (current === panel ? null : panel));
-  };
-
   const blockedCount = ipSecurity?.blocked_ips?.length ?? 0;
 
   const totalRows = data?.pagination.total ?? 0;
   const rowStart = totalRows === 0 ? 0 : offset + 1;
   const rowEnd = offset + (data?.results.length ?? 0);
 
+  useSetAdminPageChrome({
+    title: "Logs",
+    subtitle: "Audit trail, visits & security",
+    icon: Logs,
+    search: {
+      value: search,
+      onChange: handleSearchChange,
+      placeholder: "Search name, IP, page…",
+    },
+    activeFilterCount,
+    onClearFilters: clearFilters,
+    meta: loading ? "Loading…" : `${totalRows} log(s)`,
+    syncKey: `${search}|${eventType}|${dateFrom}|${dateTo}|${loading}|${totalRows}|${securityOpen}|${blockedCount}|${selectionCount}`,
+    actions: (
+      <>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => setSecurityOpen((open) => !open)}
+          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-sm font-semibold transition-colors ${
+            securityOpen
+              ? "border-[#009877] bg-[#009877]/10 text-[#006F57]"
+              : "border-[#D9E1EA] bg-white text-[#102A43] hover:bg-[#F5F7FA]"
+          }`}
+        >
+          <Shield className="w-4 h-4" />
+          Security
+          {blockedCount > 0 ? (
+            <span className="rounded-full bg-[#B42318] px-1.5 text-[10px] text-white">{blockedCount}</span>
+          ) : null}
+        </button>
+      </>
+    ),
+    filtersContent: (
+      <>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Event type</span>
+          <select
+            value={eventType}
+            onChange={(e) => handleEventTypeChange(e.target.value as EventFilter)}
+            className={filterFieldClass}
+          >
+            <option value="all">All events</option>
+            <option value="login">Login</option>
+            <option value="failed_attempt">Failed attempt</option>
+            <option value="website_visit">Website visit</option>
+            <option value="event">Other events</option>
+            <option value="email">Email delivery</option>
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Date from</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => handleDateFromChange(e.target.value)}
+            className={filterFieldClass}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Date to</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => handleDateToChange(e.target.value)}
+            className={filterFieldClass}
+          />
+        </label>
+      </>
+    ),
+  });
+
   return (
     <div className="space-y-3 font-body min-w-0 max-w-full">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Logs className="w-6 h-6 text-[#009877]" />
-          <h1 className="text-2xl font-heading font-semibold text-[#102A43]">Logs Module</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 flex-1 justify-end min-w-0">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") applyFilters();
-            }}
-            placeholder="Search name, IP, page…"
-            className="w-full min-w-[180px] max-w-sm rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm"
-          />
-          <button
-            type="button"
-            onClick={() => togglePanel("security")}
-            className={`inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-sm font-semibold transition-colors ${
-              activePanel === "security"
-                ? "border-[#009877] bg-[#009877]/10 text-[#006F57]"
-                : "border-[#D9E1EA] bg-white text-[#102A43] hover:bg-[#F5F7FA]"
-            }`}
-          >
-            <Shield className="w-4 h-4" />
-            Security
-            {blockedCount > 0 ? (
-              <span className="rounded-full bg-[#B42318] px-1.5 text-[10px] text-white">{blockedCount}</span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={() => togglePanel("filters")}
-            className={`inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-sm font-semibold transition-colors ${
-              activePanel === "filters" || hasFilters
-                ? "border-[#009877] bg-[#009877]/10 text-[#006F57]"
-                : "border-[#D9E1EA] bg-white text-[#102A43] hover:bg-[#F5F7FA]"
-            }`}
-          >
-            <Filter className="w-4 h-4" />
-            Filters
-            {hasFilters ? <span className="rounded-full bg-[#009877] px-1.5 text-[10px] text-white">on</span> : null}
-          </button>
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold disabled:opacity-60"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-          {selectionCount > 0 ? (
-            <span className="text-xs font-semibold text-[#0B69B7]">{selectionCount} selected</span>
-          ) : null}
-        </div>
-      </div>
-
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {kpiButtons.map((kpi) => (
           <button
             key={kpi.key}
             type="button"
-            onClick={() => {
-              setEventType(kpi.key);
-              setOffset(0);
-            }}
+            onClick={() => handleEventTypeChange(kpi.key)}
             className={`text-left rounded-[10px] border p-3 transition-colors ${
               eventType === kpi.key ? "border-[#009877] bg-[#009877]/10" : "border-[#D9E1EA] bg-white hover:border-[#33A1FD]/40"
             }`}
@@ -381,7 +416,7 @@ export default function AdminLogsPage() {
         </div>
       ) : null}
 
-      {activePanel === "security" ? (
+      {securityOpen ? (
         <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4 space-y-3">
           <p className="text-sm font-semibold text-[#102A43]">IP threshold & blocking</p>
           <p className="text-xs text-[#627D98]">
@@ -517,99 +552,36 @@ export default function AdminLogsPage() {
         </div>
       ) : null}
 
-      {activePanel === "filters" ? (
-        <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-[#102A43]">Log filters</p>
-            {hasFilters ? (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#486581]"
-              >
-                <X className="w-3.5 h-3.5" />
-                Clear filters
-              </button>
-            ) : null}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <label className="block text-sm">
-              <span className="text-xs text-[#627D98]">Event type</span>
-              <select
-                value={eventType}
-                onChange={(e) => setEventType(e.target.value as EventFilter)}
-                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
-              >
-                <option value="all">All events</option>
-                <option value="login">Login</option>
-                <option value="failed_attempt">Failed attempt</option>
-                <option value="website_visit">Website visit</option>
-                <option value="event">Other events</option>
-                <option value="email">Email delivery</option>
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-[#627D98]">Date from</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-[#627D98]">Date to</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
-              />
-            </label>
-            <div className="flex items-end">
-              <button
-                type="button"
-                onClick={applyFilters}
-                className="w-full rounded-[10px] bg-[#009877] px-3 py-2 text-sm font-semibold text-white hover:bg-[#007B61]"
-              >
-                Apply filters
-              </button>
-            </div>
-          </div>
-
-          <div className="border-t border-[#E5EAF0] pt-4 flex flex-wrap items-center gap-2">
-            <p className="text-xs text-[#627D98] w-full sm:w-auto sm:mr-2">
-              {selectionCount > 0 ? `${selectionCount} selected` : "No rows selected"}
-            </p>
-            <button
-              type="button"
-              onClick={() => void selectAllFiltered()}
-              disabled={selectingAll || loading || totalRows === 0}
-              className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-50"
-            >
-              {selectingAll ? "Selecting…" : "Select all"}
-            </button>
-            <button
-              type="button"
-              onClick={clearSelection}
-              disabled={selectionCount === 0}
-              className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA] disabled:opacity-50"
-            >
-              Clear selection
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleDeleteSelected()}
-              disabled={deleting || selectionCount === 0}
-              className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#B42318] px-3 py-2 text-xs font-semibold text-white hover:bg-[#9B2C1A] disabled:opacity-50"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              {deleting ? "Deleting…" : `Delete selected (${selectionCount})`}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-2 rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2">
+        <p className="text-xs text-[#627D98] w-full sm:w-auto sm:mr-2">
+          {selectionCount > 0 ? `${selectionCount} selected` : "No rows selected"}
+        </p>
+        <button
+          type="button"
+          onClick={() => void selectAllFiltered()}
+          disabled={selectingAll || loading || totalRows === 0}
+          className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-50"
+        >
+          {selectingAll ? "Selecting…" : "Select all"}
+        </button>
+        <button
+          type="button"
+          onClick={clearSelection}
+          disabled={selectionCount === 0}
+          className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA] disabled:opacity-50"
+        >
+          Clear selection
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleDeleteSelected()}
+          disabled={deleting || selectionCount === 0}
+          className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#B42318] px-3 py-2 text-xs font-semibold text-white hover:bg-[#9B2C1A] disabled:opacity-50"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          {deleting ? "Deleting…" : `Delete selected (${selectionCount})`}
+        </button>
+      </div>
 
       <div className="bg-white rounded-[12px] border border-[#D9E1EA] overflow-hidden w-full min-w-0">
         <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]">

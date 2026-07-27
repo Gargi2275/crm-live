@@ -57,7 +57,7 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
 
   return (
     <motion.div
-      className="flex justify-center gap-2.5 sm:gap-3.5"
+      className="flex justify-center gap-2 sm:gap-2.5"
       animate={error ? { x: [0, -8, 8, -8, 0] } : {}}
       transition={{ duration: 0.4 }}
     >
@@ -74,7 +74,7 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
             initial={false}
             animate={success ? { backgroundColor: "#DCFCE7", borderColor: "#16A34A" } : {}} 
             transition={{ delay: success ? i * 0.05 : 0, duration: 0.2 }}
-            className={`h-[58px] w-[48px] overflow-hidden rounded-[14px] border ${stateClass}`}
+            className={`h-[48px] w-[42px] overflow-hidden rounded-[12px] border sm:h-[52px] sm:w-[46px] ${stateClass}`}
           >
             <input
               ref={(el) => { inputRefs.current[i] = el; }}
@@ -84,7 +84,7 @@ export function OTPInput({ onComplete, error, success }: OTPInputProps) {
               onChange={(e) => handleChange(i, e.target.value.replace(/[^0-9]/g, ''))}
               onKeyDown={(e) => handleKeyDown(i, e)}
               onPaste={handlePaste}
-              className="h-full w-full border-0 bg-transparent text-center font-mono text-[22px] font-bold tracking-[0.08em] text-inherit outline-none ring-0 transition focus:bg-[#eef6ff] focus:shadow-[inset_0_0_0_2px_rgba(51,161,253,0.5)] disabled:opacity-100 placeholder:text-transparent"
+              className="h-full w-full border-0 bg-transparent text-center font-mono text-[20px] font-bold tracking-[0.08em] text-inherit outline-none ring-0 transition focus:bg-[#eef6ff] focus:shadow-[inset_0_0_0_2px_rgba(51,161,253,0.5)] disabled:opacity-100 placeholder:text-transparent"
               maxLength={1}
               disabled={success}
             />

@@ -155,6 +155,7 @@ import { TopHeader } from "@/components/console/TopHeader";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
 import { ConsoleProvider } from "@/components/console/ConsoleContext";
+import { AdminPageChromeProvider } from "@/components/console/AdminPageChromeContext";
 import { Toaster } from "react-hot-toast";
 import { AdminAuthProvider, useAdminAuth } from "@/context/AdminAuthContext";
 import { getAdminMyPermissions, getConsoleHomePath } from "@/lib/admin-auth";
@@ -174,11 +175,37 @@ export default function ConsoleLayout({
 
 function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, isBootstrapped, logout, adminUser } = useAdminAuth();
   const isPublicAdminAuthRoute = pathname === "/admin/login" || pathname === "/admin/reset-password";
+
+  // Small screens: keep sidebar closed by default; close when crossing into mobile width.
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const sync = () => {
+      if (mq.matches) setMobileOpen(false);
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  // Close mobile drawer after navigation.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileOpen]);
 
   useEffect(() => {
     if (!isBootstrapped) return;
@@ -280,47 +307,45 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
 
   return (
     <ConsoleProvider>
-      <div className="flex min-h-screen w-full bg-[#F5F7FA] overflow-hidden text-slate-900">
-        <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
+      <AdminPageChromeProvider>
+        <div className="flex min-h-screen w-full bg-[#F5F7FA] overflow-hidden text-slate-900 admin-shell text-[15px] leading-normal">
+          <Sidebar
+            collapsed={collapsed}
+            setCollapsed={setCollapsed}
+            mobileOpen={mobileOpen}
+            setMobileOpen={setMobileOpen}
+          />
 
-        <div className="flex-1 min-w-0 h-screen overflow-y-auto flex flex-col">
-          <TopHeader />
+          <div className="flex-1 min-w-0 h-screen overflow-y-auto flex flex-col">
+            <TopHeader
+              mobileOpen={mobileOpen}
+              onToggleMobileNav={() => setMobileOpen((v) => !v)}
+            />
 
-          <main className="relative flex-1 p-4 md:p-6 lg:p-7">
-            <motion.div
-              aria-hidden
-              className="pointer-events-none absolute -top-20 -right-16 h-52 w-52 rounded-full bg-[#33A1FD]/10 blur-3xl"
-              animate={{ x: [0, -14, 0], y: [0, 10, 0], opacity: [0.35, 0.5, 0.35] }}
-              transition={{ duration: 11, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <motion.div
-              aria-hidden
-              className="pointer-events-none absolute top-1/3 -left-20 h-44 w-44 rounded-full bg-[#009877]/10 blur-3xl"
-              animate={{ x: [0, 12, 0], y: [0, -8, 0], opacity: [0.25, 0.4, 0.25] }}
-              transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={pathname}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.24, ease: "easeOut" }}
-                className="relative h-full"
-              >
-                {children}
-              </motion.div>
-            </AnimatePresence>
-          </main>
+            <main className="relative flex-1 p-3 md:p-4 lg:p-5 text-[15px]">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={pathname}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className="relative h-full"
+                >
+                  {children}
+                </motion.div>
+              </AnimatePresence>
+            </main>
+          </div>
         </div>
-      </div>
 
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          style: { background: "#FFFFFF", color: "#0F172A", border: "0.5px solid #D9E1EA", borderRadius: "12px" },
-        }}
-      />
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            style: { background: "#FFFFFF", color: "#0F172A", border: "0.5px solid #D9E1EA", borderRadius: "12px" },
+          }}
+        />
+      </AdminPageChromeProvider>
     </ConsoleProvider>
   );
 }

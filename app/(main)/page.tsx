@@ -1,23 +1,47 @@
-import HeroSection from "../../components/HeroSection";
-import { DocumentAuditSection } from "@/components/home/DocumentAuditSection";
-import { TrustFeaturesSection } from "@/components/home/TrustFeaturesSection";
+import HeroSection from "@/components/HeroSection";
 import WhatWeDo from "@/components/WhatWeDo";
-import { StepTimeline } from "@/components/StepTimeline";
-import { ServiceFees } from "@/components/ServiceFees";
-import { TestimonialsCarousel } from "@/components/home/TestimonialsCarousel";
-import { FadeInUp } from "@/components/FadeInUp";
-import { Button } from "@/components/ui/Button";
-import { getPublicTestimonials } from "@/lib/api";
-import Link from "next/link";
+import { CategoryServicesSection } from "@/components/home/CategoryServicesSection";
+import { DocumentAuditSection } from "@/components/home/DocumentAuditSection";
+import { OriginCountriesSection } from "@/components/home/OriginCountriesSection";
+import { TrustFeaturesSection } from "@/components/home/TrustFeaturesSection";
+import { BlogSection } from "@/components/home/BlogSection";
+import { HowItWorksSection } from "@/components/home/HowItWorksSection";
+import { FinalCtaSection } from "@/components/home/FinalCtaSection";
+import { TestimonialsSection } from "@/components/home/TestimonialsSection";
+import { PricingSection } from "@/components/home/PricingSection";
+import {
+  getPublicBlogPosts,
+  getPublicHomepageModules,
+  getPublicOriginCountries,
+  getPublicTestimonials,
+  type PublicBlogPost,
+  type PublicOriginCountriesPayload,
+} from "@/lib/api";
 import { buildPageMetadata } from "@/lib/seo";
 import { PAGE_SEO } from "@/lib/seo-pages";
+import type { ReactNode } from "react";
 
 export const metadata = buildPageMetadata(PAGE_SEO.home);
+
+const DEFAULT_MODULE_KEYS = [
+  "hero",
+  "what_we_do",
+  "category_services",
+  "origin_countries",
+  "document_audit",
+  "how_it_works",
+  "pricing",
+  "trust_features",
+  "testimonials",
+  "blog",
+  "final_cta",
+];
 
 const fallbackTestimonials = [
   {
     title: "OCI Renewal Was Smooth and Stress-Free",
-    quote: "FlyOCI made my parents' OCI renewal very easy. All documents were checked in advance and there were no surprises at VFS.",
+    quote:
+      "FlyOCI made my parents' OCI renewal very easy. All documents were checked in advance and there were no surprises at VFS.",
     author: "Rajesh K., UK",
     service: "OCI Renewal",
     detail: "Document Audit Completed",
@@ -33,7 +57,8 @@ const fallbackTestimonials = [
   },
   {
     title: "Strong Support for First-Time Applicants",
-    quote: "As a first-time applicant, I had many doubts. FlyOCI made everything easy to understand and support on email and WhatsApp was quick.",
+    quote:
+      "As a first-time applicant, I had many doubts. FlyOCI made everything easy to understand and support on email and WhatsApp was quick.",
     author: "Anita Patel",
     service: "New OCI Card",
     detail: "WhatsApp + Email Updates",
@@ -41,7 +66,8 @@ const fallbackTestimonials = [
   },
   {
     title: "Audit Caught Missing Documents Early",
-    quote: "The pre-check report highlighted a name mismatch and missing supporting documents before submission. That saved me a rejection and a lot of delay.",
+    quote:
+      "The pre-check report highlighted a name mismatch and missing supporting documents before submission. That saved me a rejection and a lot of delay.",
     author: "Rishabh S., London",
     service: "Document Audit",
     detail: "Pass / Fix / Missing Report",
@@ -49,7 +75,8 @@ const fallbackTestimonials = [
   },
   {
     title: "Clear Pricing and No Hidden Surprises",
-    quote: "Everything was explained clearly: service fee, government fee and timeline. The process felt transparent and professionally managed.",
+    quote:
+      "Everything was explained clearly: service fee, government fee and timeline. The process felt transparent and professionally managed.",
     author: "Parth S., Manchester",
     service: "OCI Update",
     detail: "Fixed Transparent Fees",
@@ -77,195 +104,100 @@ async function loadTestimonials() {
   }
 }
 
-export default async function Home() {
-  const testimonials = await loadTestimonials();
+async function loadHomepageBlogPosts() {
+  try {
+    const { posts } = await getPublicBlogPosts({ homepage: true, limit: 3 });
+    return posts;
+  } catch {
+    return [];
+  }
+}
 
-  const steps = [
-    { title: "Step 1 - Quick Online Form & Upload", description: "Tell us which service you need and upload clear photos/scans through our secure portal." },
-    { title: "Step 2 - Expert Document Audit", description: "We send a written report showing what is correct, missing, or needs correction." },
-    { title: "Step 3 - End-to-End Handling", description: "Once documents are ready, we prepare forms, submission steps, and ongoing guidance." },
-  ];
+async function loadOriginCountries() {
+  try {
+    return await getPublicOriginCountries();
+  } catch {
+    return {
+      title: "Apply for an Indian Visa from These Countries",
+      subtitle:
+        "Apply for Indian visas from the USA, UK, Canada, Australia, and other countries with FlyOCI.",
+      countries: [],
+    };
+  }
+}
+
+async function loadHomepageModuleKeys() {
+  try {
+    const modules = await getPublicHomepageModules();
+    const keys = modules.map((m) => m.key).filter(Boolean);
+    return keys.length ? keys : DEFAULT_MODULE_KEYS;
+  } catch {
+    return DEFAULT_MODULE_KEYS;
+  }
+}
+
+function renderHomepageModule(
+  key: string,
+  ctx: {
+    testimonials: Awaited<ReturnType<typeof loadTestimonials>>;
+    blogPosts: PublicBlogPost[];
+    originCountries: PublicOriginCountriesPayload;
+  },
+): ReactNode {
+  switch (key) {
+    case "hero":
+      return <HeroSection key={key} />;
+    case "what_we_do":
+      return <WhatWeDo key={key} />;
+    case "category_services":
+      return <CategoryServicesSection key={key} />;
+    case "origin_countries":
+      return (
+        <OriginCountriesSection
+          key={key}
+          title={ctx.originCountries.title}
+          subtitle={ctx.originCountries.subtitle}
+          countries={ctx.originCountries.countries}
+        />
+      );
+    case "document_audit":
+      return <DocumentAuditSection key={key} />;
+    case "how_it_works":
+      return <HowItWorksSection key={key} />;
+    case "pricing":
+      return <PricingSection key={key} />;
+    case "trust_features":
+      return <TrustFeaturesSection key={key} />;
+    case "testimonials":
+      return (
+        <TestimonialsSection
+          key={key}
+          testimonials={ctx.testimonials}
+          fallbackTestimonials={fallbackTestimonials}
+        />
+      );
+    case "blog":
+      return <BlogSection key={key} posts={ctx.blogPosts} />;
+    case "final_cta":
+      return <FinalCtaSection key={key} />;
+    default:
+      return null;
+  }
+}
+
+export default async function Home() {
+  const [testimonials, blogPosts, originCountries, moduleKeys] = await Promise.all([
+    loadTestimonials(),
+    loadHomepageBlogPosts(),
+    loadOriginCountries(),
+    loadHomepageModuleKeys(),
+  ]);
 
   return (
     <div className="font-body">
-      <HeroSection />
-
-      {/* SECTION 1: What We Do */}
-      <WhatWeDo />
-
-      <DocumentAuditSection />
-      {/* SECTION 3: How It Works */}
-  <section className="py-5 lg:py-8 relative overflow-hidden" style={{background: 'linear-gradient(160deg, #f0f6ff 0%, #fafcff 50%, #eef5ff 100%)'}}>
-  {/* bg blobs */}
-  <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full pointer-events-none">
-    <div style={{background: 'radial-gradient(circle, rgba(21,95,196,0.08) 0%, transparent 70%)'}} className="w-full h-full rounded-full" />
-  </div>
-  <div className="absolute -bottom-16 -left-16 w-64 h-64 rounded-full pointer-events-none">
-    <div style={{background: 'radial-gradient(circle, rgba(21,95,196,0.06) 0%, transparent 70%)'}} className="w-full h-full rounded-full" />
-  </div>
-
-  <div className="mx-auto px-4 sm:px-6 lg:px-8 relative">
-
-    {/* Header */}
-    <FadeInUp className="mb-12">
-      <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 mb-5 text-xs font-semibold uppercase tracking-widest border" style={{background: 'rgba(21,95,196,0.08)', borderColor: 'rgba(21,95,196,0.18)', color: '#155fc4'}}>
-        <span className="w-2 h-2 rounded-full bg-[#155fc4] animate-pulse" />
-        Our process
-      </div>
-      <h2 className="font-heading text-[clamp(2rem,4vw,2.75rem)] font-black leading-tight text-[#0b2a6b] mb-4">
-        Simple. Structured. <em className="not-italic text-[#155fc4]">No surprises.</em>
-      </h2>
-      <p className="font-body text-lg max-w-2xl text-[#506080]">
-        We keep the process structured so you always know what happens next.
-      </p>
-    </FadeInUp>
-
-    {/* 3 Step Cards */}
-    <FadeInUp className="mb-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 rounded-3xl overflow-hidden border" style={{borderColor: 'rgba(21,95,196,0.12)'}}>
-        {steps.map((step, i) => (
-          <div
-            key={i}
-            className="relative bg-white p-8 group transition-all duration-300 hover:-translate-y-1.5 hover:z-10"
-            style={{
-              borderRight: i < steps.length - 1 ? '1px solid rgba(21,95,196,0.1)' : 'none',
-              boxShadow: 'none',
-            }}
-          >
-            {/* Number block */}
-            <div className="relative w-12 h-12 mb-5">
-              <div className="absolute inset-0 rounded-xl" style={{background: '#eef4ff', transform: 'rotate(10deg)'}} />
-              <div className="absolute inset-0 flex items-center justify-center font-heading text-2xl font-black text-[#155fc4]">
-                {i + 1}
-              </div>
-            </div>
-            <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{color: '#155fc4'}}>
-              {['Start here', 'Expert review', 'We handle it'][i]}
-            </p>
-            <h3 className="font-heading text-[1.2rem] font-bold leading-snug text-[#0b2a6b] mb-2">
-              {step.title}
-            </h3>
-            <p className="font-body text-sm leading-relaxed text-[#507090]">
-              {step.description}
-            </p>
-            {/* Arrow connector */}
-            {i < steps.length - 1 && (
-              <div className="hidden md:flex absolute -right-4 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white border items-center justify-center z-10 text-xs" style={{borderColor: 'rgba(21,95,196,0.18)', color: '#155fc4'}}>
-                →
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </FadeInUp>
-
-    {/* 2 Info Cards */}
-    <FadeInUp delay={0.4} className="mb-8">
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="group relative overflow-hidden rounded-2xl border bg-white p-6 hover:shadow-lg transition-shadow duration-200" style={{borderColor: 'rgba(21,95,196,0.12)'}}>
-          <div className="flex items-start gap-4">
-            <div className="flex-shrink-0 h-10 w-10 rounded-xl flex items-center justify-center" style={{background: '#eef4ff', color: '#155fc4'}}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2v6" stroke="#155fc4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-                <circle cx="12" cy="12" r="9" stroke="#155fc4" strokeWidth="1.6"/>
-              </svg>
-            </div>
-            <div>
-              <p className="font-heading text-sm font-semibold mb-1 text-[#0b2a6b]">Document Audit Fee: GBP 15</p>
-              <p className="font-body text-sm leading-relaxed text-[#507090]">
-                The audit fee is fully adjusted against your full service fee when you proceed within 30 days.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="group relative overflow-hidden rounded-2xl border bg-white p-6 hover:shadow-lg transition-shadow duration-200" style={{borderColor: 'rgba(21,95,196,0.12)'}}>
-          <div className="flex items-start gap-4">
-            <div className="flex-shrink-0 h-10 w-10 rounded-xl flex items-center justify-center" style={{background: '#edfaf3', color: '#0a7a4a'}}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M3 12h18" stroke="#0a7a4a" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M3 6h18M3 18h18" stroke="#0a7a4a" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <div>
-              <p className="font-heading text-sm font-semibold mb-1 text-[#0b2a6b]">Clear Delivery</p>
-              <p className="font-body text-sm leading-relaxed text-[#507090]">
-                You receive guidance and updates on email and WhatsApp from document review to completion.
-              </p>
-              <p className="text-xs font-semibold mt-2" style={{color: '#155fc4'}}>Live updates</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </FadeInUp>
-
-    {/* CTA */}
-    <FadeInUp delay={0.6} className="text-center">
-      <Link href="/document-audit">
-        <Button variant="primary" className="text-lg py-4 px-8 shadow-lg transform transition-transform hover:-translate-y-1 rounded-full">
-          Start My Application
-        </Button>
-      </Link>
-    </FadeInUp>
-
-  </div>
-</section>
-
-      {/* SECTION 4: Pricing */}
-      <div className="py-6 lg:py-8" style={{background: 'linear-gradient(160deg, #f0f6ff 0%, #fafcff 50%, #eef5ff 100%)'}}>
-        <div className="mx-auto px-4 sm:px-6 lg:px-8">
-          {/* <div className="rounded-3xl border border-[#dbeaff] bg-[linear-gradient(180deg,#fbfdff_0%,#f3f8ff_100%)] p-2.5 sm:p-3.5 md:p-5 shadow-[0_10px_30px_rgba(30,74,135,0.07)]"> */}
-            <ServiceFees />
-          {/* </div> */}
-        </div>
-      </div>
-
-      <TrustFeaturesSection />
-
-      {/* Testimonials */}
-      <section className="py-10 lg:py-14 bg-white">
-        <div className="mx-auto px-4 sm:px-6 lg:px-8">
-          <FadeInUp className="mb-10 text-center">
-            <h2 className="text-2xl md:text-3xl font-heading font-bold text-primary mb-2">
-              Our Customers Say
-            </h2>
-            <p className="text-textMuted font-body text-sm md:text-base max-w-3xl mx-auto">
-              Real feedback from UK and US families who used FlyOCI for OCI, e-Visa, and document pre-check support.
-            </p>
-          </FadeInUp>
-
-          <FadeInUp delay={0.2} className="overflow-visible">
-            {/* <div className="rounded-1xl border border-[#dce9ff] bg-[#f6faff] p-4 md:p-4 shadow-[0_10px_28px_rgba(30,74,135,0.08)]"> */}
-              <TestimonialsCarousel initialItems={testimonials} staticItems={fallbackTestimonials} />
-        
-          </FadeInUp>
-        </div>
-      </section>
-
-      {/* SECTION 7: Final CTA */}
-      <section className="py-20 lg:py-18 bg-[linear-gradient(180deg,#f7fbff_0%,#ffffff_100%)]">
-        <div className="mx-auto px-4 sm:px-6 lg:px-8">
-          <FadeInUp>
-            <div className="rounded-3xl border border-[#d6e7ff] bg-[linear-gradient(180deg,#f8fbff_0%,#eef5ff_100%)] p-8 md:p-12 text-center shadow-[0_16px_40px_rgba(30,74,135,0.12)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2b5e93]">Final step</p>
-              <h2 className="mt-3 text-3xl md:text-4xl font-heading font-bold text-primary">Ready to Start?</h2>
-              <p className="mt-4 text-textMuted text-base md:text-lg max-w-3xl mx-auto leading-7">
-                Whether you need a new OCI, OCI update, e-Visa, or passport renewal, the first step is the same: get your documents checked.
-              </p>
-              <div className="mt-8 flex items-center justify-center gap-4 flex-wrap">
-                <Link href="/document-audit">
-                  <Button variant="primary" className="text-base md:text-lg py-3.5 px-8">
-                    Start My Document Audit
-                  </Button>
-                </Link>
-                <Link href="/services" className="inline-flex items-center rounded-xl border border-[#cfe2ff] bg-white px-5 py-3 text-sm md:text-base font-semibold text-primary hover:bg-[#f3f8ff] transition-colors">
-                  View Services &amp; Pricing
-                </Link>
-              </div>
-            </div>
-          </FadeInUp>
-        </div>
-      </section>
+      {moduleKeys.map((key) =>
+        renderHomepageModule(key, { testimonials, blogPosts, originCountries }),
+      )}
     </div>
   );
 }

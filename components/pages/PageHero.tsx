@@ -37,7 +37,7 @@ export function PageHero({
         {eyebrow && (
           <motion.div
             variants={pageFadeUp}
-            className={`mb-4 inline-flex items-center gap-2 rounded-full border border-[#cfe1fb] bg-white px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[#1c69dd] shadow-sm ${centered ? "mx-auto" : ""}`}
+            className={`mb-4 inline-flex items-center gap-2 rounded-full border border-[#cfe1fb] bg-white px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-[#1c69dd] shadow-sm ${centered ? "mx-auto" : ""}`}
           >
             <Sparkles className="h-3.5 w-3.5" />
             {eyebrow}
@@ -70,8 +70,8 @@ export function PageHero({
                 whileHover={reduceMotion ? undefined : { y: -4, scale: 1.02 }}
                 className="rounded-2xl border border-[#d9e8ff] bg-white px-4 py-3.5 text-left shadow-[0_8px_24px_rgba(30,74,135,0.08)] transition-shadow hover:shadow-[0_14px_32px_rgba(28,105,221,0.12)]"
               >
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#2b5e93]">{item.label}</p>
-                <p className="mt-1 text-sm font-bold text-[#041020]">{item.value}</p>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#2b5e93]">{item.label}</p>
+                <p className="mt-1 text-base font-bold text-[#041020]">{item.value}</p>
               </motion.div>
             ))}
           </motion.div>

@@ -1,44 +1,45 @@
 "use client";
 
-import { Bell, Search, LogOut, User, TrendingUp, FileText } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
-import { motion } from "framer-motion";
+import {
+  Bell,
+  Filter,
+  LogOut,
+  Menu,
+  Search,
+  User,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAdminAuth } from "@/context/AdminAuthContext";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { getAdminAlerts } from "@/lib/admin-auth";
-import { adminSearch, type AdminSearchResult } from "@/lib/admin-auth";
-import { AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
-import { useCallback } from "react";
+import {
+  titleForAdminPath,
+  useAdminPageChrome,
+} from "@/components/console/AdminPageChromeContext";
 
-
-
-  function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
-}
-
-
-export function TopHeader() {
+export function TopHeader({
+  mobileOpen = false,
+  onToggleMobileNav,
+}: {
+  mobileOpen?: boolean;
+  onToggleMobileNav?: () => void;
+}) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [openAlertCount, setOpenAlertCount] = useState(0);
-  // const [notifications, setNotifications] = useState<Array<{ id: string | number; type: string; message: string; timestamp: string }>>([]);
   const [notifications, setNotifications] = useState<import("@/lib/admin-auth").AdminNotification[]>([]);
   const { logout, adminUser } = useAdminAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const { chrome, chromeRef } = useAdminPageChrome();
+
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-const [searchResults, setSearchResults] = useState<AdminSearchResult | null>(null);
-const [searchLoading, setSearchLoading] = useState(false);
-const [searchOpen, setSearchOpen] = useState(false);
-const searchRef = useRef<HTMLDivElement | null>(null);
-const debouncedQuery = useDebounce(searchQuery, 350);
   const notificationMenuRef = useRef<HTMLDivElement | null>(null);
+  const filtersRef = useRef<HTMLDivElement | null>(null);
+
   const roleLabelMap: Record<string, string> = {
     admin: "Admin",
     ops_manager: "Operations Manager",
@@ -47,6 +48,13 @@ const debouncedQuery = useDebounce(searchQuery, 350);
     support_agent: "Support Agent",
   };
   const roleLabel = roleLabelMap[String(adminUser?.role || "")] || "Staff";
+
+  const pageTitle = chrome?.title || titleForAdminPath(pathname || "/admin");
+  const PageIcon = chrome?.icon;
+  const hasFilters = Boolean(chrome?.filtersContent);
+  const hasSearch = Boolean(chrome?.search);
+  const hasActions = Boolean(chrome?.actions);
+  const activeFilterCount = chrome?.activeFilterCount ?? 0;
 
   const loadAlertSummary = useCallback(async (markRead = false) => {
     try {
@@ -68,6 +76,14 @@ const debouncedQuery = useDebounce(searchQuery, 350);
   }, []);
 
   useEffect(() => {
+    setFiltersOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!hasFilters) setFiltersOpen(false);
+  }, [hasFilters]);
+
+  useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node;
       if (profileMenuRef.current && !profileMenuRef.current.contains(target)) {
@@ -75,6 +91,9 @@ const debouncedQuery = useDebounce(searchQuery, 350);
       }
       if (notificationMenuRef.current && !notificationMenuRef.current.contains(target)) {
         setShowNotificationMenu(false);
+      }
+      if (filtersRef.current && !filtersRef.current.contains(target)) {
+        setFiltersOpen(false);
       }
     };
 
@@ -110,255 +129,279 @@ const debouncedQuery = useDebounce(searchQuery, 350);
     }
   };
 
-const runSearch = useCallback(async (q: string) => {
-  if (q.trim().length < 2) { setSearchResults(null); return; }
-  setSearchLoading(true);
-  try {
-    const results = await adminSearch(q);
-    setSearchResults(results);
-    setSearchOpen(true);
-  } catch {
-    setSearchResults(null);
-  } finally {
-    setSearchLoading(false);
-  }
-}, []);
-
-useEffect(() => { void runSearch(debouncedQuery); }, [debouncedQuery, runSearch]);
-
-
-const totalResults = searchResults
-  ? (searchResults.cases?.length ?? 0) + (searchResults.customers?.length ?? 0) + (searchResults.leads?.length ?? 0)
-  : 0;
-
-
-
   return (
-    <header className="bg-white border-b border-[0.5px] border-[#D9E1EA] sticky top-0 z-10">
-      <div className="h-16 flex items-center justify-between gap-4 px-6">
-      {/* Search Bar */}
-      {/* <div className="flex-1 max-w-lg">
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-[#009877]" />
-          <input 
-            type="text" 
-            placeholder="Search cases, customers, or leads..." 
-            className="w-full pl-9 pr-4 py-2.5 bg-[#F8FAFC] border border-[0.5px] border-[#D9E1EA] rounded-[12px] text-sm font-body focus:outline-none focus:ring-2 focus:ring-[#009877]/20 focus:border-[#009877] transition-all text-slate-900 placeholder:text-slate-500"
-          />
-        </div>
-      </div> */}
-
-
-<div className="flex-1 max-w-lg relative" ref={searchRef}>
-  <div className="relative group">
-    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-[#009877]" />
-    <input
-      type="text"
-      value={searchQuery}
-      onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(e.target.value.length >= 2); }}
-      onFocus={() => { if (searchQuery.length >= 2) setSearchOpen(true); }}
-      placeholder="Search cases, customers, or leads..."
-      className="w-full pl-9 pr-8 py-2.5 bg-[#F8FAFC] border border-[0.5px] border-[#D9E1EA] rounded-[12px] text-sm font-body focus:outline-none focus:ring-2 focus:ring-[#009877]/20 focus:border-[#009877] transition-all text-slate-900 placeholder:text-slate-500"
-    />
-    {searchQuery && (
-      <button onClick={() => { setSearchQuery(""); setSearchResults(null); setSearchOpen(false); }}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-        <X className="w-3.5 h-3.5" />
-      </button>
-    )}
-  </div>
-
-  <AnimatePresence>
-    {searchOpen && (
-      <motion.div
-        initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-        className="absolute top-full left-0 right-0 mt-2 bg-white rounded-[12px] border border-[#D9E1EA] shadow-[0_18px_36px_rgba(15,42,67,0.12)] z-30 overflow-hidden"
-      >
-        {searchLoading && (
-          <div className="px-4 py-4 text-sm text-[#627D98] flex items-center gap-2">
-            <div className="w-3.5 h-3.5 border-2 border-[#009877] border-t-transparent rounded-full animate-spin" />
-            Searching...
-          </div>
-        )}
-
-        {!searchLoading && searchResults && totalResults === 0 && (
-          <p className="px-4 py-4 text-sm text-[#627D98]">No results for <span className="font-medium text-[#102A43]">"{searchQuery}"</span></p>
-        )}
-
-        {!searchLoading && searchResults && totalResults > 0 && (
-          <div className="max-h-[400px] overflow-y-auto divide-y divide-[#F1F5F9]">
-
-            {searchResults.cases?.length > 0 && (
-              <div className="p-3">
-                <p className="text-[10px] font-semibold text-[#829AB1] uppercase tracking-wider mb-2">Cases</p>
-                {searchResults.cases.map((c) => (
-                  <button key={c.id} onClick={() => { setSearchOpen(false); setSearchQuery(""); router.push(`/admin/kanban?applicationId=${c.id}`); }}
-                    className="w-full text-left px-3 py-2 rounded-[8px] hover:bg-[#F5F7FA] flex items-center gap-3">
-                    <FileText className="w-4 h-4 text-[#33A1FD] shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-[#102A43]">{c.reference_number}</p>
-                      <p className="text-xs text-[#627D98]">{c.customer_name} • {c.service_name}</p>
-                    </div>
-                    <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[#F1F5F9] text-[#486581]">{c.application_status}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {searchResults.customers?.length > 0 && (
-              <div className="p-3">
-                <p className="text-[10px] font-semibold text-[#829AB1] uppercase tracking-wider mb-2">Customers</p>
-                {searchResults.customers.map((c) => (
-                  <button key={c.id} onClick={() => { setSearchOpen(false); setSearchQuery(""); router.push(`/admin/customers/${c.id}`); }}
-                    className="w-full text-left px-3 py-2 rounded-[8px] hover:bg-[#F5F7FA] flex items-center gap-3">
-                    <User className="w-4 h-4 text-[#009877] shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-[#102A43]">{c.full_name}</p>
-                      <p className="text-xs text-[#627D98]">{c.email ?? c.phone}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {searchResults.leads?.length > 0 && (
-              <div className="p-3">
-                <p className="text-[10px] font-semibold text-[#829AB1] uppercase tracking-wider mb-2">Leads</p>
-                {searchResults.leads.map((l) => (
-                  <button key={l.id} onClick={() => { setSearchOpen(false); setSearchQuery(""); router.push(`/admin/kanban?applicationId=${l.id}`); }}
-                    className="w-full text-left px-3 py-2 rounded-[8px] hover:bg-[#F5F7FA] flex items-center gap-3">
-                    <TrendingUp className="w-4 h-4 text-[#B87333] shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-[#102A43]">{l.reference_number}</p>
-                      <p className="text-xs text-[#627D98]">{l.customer_name} • {l.stage}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </motion.div>
-    )}
-  </AnimatePresence>
-</div>
-
-
-      <div className="flex items-center gap-3">
-
-
-        {/* Notifications */}
-        
-        <div ref={notificationMenuRef} className="relative">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="relative p-2 text-slate-600 hover:bg-[#F5F7FA] rounded-full transition-colors"
-            onClick={() => {
-              setShowNotificationMenu((prev) => {
-                const next = !prev;
-                // when opening the menu, mark visible alerts as read on the server
-                if (next) void loadAlertSummary(true);
-                return next;
-              });
-              setShowProfileMenu(false);
-            }}
-            aria-label="Open notifications"
-            aria-expanded={showNotificationMenu}
-          >
-            <Bell className="w-5 h-5" />
-            {openAlertCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1.5 bg-red-500 border-2 border-white rounded-full text-[10px] leading-none font-semibold text-white inline-flex items-center justify-center">
-                {openAlertCount > 99 ? "99+" : openAlertCount}
-              </span>
-            )}
-          </motion.button>
-
-          {showNotificationMenu && (
-            <div className="absolute right-0 mt-2 w-[340px] max-w-[90vw] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] z-20 overflow-hidden">
-              <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
-                <p className="text-sm font-semibold text-[#102A43] font-heading">Notifications</p>
-               {["admin", "ops_manager"].includes(adminUser?.role || "") && (
-  <button
-    type="button"
-    onClick={() => {
-      setShowNotificationMenu(false);
-      router.push("/admin/alerts");
-    }}
-    className="text-xs text-[#009877] hover:underline"
-  >
-    View all
-  </button>
-)}
-              </div>
-
-              <div className="max-h-80 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <p className="px-4 py-6 text-sm text-[#627D98]">No notifications yet.</p>
-                ) : (
-                  notifications.slice(0, 8).map((notification) => (
-                    <button
-                      key={String(notification.id)}
-                      type="button"
-                      onClick={() => openNotification(notification)}
-                      className="w-full text-left px-4 py-3 border-b border-[#F1F5F9] last:border-b-0 hover:bg-[#F8FAFC] transition-colors"
-                    >
-                      <p className="text-sm text-[#102A43] leading-snug">{notification.message}</p>
-                      <p className="mt-1 text-[11px] text-[#829AB1]">
-                        {notification.type_label ? `${notification.type_label} · ` : ""}
-                        {new Date(notification.timestamp).toLocaleString([], { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}
-                      </p>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div
-          ref={profileMenuRef}
-          className="relative pl-2 sm:pl-3 border-l border-[0.5px] border-[#D9E1EA]"
-        >
+    <header className="bg-white border-b border-[#D9E1EA] sticky top-0 z-20 shadow-[0_1px_0_rgba(15,42,67,0.03)]">
+      <div className="min-h-[3.75rem] flex items-center gap-2.5 md:gap-3.5 px-3 md:px-5 py-2.5 sm:py-0">
+        {onToggleMobileNav ? (
           <button
-            onClick={() => setShowProfileMenu((prev) => !prev)}
-            className="inline-flex items-center gap-2 rounded-[12px] px-1.5 py-1 hover:bg-[#F5F7FA] transition-colors"
-            aria-label="Profile menu"
+            type="button"
+            onClick={onToggleMobileNav}
+            className="lg:hidden inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-[#D9E1EA] bg-white text-[#486581] hover:bg-[#F5F7FA]"
+            aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+            aria-expanded={mobileOpen}
           >
-            <div className="w-9 h-9 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[0.5px] border-[#009877]/30">
-              <User className="w-4.5 h-4.5" />
-            </div>
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
+        ) : null}
 
-         {showProfileMenu && (
-  <div className="absolute right-0 mt-2 w-[220px] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-20">
-    <div className="flex items-center gap-3 mb-3">
-      <div className="w-10 h-10 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[#009877]/30 shrink-0 text-sm font-bold font-heading">
-        {adminUser?.full_name?.charAt(0)?.toUpperCase() ?? "S"}
-      </div>
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-[#102A43] font-heading truncate">
-          {adminUser?.full_name || adminUser?.username || "Staff"}
-        </p>
-        <p className="text-xs text-[#627D98] truncate">{roleLabel}</p>
-      </div>
-    </div>
-    <div className="border-t border-[#E5EAF0] pt-2">
-      <button
-        onClick={() => {
-          setShowProfileMenu(false);
-          logout();
-        }}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm text-[#334E68] hover:bg-[#F5F7FA]"
-      >
-        <LogOut className="w-4 h-4" /> Logout
-      </button>
-    </div>
-  </div>
-)}
+        {/* Page identity — shrinks when search is present */}
+        <div
+          className={`min-w-0 shrink-0 ${
+            hasSearch ? "max-w-[36%] sm:max-w-[220px] md:max-w-[260px] lg:max-w-[300px]" : "max-w-[55%] sm:max-w-[300px] md:max-w-[360px]"
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            {PageIcon ? (
+              <span className="hidden md:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#009877]/10 text-[#006F57]">
+                <PageIcon className="h-[18px] w-[18px]" />
+              </span>
+            ) : null}
+            <div className="min-w-0">
+              <h1 className="truncate text-base sm:text-[17px] md:text-lg font-heading font-semibold text-[#102A43] leading-tight">
+                {pageTitle}
+              </h1>
+              {chrome?.subtitle ? (
+                <p className="hidden xl:block truncate text-xs text-[#829AB1] leading-tight mt-0.5">
+                  {chrome.subtitle}
+                </p>
+              ) : null}
+            </div>
+          </div>
         </div>
+
+        {/* Search + Filters — primary focus of the bar */}
+        <div className="flex-1 min-w-0 flex items-center justify-center gap-2 sm:gap-2.5">
+          {hasSearch ? (
+            <div className="relative w-full max-w-lg group">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8A9BB0] group-focus-within:text-[#009877]" />
+              <input
+                type="search"
+                value={chrome?.search?.value ?? ""}
+                onChange={(e) => chromeRef.current?.search?.onChange(e.target.value)}
+                placeholder={chrome?.search?.placeholder || "Search…"}
+                className="w-full rounded-[10px] border border-[#D9E1EA] bg-[#F8FAFC] py-2 sm:py-2.5 pl-9 sm:pl-10 pr-9 text-[15px] text-[#102A43] placeholder:text-[#8A9BB0] focus:outline-none focus:ring-2 focus:ring-[#009877]/20 focus:border-[#009877] transition-all"
+              />
+              {chrome?.search?.value ? (
+                <button
+                  type="button"
+                  onClick={() => chromeRef.current?.search?.onChange("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8A9BB0] hover:text-[#486581]"
+                  aria-label="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="hidden md:block flex-1" />
+          )}
+
+          {hasFilters ? (
+            <div className="relative shrink-0" ref={filtersRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setFiltersOpen((v) => !v);
+                  setShowNotificationMenu(false);
+                  setShowProfileMenu(false);
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-[10px] border px-2.5 sm:px-3 py-2 sm:py-2.5 text-[15px] font-semibold transition-colors ${
+                  filtersOpen || activeFilterCount > 0
+                    ? "border-[#009877] bg-[#E6F7F2] text-[#006F57]"
+                    : "border-[#D9E1EA] bg-white text-[#486581] hover:bg-[#F5F7FA]"
+                }`}
+                aria-expanded={filtersOpen}
+                aria-haspopup="dialog"
+                aria-label="Open filters"
+              >
+                <Filter className="h-4 w-4" />
+                <span className="hidden sm:inline">Filters</span>
+                {activeFilterCount > 0 ? (
+                  <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#009877] text-[11px] font-bold text-white inline-flex items-center justify-center">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </button>
+
+              <AnimatePresence>
+                {filtersOpen ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="absolute right-0 top-full mt-2 w-[min(calc(100vw-1.5rem),420px)] rounded-[14px] border border-[#D9E1EA] bg-white shadow-[0_20px_40px_rgba(15,42,67,0.14)] z-40 overflow-hidden"
+                    role="dialog"
+                    aria-label="Page filters"
+                  >
+                    <div className="flex items-center justify-between gap-2 border-b border-[#E5EAF0] px-4 py-3">
+                      <p className="text-base font-heading font-semibold text-[#102A43]">Filters</p>
+                      <div className="flex items-center gap-2">
+                        {activeFilterCount > 0 && chrome?.onClearFilters ? (
+                          <button
+                            type="button"
+                            onClick={() => chromeRef.current?.onClearFilters?.()}
+                            className="text-sm font-semibold text-[#627D98] hover:text-[#B42318]"
+                          >
+                            Clear all
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => setFiltersOpen(false)}
+                          className="rounded-full p-1 text-[#829AB1] hover:bg-[#F5F7FA] hover:text-[#486581]"
+                          aria-label="Close filters"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-[min(70vh,480px)] overflow-y-auto p-4 space-y-3.5 text-[15px]">
+                      {chrome?.filtersContent}
+                    </div>
+                    {(chromeRef.current ?? chrome)?.meta ? (
+                      <div className="border-t border-[#E5EAF0] px-4 py-2.5 text-sm text-[#627D98]">
+                        {(chromeRef.current ?? chrome)?.meta}
+                      </div>
+                    ) : null}
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Actions + notifications + profile */}
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {hasActions ? (
+            <div className="hidden md:flex items-center gap-1.5 max-w-[280px] lg:max-w-none overflow-hidden">
+              {chrome?.actions}
+            </div>
+          ) : null}
+
+          <div ref={notificationMenuRef} className="relative">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="relative p-2 text-slate-600 hover:bg-[#F5F7FA] rounded-full transition-colors"
+              onClick={() => {
+                setShowNotificationMenu((prev) => {
+                  const next = !prev;
+                  if (next) void loadAlertSummary(true);
+                  return next;
+                });
+                setShowProfileMenu(false);
+                setFiltersOpen(false);
+              }}
+              aria-label="Open notifications"
+              aria-expanded={showNotificationMenu}
+            >
+              <Bell className="w-5 h-5" />
+              {openAlertCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1.5 bg-red-500 border-2 border-white rounded-full text-[10px] leading-none font-semibold text-white inline-flex items-center justify-center">
+                  {openAlertCount > 99 ? "99+" : openAlertCount}
+                </span>
+              )}
+            </motion.button>
+
+            {showNotificationMenu && (
+              <div className="absolute right-0 mt-2 w-[min(340px,calc(100vw-1.5rem))] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] z-30 overflow-hidden">
+                <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
+                  <p className="text-base font-semibold text-[#102A43] font-heading">Notifications</p>
+                  {["admin", "ops_manager"].includes(adminUser?.role || "") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNotificationMenu(false);
+                        router.push("/admin/alerts");
+                      }}
+                      className="text-sm text-[#009877] hover:underline"
+                    >
+                      View all
+                    </button>
+                  )}
+                </div>
+
+                <div className="max-h-80 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <p className="px-4 py-6 text-[15px] text-[#627D98]">No notifications yet.</p>
+                  ) : (
+                    notifications.slice(0, 8).map((notification) => (
+                      <button
+                        key={String(notification.id)}
+                        type="button"
+                        onClick={() => openNotification(notification)}
+                        className="w-full text-left px-4 py-3 border-b border-[#F1F5F9] last:border-b-0 hover:bg-[#F8FAFC] transition-colors"
+                      >
+                        <p className="text-[15px] text-[#102A43] leading-snug">{notification.message}</p>
+                        <p className="mt-1 text-xs text-[#829AB1]">
+                          {notification.type_label ? `${notification.type_label} · ` : ""}
+                          {new Date(notification.timestamp).toLocaleString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            day: "2-digit",
+                            month: "short",
+                          })}
+                        </p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div ref={profileMenuRef} className="relative pl-1 sm:pl-2 border-l border-[#D9E1EA]">
+            <button
+              onClick={() => {
+                setShowProfileMenu((prev) => !prev);
+                setShowNotificationMenu(false);
+                setFiltersOpen(false);
+              }}
+              className="inline-flex items-center gap-2 rounded-[12px] px-1 py-1 hover:bg-[#F5F7FA] transition-colors"
+              aria-label="Profile menu"
+            >
+              <div className="w-8 h-8 sm:w-9 sm:h-9 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[#009877]/30">
+                <User className="w-4 h-4" />
+              </div>
+            </button>
+
+            {showProfileMenu && (
+              <div className="absolute right-0 mt-2 w-[220px] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-30">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[#009877]/30 shrink-0 text-sm font-bold font-heading">
+                    {adminUser?.full_name?.charAt(0)?.toUpperCase() ?? "S"}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-semibold text-[#102A43] font-heading truncate">
+                      {adminUser?.full_name || adminUser?.username || "Staff"}
+                    </p>
+                    <p className="text-sm text-[#627D98] truncate">{roleLabel}</p>
+                  </div>
+                </div>
+                <div className="border-t border-[#E5EAF0] pt-2">
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      logout();
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-[10px] border border-[#D9E1EA] px-3 py-2.5 text-[15px] text-[#334E68] hover:bg-[#F5F7FA]"
+                  >
+                    <LogOut className="w-4 h-4" /> Logout
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Mobile / tablet actions — only when needed, compact scroll row */}
+      {hasActions ? (
+        <div className="md:hidden flex items-center gap-2 px-3 pb-2.5 overflow-x-auto scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {chrome?.actions}
+        </div>
+      ) : null}
     </header>
   );
 }

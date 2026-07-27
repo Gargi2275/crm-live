@@ -14,6 +14,8 @@ interface TravelDetails {
 interface EVisaState {
   fileNumber: string | null;
   visaDuration: "1-Year" | "5-Year" | null;
+  originOptionId: number | null;
+  originSlug: string;
   email: string;
   phone: string;
   countryCode: string;
@@ -43,6 +45,8 @@ interface EVisaContextType {
 const initialState: EVisaState = {
   fileNumber: null,
   visaDuration: null,
+  originOptionId: null,
+  originSlug: "",
   email: "",
   phone: "",
   countryCode: "+44",

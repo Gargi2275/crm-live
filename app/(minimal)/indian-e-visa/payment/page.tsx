@@ -5,10 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { Navbar } from "@/components/Navbar";
-import { Footer } from "@/components/Footer";
-import { CookieBanner } from "@/components/CookieBanner";
-import PageTransition from "@/components/PageTransition";
+import { ProgressStepper } from "@/components/ProgressStepper";
 import { Button } from "@/components/ui/Button";
 import { eVisaApi } from "@/lib/api-client";
 import {
@@ -46,6 +43,11 @@ export default function EVisaPaymentPage() {
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState("");
 
+  const docsUrl = (resolvedCase: string, url?: string) => {
+    if (url && url.startsWith("/")) return url;
+    return `/indian-e-visa/upload?case=${encodeURIComponent(resolvedCase)}`;
+  };
+
   useEffect(() => {
     const loadCase = async () => {
       if (!caseNumber) {
@@ -62,7 +64,9 @@ export default function EVisaPaymentPage() {
         setServiceName(app.service_name || "Indian e-Visa assistance");
         setPaymentConfirmed(Boolean(app.payment_confirmed));
         if (app.payment_confirmed) {
-          setUploadUrl(`/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}`);
+          const next = docsUrl(caseNumber);
+          setUploadUrl(next);
+          router.replace(next);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Unable to load payment details.");
@@ -72,7 +76,7 @@ export default function EVisaPaymentPage() {
     };
 
     void loadCase();
-  }, [caseNumber]);
+  }, [caseNumber, router]);
 
   useEffect(() => {
     const { sessionId, paymentKind, reference } = readStripeReturnParams();
@@ -92,21 +96,22 @@ export default function EVisaPaymentPage() {
         if (!active) return;
         clearStripeReturnParams();
         setPaymentConfirmed(true);
-        setUploadUrl(response.data.upload_url || `/indian-e-visa/upload?case=${encodeURIComponent(resolvedCase)}`);
+        const next = docsUrl(resolvedCase, response.data.upload_url);
+        setUploadUrl(next);
+        // After payment → documents (simple)
+        router.replace(next);
       } catch (e) {
         if (!active) return;
         setError(e instanceof Error ? e.message : "Payment verification failed.");
       } finally {
-        if (active) {
-          setPaying(false);
-        }
+        if (active) setPaying(false);
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [caseNumber]);
+  }, [caseNumber, router]);
 
   const displayAmount = useMemo(() => {
     if (amountMinor === null) return null;
@@ -131,82 +136,77 @@ export default function EVisaPaymentPage() {
     }
   };
 
-  const handleContinue = () => {
-    const target =
-      uploadUrl && uploadUrl.startsWith("/")
-        ? uploadUrl
-        : `/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}`;
-    router.push(target);
-  };
-
   return (
-    <div className="min-h-[100svh] flex flex-col">
-      <Navbar />
-      <PageTransition>
-        <main className="flex-1 pt-28 pb-20 px-4 sm:px-6 lg:px-8 bg-[linear-gradient(180deg,#f4f9ff_0%,#ffffff_70%)]">
-          <section className="max-w-4xl mx-auto">
-            <div className="rounded-3xl border border-[#d7e5fb] bg-white p-6 sm:p-8 shadow-[0_18px_48px_rgba(30,74,135,0.08)]">
-              <p className="inline-flex items-center rounded-full border border-[#cfe2ff] bg-[#eef6ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2b5e93]">
-                Indian e-Visa / Payment
-              </p>
-              <h1 className="mt-3 text-3xl font-heading font-bold text-primary">Complete Your Payment</h1>
-              <p className="mt-2 text-sm text-slate-600">
-                Pay securely with Stripe to continue to document upload.
-              </p>
+    <div className="w-full bg-[#F4F6F9] text-[#102A43]">
+      <div className="mx-auto w-full max-w-[720px] px-3 py-4 sm:px-5 sm:py-5">
+        <div className="mb-4 max-w-md">
+          <ProgressStepper currentStep={1} />
+        </div>
 
-              {loading ? (
-                <div className="mt-8 flex items-center gap-2 text-slate-600">
-                  <Loader2 className="h-5 w-5 animate-spin" /> Loading payment summary...
-                </div>
-              ) : (
-                <>
-                  <div className="mt-7 rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
-                    <h2 className="text-lg font-semibold text-primary">Payment Summary</h2>
-                    <div className="mt-4 space-y-2 text-sm text-slate-700">
-                      <p className="flex justify-between">
-                        <span>Case number</span>
-                        <strong>{caseNumber || "-"}</strong>
-                      </p>
-                      <p className="flex justify-between">
-                        <span>Service</span>
-                        <strong>{serviceName}</strong>
-                      </p>
-                      {displayAmount ? (
-                        <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary">
-                          <span className="font-semibold">Total due</span>
-                          <strong>{displayAmount}</strong>
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
+        <div className="rounded-xl border border-[#E1E7EF] bg-white p-5 shadow-sm sm:p-6">
+          <h1 className="text-[22px] font-semibold text-[#0F1F3D]">Forms & Payment</h1>
+          <p className="mt-1 text-[13px] text-[#627D98]">
+            Pay securely — then upload your documents on the next screen.
+          </p>
 
-                  {paymentConfirmed ? (
-                    <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                      Payment is confirmed. You can continue to document upload.
-                    </div>
-                  ) : null}
-
-                  {error ? (
-                    <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
-                  ) : null}
-
-                  <div className="mt-6 flex flex-wrap gap-3">
-                    {paymentConfirmed ? (
-                      <Button onClick={handleContinue}>Upload Documents</Button>
-                    ) : (
-                      <Button onClick={() => void handlePayment()} isLoading={paying} disabled={!caseNumber}>
-                        Pay with Stripe
-                      </Button>
-                    )}
-                  </div>
-                </>
-              )}
+          {loading ? (
+            <div className="mt-6 flex items-center gap-2 text-[13px] text-[#627D98]">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
-          </section>
-        </main>
-      </PageTransition>
-      <Footer />
-      <CookieBanner />
+          ) : (
+            <>
+              <div className="mt-5 rounded-lg border border-[#E8EEF6] bg-[#F7F9FC] p-4">
+                <div className="space-y-2 text-[13px] text-[#334E68]">
+                  <p className="flex justify-between gap-3">
+                    <span>Case</span>
+                    <strong className="text-[#0F1F3D]">{caseNumber || "-"}</strong>
+                  </p>
+                  <p className="flex justify-between gap-3">
+                    <span>Service</span>
+                    <strong className="text-right text-[#0F1F3D]">{serviceName}</strong>
+                  </p>
+                  {displayAmount ? (
+                    <p className="flex justify-between gap-3 border-t border-[#E8EEF6] pt-2 text-[15px]">
+                      <span className="font-semibold">Total due</span>
+                      <strong className="text-[#1A56DB]">{displayAmount}</strong>
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              {paymentConfirmed ? (
+                <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[13px] text-emerald-800">
+                  Payment confirmed. Taking you to documents…
+                </div>
+              ) : null}
+
+              {error ? (
+                <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-[13px] text-rose-700">
+                  {error}
+                </p>
+              ) : null}
+
+              <div className="mt-5">
+                {paymentConfirmed ? (
+                  <Button
+                    onClick={() =>
+                      router.push(
+                        uploadUrl || `/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}`
+                      )
+                    }
+                  >
+                    Upload documents
+                  </Button>
+                ) : (
+                  <Button onClick={() => void handlePayment()} isLoading={paying} disabled={!caseNumber}>
+                    Pay & continue to documents
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

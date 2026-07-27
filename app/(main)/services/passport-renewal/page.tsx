@@ -23,7 +23,7 @@ export default function PassportRenewalPage() {
         ],
         footnote: "Fee is confirmed after evaluating your exact case route.",
         ctaLabel: "Start application",
-        ctaHref: "/document-audit",
+        ctaHref: "/dashboard/document-audit?start=1&service=passport_renewal",
       }}
       stats={[
         { label: "Who This Helps", value: "Adults, children, and family renewals" },

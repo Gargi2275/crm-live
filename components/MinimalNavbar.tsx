@@ -82,67 +82,15 @@ export function MinimalNavbar() {
         {/* Desktop Links */}
         <div className="hidden md:flex items-center gap-8">
           {isRegistrationPage ? (
-            <>
-              <Link href="/services/new-oci" className="font-body font-semibold text-[#486581] hover:text-primary transition-colors">
-                OCI
-              </Link>
-              <Link href="/indian-e-visa" className="font-body font-semibold text-primary border-b-2 border-primary pb-1">
-                Indian e-Visa
-              </Link>
-              <Link href="/track" className="font-body font-semibold text-[#486581] hover:text-primary transition-colors">
-                Track Application
-              </Link>
-              <Link href="/contact" className="font-body font-semibold text-[#486581] hover:text-primary transition-colors">
-                Contact
-              </Link>
-              {loading ? (
-                <span className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-500">
-                  Loading...
-                </span>
-              ) : isAuthenticated ? (
-                <div className="relative" ref={profileMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setProfileMenuOpen((prev) => !prev)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#bfd3ff] bg-white text-primary hover:bg-[#f6faff]"
-                    aria-label="Open profile menu"
-                    aria-haspopup="menu"
-                    aria-expanded={profileMenuOpen}
-                  >
-                    <CircleUserRound className="h-5 w-5" />
-                  </button>
-                  {profileMenuOpen && (
-                    <div className="absolute right-0 mt-2 w-44 rounded-xl border border-[#d6e2f5] bg-white shadow-[0_14px_34px_rgba(20,48,96,0.15)] p-2" role="menu">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setProfileMenuOpen(false);
-                          router.push("/dashboard");
-                        }}
-                        className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-[#294d84] hover:bg-[#f6faff]"
-                      >
-                        Dashboard
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleLogout}
-                        disabled={isLoggingOut}
-                        className="w-full text-left rounded-lg px-3 py-2 text-sm font-medium text-[#d04b4b] hover:bg-[#fff1f1] disabled:opacity-60"
-                      >
-                        {isLoggingOut ? "Logging out..." : "Logout"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <Link
-                  href="/track"
-                  className="rounded-lg border border-[#009877] px-4 py-2 text-sm font-semibold text-[#006F57] transition-colors hover:bg-[#ECFAF5]"
-                >
-                  Track
-                </Link>
-              )}
-            </>
+            <a
+              href="https://wa.me/442078086162"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 font-body font-semibold text-[#486581] hover:text-primary transition-colors"
+            >
+              <MessageCircle className="w-5 h-5" />
+              Need help?
+            </a>
           ) : (
             <>
               {showFileNumber && (
@@ -155,7 +103,7 @@ export function MinimalNavbar() {
                 Track Application
               </Link>
               <a
-                href="https://wa.me/1234567890" // Decorative
+                href="https://wa.me/442078086162"
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-2 font-body font-semibold text-secondary hover:opacity-80 transition-opacity"
@@ -245,59 +193,14 @@ export function MinimalNavbar() {
               </div>
 
               {isRegistrationPage ? (
-                <>
-                  <Link
-                    href="/services/new-oci"
-                    className="font-body font-bold text-lg text-[#486581]"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    OCI
-                  </Link>
-                  <Link
-                    href="/indian-e-visa"
-                    className="font-body font-bold text-lg text-primary"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    Indian e-Visa
-                  </Link>
-                  <Link
-                    href="/track"
-                    className="font-body font-bold text-lg text-[#486581]"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    Track Application
-                  </Link>
-                  <Link
-                    href="/contact"
-                    className="font-body font-bold text-lg text-[#486581]"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    Contact
-                  </Link>
-                  {loading ? (
-                    <span className="font-body font-bold text-lg text-slate-500">Loading...</span>
-                  ) : isAuthenticated ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMobileMenuOpen(false);
-                          router.push("/dashboard");
-                        }}
-                        className="text-left font-body font-bold text-lg text-primary"
-                      >
-                        Dashboard
-                      </button>
-                      <button
-                        onClick={handleLogout}
-                        disabled={isLoggingOut}
-                        className="text-left font-body font-bold text-lg text-red-600 disabled:opacity-60"
-                      >
-                        {isLoggingOut ? "Logging out..." : "Logout"}
-                      </button>
-                    </>
-                  ) : null}
-                </>
+                <a
+                  href="https://wa.me/442078086162"
+                  className="flex items-center gap-2 font-body font-bold text-lg text-secondary"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <MessageCircle className="w-5 h-5" />
+                  Need help?
+                </a>
               ) : (
                 <>
                   {showFileNumber && (
@@ -315,7 +218,7 @@ export function MinimalNavbar() {
                     Track Application
                   </Link>
                   <a
-                    href="https://wa.me/1234567890"
+                    href="https://wa.me/442078086162"
                     className="flex items-center gap-2 font-body font-bold text-lg text-secondary mt-2"
                     onClick={() => setMobileMenuOpen(false)}
                   >

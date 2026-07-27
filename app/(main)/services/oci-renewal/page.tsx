@@ -16,14 +16,10 @@ export default function OCIRenewalPage() {
         "Error prevention before submission",
       ]}
       pricing={{
-        lines: [
-          { label: "Service fee", value: "£78" },
-          { label: "Audit credit", value: "-£15" },
-          { label: "After audit", value: "£63", highlight: true },
-        ],
+        lines: [{ label: "Service fee", value: "£78", highlight: true }],
         footnote: "Best for passport change and transfer-related OCI updates.",
         ctaLabel: "Start application",
-        ctaHref: "/document-audit",
+        ctaHref: "/dashboard/document-audit?start=1&service=oci_renewal",
       }}
       stats={[
         { label: "Who This Helps", value: "Passport change and OCI transfer cases" },

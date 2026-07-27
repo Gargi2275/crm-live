@@ -16,6 +16,8 @@
 	--shadow-soft: 0 12px 36px rgba(18, 84, 150, 0.08);
 	--shadow-hover: 0 18px 48px rgba(18, 84, 150, 0.14);
 	--ease-premium: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Visament-matched stack (Roboto via next/font → --font-sans) */
+	--font-heading: var(--font-sans);
 }
 
 * {
@@ -38,6 +40,8 @@ body {
 	-ms-overflow-style: none;
 	scrollbar-width: none;
 	color: var(--text-body);
+	font-size: 1.0625rem; /* ~17px public body */
+	line-height: 1.65;
 	background:
 		radial-gradient(circle at 8% 0%, rgba(51, 161, 253, 0.12), transparent 32%),
 		radial-gradient(circle at 92% 14%, rgba(51, 161, 253, 0.09), transparent 36%),
@@ -160,6 +164,140 @@ body::-webkit-scrollbar {
   display: none;                /* Chrome/Safari */
 }
 
+/* Admin console: bump tiny utility sizes for readability */
+.admin-shell .text-xs {
+	font-size: 0.8125rem; /* 13px */
+	line-height: 1.35rem;
+}
+.admin-shell .text-\[10px\] {
+	font-size: 0.6875rem; /* 11px */
+	line-height: 1rem;
+}
+.admin-shell .text-\[11px\] {
+	font-size: 0.75rem; /* 12px */
+	line-height: 1.1rem;
+}
+.admin-shell .text-\[13px\] {
+	font-size: 0.875rem; /* 14px */
+	line-height: 1.25rem;
+}
+.admin-shell table {
+	font-size: 0.9375rem; /* 15px */
+}
+.admin-shell th {
+	font-size: 0.8125rem; /* 13px */
+}
+
 .swiper {
 	overflow: visible !important;
   }
+
+/* Public blog article body */
+.blog-prose {
+	font-size: 1.0625rem;
+	line-height: 1.85;
+	color: #3a4f66;
+}
+.blog-prose > *:first-child {
+	margin-top: 0;
+}
+.blog-prose h2 {
+	margin-top: 2.15rem;
+	margin-bottom: 0.8rem;
+	font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+	font-size: clamp(1.3rem, 2vw, 1.5rem);
+	font-weight: 700;
+	line-height: 1.3;
+	color: #0d1f2d;
+	scroll-margin-top: 6.5rem;
+	letter-spacing: -0.015em;
+}
+.blog-prose h3 {
+	margin-top: 1.6rem;
+	margin-bottom: 0.55rem;
+	font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+	font-size: 1.12rem;
+	font-weight: 600;
+	color: #0d1f2d;
+	scroll-margin-top: 6.5rem;
+}
+.blog-prose p {
+	margin-bottom: 1.1rem;
+}
+.blog-prose strong {
+	color: #0b2a6b;
+	font-weight: 700;
+}
+.blog-prose ul,
+.blog-prose ol {
+	margin: 0 0 1.1rem 1.35rem;
+}
+.blog-prose ul {
+	list-style: disc;
+}
+.blog-prose ol {
+	list-style: decimal;
+}
+.blog-prose li {
+	margin-bottom: 0.4rem;
+}
+.blog-prose li::marker {
+	color: #155fc4;
+}
+.blog-prose a {
+	color: #155fc4;
+	font-weight: 600;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.blog-prose table {
+	width: 100%;
+	margin: 1.4rem 0;
+	border-collapse: separate;
+	border-spacing: 0;
+	font-size: 0.92rem;
+	border: 1px solid rgba(21, 95, 196, 0.16);
+	border-radius: 0.85rem;
+	display: block;
+	overflow-x: auto;
+}
+.blog-prose thead {
+	background: linear-gradient(180deg, #eef4ff 0%, #e4eeff 100%);
+}
+.blog-prose th,
+.blog-prose td {
+	border-bottom: 1px solid rgba(21, 95, 196, 0.12);
+	border-right: 1px solid rgba(21, 95, 196, 0.08);
+	padding: 0.7rem 0.9rem;
+	text-align: left;
+	vertical-align: top;
+	min-width: 7rem;
+}
+.blog-prose th:last-child,
+.blog-prose td:last-child {
+	border-right: 0;
+}
+.blog-prose tr:last-child td {
+	border-bottom: 0;
+}
+.blog-prose th {
+	color: #0b2a6b;
+	font-weight: 700;
+	white-space: nowrap;
+}
+.blog-prose img {
+	max-width: 100%;
+	height: auto;
+	border-radius: 0.9rem;
+	margin: 1.2rem 0;
+	border: 1px solid rgba(21, 95, 196, 0.12);
+}
+.blog-prose blockquote {
+	margin: 1.4rem 0;
+	padding: 1rem 1.1rem;
+	border-left: 4px solid #155fc4;
+	background: #f3f8ff;
+	border-radius: 0 0.75rem 0.75rem 0;
+	color: #334e68;
+	font-weight: 500;
+}

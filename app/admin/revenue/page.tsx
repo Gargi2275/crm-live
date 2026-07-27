@@ -12,6 +12,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 import { motion } from "framer-motion";
 import { TrendingUp, BarChart3, Landmark } from "lucide-react";
 import toast from "react-hot-toast";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 export default function RevenuePage() {
   const { adminUser } = useAdminAuth();
@@ -31,6 +32,12 @@ export default function RevenuePage() {
   }, []);
 
   const isOwnRevenue = isStaffOwnRevenueDashboard(dashboardData, adminUser?.role);
+
+  useSetAdminPageChrome({
+    title: isOwnRevenue ? "My revenue" : "Revenue",
+    icon: TrendingUp,
+    syncKey: `${isOwnRevenue}|${dashboardData ? "loaded" : "loading"}`,
+  });
 
   const formatInr = (amount: number) => `₹${amount.toLocaleString("en-IN")}`;
   const adminKpiSnapshot = dashboardData?.kpi_snapshot;
@@ -73,7 +80,6 @@ export default function RevenuePage() {
         animate={{ opacity: 1, y: 0 }}
         className="space-y-4 font-body max-w-[1100px] mx-auto"
       >
-        <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">My revenue</h1>
         <p className="text-sm text-[#627D98]">
           {dashboardData?.staff_revenue_summary?.attribution_note ||
             "Revenue from cases where you are on the latest assigned task."}
@@ -150,8 +156,6 @@ export default function RevenuePage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="space-y-4 font-body max-w-[1300px] mx-auto"
     >
-      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Remittance / Revenue</h1>
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
           <p className="text-xs text-[#627D98]">Conversion</p>

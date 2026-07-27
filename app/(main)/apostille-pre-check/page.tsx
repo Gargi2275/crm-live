@@ -260,12 +260,12 @@ export default function ApostillePreCheckPage() {
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="rounded-3xl border border-[#d7e5f9] bg-white shadow-[0_16px_40px_rgba(20,60,106,0.1)]">
             <div className="border-b border-[#e8eef8] px-5 py-4 sm:px-6">
-              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#1d6fd1]">Free Pre-Check</p>
-              <h1 className="mt-1 font-heading text-2xl font-bold text-primary sm:text-3xl">
-                Submit Your Document for Review
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#1d6fd1]">1. Service</p>
+              <h1 className="mt-1 font-heading text-[22px] font-semibold text-primary sm:text-2xl">
+                Start your order
               </h1>
-              <p className="mt-1 text-sm text-[#627d98]">
-                No payment now. Fill in everything below and submit once — we review first, then send your quote.
+              <p className="mt-1 text-[13px] text-[#627d98]">
+                Free pre-check — no payment now. We review first, then send your quote.
               </p>
             </div>
 

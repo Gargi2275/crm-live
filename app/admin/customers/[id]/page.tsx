@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { User } from "lucide-react";
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { getAdminTokens } from "@/lib/admin-auth";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 type Customer = {
   id: number;
@@ -20,6 +22,17 @@ export default function CustomerDetailsPage() {
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const customerName = customer
+    ? `${customer.first_name || ""} ${customer.last_name || ""}`.trim()
+    : "";
+
+  useSetAdminPageChrome({
+    title: "Customer",
+    subtitle: customerName || undefined,
+    icon: User,
+    syncKey: `${loading}|${customerName}|${id}`,
+  });
 
   useEffect(() => {
     const fetchCustomer = async () => {
@@ -75,17 +88,6 @@ export default function CustomerDetailsPage() {
 
   return (
     <div className="p-6 md:p-10 bg-[#F5F7FA] min-h-screen">
-      
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-[#102A43]">
-          Customer Profile
-        </h1>
-        <p className="text-sm text-[#486581]">
-          Detailed information about the customer account
-        </p>
-      </div>
-
       {/* Main Card */}
       <div className="bg-white border border-[#E5EAF0] rounded-2xl shadow-sm overflow-hidden">
 

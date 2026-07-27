@@ -426,6 +426,7 @@ export interface AdminApplication {
   };
   kanban_stage?: string | null;
   audit_fee_pence?: number;
+  audit_fee_paid?: boolean;
   audit_credit_pence?: number;
   service_total_pence?: number;
   amount_due_pence?: number;
@@ -443,6 +444,7 @@ export interface AdminApplication {
   quote_set_at?: string | null;
   quote_expires_at?: string | null;
   quoted_fee?: string | number | null;
+  quote_amount_pence?: number;
   quote_currency?: string | null;
   review_note?: string;
   internal_admin_notes?: string;
@@ -1000,6 +1002,648 @@ export const unlockStaffUser = async (staffId: number) => {
   await parseApiResponse(response);
 };
 
+export type AdminService = {
+  id: number;
+  service_name: string;
+  description: string;
+  base_fee: string | number;
+  government_fee: string | number;
+  total_fee: string | number;
+  audit_fee: string | number;
+  service_type: string;
+  category: string;
+  processing_time_days: number | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+  code_keyed?: boolean;
+  code_keyed_warning?: string;
+};
+
+export type AdminServiceMeta = {
+  service_types: Array<{ id: string; label: string }>;
+  categories: Array<{ id: string; label: string }>;
+  code_keyed_types: string[];
+};
+
+export type AdminServiceListResponse = {
+  services: AdminService[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+    total_pages: number;
+  };
+  meta: AdminServiceMeta;
+};
+
+export const listAdminServices = async (params?: {
+  search?: string;
+  service_type?: string;
+  category?: string;
+  active?: "all" | "true" | "false";
+  page?: number;
+  page_size?: number;
+}): Promise<AdminServiceListResponse> => {
+  const query = new URLSearchParams();
+  if (params?.search) query.set("search", params.search);
+  if (params?.service_type) query.set("service_type", params.service_type);
+  if (params?.category) query.set("category", params.category);
+  if (params?.active && params.active !== "all") query.set("active", params.active);
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.page_size) query.set("page_size", String(params.page_size));
+  const qs = query.toString();
+  const response = await adminAuthenticatedFetch(qs ? `/admin/services/?${qs}` : "/admin/services/", {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<AdminServiceListResponse>(response);
+  return (
+    payload.data || {
+      services: [],
+      pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+      meta: { service_types: [], categories: [], code_keyed_types: [] },
+    }
+  );
+};
+
+export const createAdminService = async (body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch("/admin/services/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ service: AdminService }>(response);
+  return payload.data?.service;
+};
+
+export const getAdminService = async (serviceId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<{ service: AdminService }>(response);
+  return payload.data?.service ?? null;
+};
+
+export const updateAdminService = async (serviceId: number, body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ service: AdminService }>(response);
+  return payload.data?.service;
+};
+
+export const deleteAdminService = async (serviceId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export type AdminDocumentRequirement = {
+  id: number;
+  service_id: number;
+  code: string;
+  name: string;
+  description: string;
+  mistakes?: string;
+  sample?: string;
+  is_mandatory: boolean;
+  display_order: number;
+  is_active: boolean;
+  show_when_question_code?: string;
+  show_when_value?: string;
+};
+
+export const listAdminServiceDocuments = async (serviceId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/documents/`, { method: "GET" });
+  const payload = await parseApiResponse<{ requirements: AdminDocumentRequirement[] }>(response);
+  return payload.data?.requirements || [];
+};
+
+export const createAdminServiceDocument = async (serviceId: number, body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/documents/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ requirement: AdminDocumentRequirement }>(response);
+  return payload.data?.requirement;
+};
+
+export const updateAdminServiceDocument = async (
+  serviceId: number,
+  requirementId: number,
+  body: Record<string, unknown>,
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/documents/${requirementId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ requirement: AdminDocumentRequirement }>(response);
+  return payload.data?.requirement;
+};
+
+export const deleteAdminServiceDocument = async (serviceId: number, requirementId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/documents/${requirementId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export const reorderAdminServiceDocuments = async (serviceId: number, orderedIds: number[]) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/documents/reorder/`, {
+    method: "POST",
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+  const payload = await parseApiResponse<{ requirements: AdminDocumentRequirement[] }>(response);
+  return payload.data?.requirements || [];
+};
+
+export type AdminServiceQuestion = {
+  id: number;
+  service_id: number;
+  code: string;
+  label: string;
+  question_type: string;
+  options: string[];
+  help_text?: string;
+  is_required: boolean;
+  display_order: number;
+  is_active: boolean;
+};
+
+export const listAdminServiceQuestions = async (serviceId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/questions/`, { method: "GET" });
+  const payload = await parseApiResponse<{ questions: AdminServiceQuestion[] }>(response);
+  return payload.data?.questions || [];
+};
+
+export const createAdminServiceQuestion = async (serviceId: number, body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/questions/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ question: AdminServiceQuestion }>(response);
+  return payload.data?.question;
+};
+
+export const updateAdminServiceQuestion = async (
+  serviceId: number,
+  questionId: number,
+  body: Record<string, unknown>,
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/questions/${questionId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ question: AdminServiceQuestion }>(response);
+  return payload.data?.question;
+};
+
+export const deleteAdminServiceQuestion = async (serviceId: number, questionId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/questions/${questionId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export const reorderAdminServiceQuestions = async (serviceId: number, orderedIds: number[]) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/questions/reorder/`, {
+    method: "POST",
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+  const payload = await parseApiResponse<{ questions: AdminServiceQuestion[] }>(response);
+  return payload.data?.questions || [];
+};
+
+export type AdminServiceReminder = {
+  id: number;
+  service_id: number;
+  title: string;
+  delay_days: number;
+  email_subject: string;
+  email_body: string;
+  is_active: boolean;
+  display_order: number;
+};
+
+export const listAdminServiceReminders = async (serviceId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/reminders/`, { method: "GET" });
+  const payload = await parseApiResponse<{ reminders: AdminServiceReminder[] }>(response);
+  return payload.data?.reminders || [];
+};
+
+export const createAdminServiceReminder = async (serviceId: number, body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/reminders/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ reminder: AdminServiceReminder }>(response);
+  return payload.data?.reminder;
+};
+
+export const updateAdminServiceReminder = async (
+  serviceId: number,
+  reminderId: number,
+  body: Record<string, unknown>,
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/reminders/${reminderId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ reminder: AdminServiceReminder }>(response);
+  return payload.data?.reminder;
+};
+
+export const deleteAdminServiceReminder = async (serviceId: number, reminderId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/reminders/${reminderId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export type AdminCategory = {
+  id: number;
+  name: string;
+  slug: string;
+  display_order: number;
+  is_active: boolean;
+};
+
+export const listAdminCategories = async () => {
+  const response = await adminAuthenticatedFetch("/admin/categories/", { method: "GET" });
+  const payload = await parseApiResponse<{ categories: AdminCategory[] }>(response);
+  return payload.data?.categories || [];
+};
+
+export const createAdminCategory = async (body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch("/admin/categories/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ category: AdminCategory }>(response);
+  return payload.data?.category;
+};
+
+export const updateAdminCategory = async (categoryId: number, body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch(`/admin/categories/${categoryId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ category: AdminCategory }>(response);
+  return payload.data?.category;
+};
+
+export const deleteAdminCategory = async (categoryId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/categories/${categoryId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export const reorderAdminCategories = async (orderedIds: number[]) => {
+  const response = await adminAuthenticatedFetch("/admin/categories/reorder/", {
+    method: "POST",
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+  const payload = await parseApiResponse<{ categories: AdminCategory[] }>(response);
+  return payload.data?.categories || [];
+};
+
+export type AdminOriginCountryFaq = {
+  question: string;
+  answer: string;
+};
+
+export type AdminOriginCountryVisaOption = {
+  id?: number;
+  service_id: number;
+  service_type?: string;
+  service_name?: string;
+  label: string;
+  fee: string | number;
+  entries?: string;
+  max_stay?: string;
+  validity?: string;
+  travel_purpose?: string;
+  display_order?: number;
+  is_active?: boolean;
+  cta_href?: string;
+  duration?: string;
+};
+
+export type AdminOriginCountry = {
+  id: number;
+  country_code: string;
+  name: string;
+  slug: string;
+  destination_code: string;
+  badge: string;
+  service_label: string;
+  href: string;
+  cta_href?: string;
+  secondary_label: string;
+  secondary_href: string;
+  image_url: string;
+  page_title?: string;
+  page_subtitle?: string;
+  faqs?: AdminOriginCountryFaq[];
+  visa_options?: AdminOriginCountryVisaOption[];
+  service_id: number | null;
+  service_name?: string;
+  stored_href?: string;
+  has_uploaded_image?: boolean;
+  display_order: number;
+  is_active: boolean;
+};
+
+export type AdminOriginCountryInput = {
+  country_code?: string;
+  name?: string;
+  slug?: string;
+  destination_code?: string;
+  service_label?: string;
+  href?: string;
+  secondary_label?: string;
+  secondary_href?: string;
+  page_title?: string;
+  page_subtitle?: string;
+  faqs?: AdminOriginCountryFaq[];
+  visa_options?: AdminOriginCountryVisaOption[];
+  service_id?: number | null;
+  is_active?: boolean;
+  image?: File | null;
+  clear_image?: boolean;
+};
+
+const buildAdminOriginCountryBody = (input: AdminOriginCountryInput): BodyInit => {
+  const form = new FormData();
+  const append = (key: string, value: unknown) => {
+    if (value === undefined) return;
+    if (value === null) {
+      form.append(key, "");
+      return;
+    }
+    if (typeof value === "boolean") {
+      form.append(key, value ? "true" : "false");
+      return;
+    }
+    if (typeof value === "number") {
+      form.append(key, String(value));
+      return;
+    }
+    if (Array.isArray(value)) {
+      form.append(key, JSON.stringify(value));
+      return;
+    }
+    form.append(key, String(value));
+  };
+
+  append("country_code", input.country_code);
+  append("name", input.name);
+  append("slug", input.slug);
+  append("destination_code", input.destination_code);
+  append("service_label", input.service_label);
+  append("href", input.href);
+  append("secondary_label", input.secondary_label);
+  append("secondary_href", input.secondary_href);
+  append("page_title", input.page_title);
+  append("page_subtitle", input.page_subtitle);
+  append("faqs", input.faqs);
+  append("visa_options", input.visa_options);
+  append("service_id", input.service_id);
+  append("is_active", input.is_active);
+  append("clear_image", input.clear_image);
+
+  if (input.image instanceof File) {
+    form.append("image", input.image);
+  }
+  return form;
+};
+
+export const listAdminOriginCountries = async () => {
+  const response = await adminAuthenticatedFetch("/admin/origin-countries/", { method: "GET" });
+  const payload = await parseApiResponse<{ countries: AdminOriginCountry[] }>(response);
+  return payload.data?.countries || [];
+};
+
+export const getAdminOriginCountry = async (countryId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/origin-countries/${countryId}/`, { method: "GET" });
+  const payload = await parseApiResponse<{ country: AdminOriginCountry }>(response);
+  return payload.data?.country;
+};
+
+export const createAdminOriginCountry = async (input: AdminOriginCountryInput) => {
+  const response = await adminAuthenticatedFetch("/admin/origin-countries/", {
+    method: "POST",
+    body: buildAdminOriginCountryBody(input),
+  });
+  const payload = await parseApiResponse<{ country: AdminOriginCountry }>(response);
+  return payload.data?.country;
+};
+
+export const updateAdminOriginCountry = async (countryId: number, input: AdminOriginCountryInput) => {
+  const response = await adminAuthenticatedFetch(`/admin/origin-countries/${countryId}/`, {
+    method: "PATCH",
+    body: buildAdminOriginCountryBody(input),
+  });
+  const payload = await parseApiResponse<{ country: AdminOriginCountry }>(response);
+  return payload.data?.country;
+};
+
+export const deleteAdminOriginCountry = async (countryId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/origin-countries/${countryId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export type AdminHubCity = {
+  id?: number;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  display_order: number;
+  offerings?: AdminHubOffering[];
+};
+
+export type AdminHubOffering = {
+  id?: number;
+  service_id: number;
+  service_name?: string;
+  service_type?: string;
+  govt_fee: string | null;
+  service_fee: string;
+  processing_time: string;
+  validity: string;
+  is_popular: boolean;
+  is_active: boolean;
+  display_order: number;
+};
+
+export type AdminHubCountry = {
+  id: number;
+  name: string;
+  slug: string;
+  currency_code: string;
+  currency_symbol: string;
+  is_active: boolean;
+  display_order: number;
+  cities: AdminHubCity[];
+  offerings: AdminHubOffering[];
+  city_count?: number;
+};
+
+export type AdminHubCountryInput = {
+  name?: string;
+  slug?: string;
+  currency_code?: string;
+  currency_symbol?: string;
+  is_active?: boolean;
+  display_order?: number;
+  cities?: AdminHubCity[];
+  offerings?: AdminHubOffering[];
+};
+
+export const listAdminHubCountries = async () => {
+  const response = await adminAuthenticatedFetch("/admin/service-hubs/", { method: "GET" });
+  const payload = await parseApiResponse<{ countries: AdminHubCountry[] }>(response);
+  return payload.data?.countries || [];
+};
+
+export const getAdminHubCountry = async (countryId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/service-hubs/${countryId}/`, { method: "GET" });
+  const payload = await parseApiResponse<{ country: AdminHubCountry }>(response);
+  return payload.data?.country;
+};
+
+export const createAdminHubCountry = async (input: AdminHubCountryInput) => {
+  const response = await adminAuthenticatedFetch("/admin/service-hubs/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const payload = await parseApiResponse<{ country: AdminHubCountry }>(response);
+  return payload.data?.country;
+};
+
+export const updateAdminHubCountry = async (countryId: number, input: AdminHubCountryInput) => {
+  const response = await adminAuthenticatedFetch(`/admin/service-hubs/${countryId}/`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const payload = await parseApiResponse<{ country: AdminHubCountry }>(response);
+  return payload.data?.country;
+};
+
+export const deleteAdminHubCountry = async (countryId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/service-hubs/${countryId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export const reorderAdminHubCountries = async (orderedIds: number[]) => {
+  const response = await adminAuthenticatedFetch("/admin/service-hubs/reorder/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+  const payload = await parseApiResponse<{ countries: AdminHubCountry[] }>(response);
+  return payload.data?.countries || [];
+};
+
+export const reorderAdminOriginCountries = async (orderedIds: number[]) => {
+  const response = await adminAuthenticatedFetch("/admin/origin-countries/reorder/", {
+    method: "POST",
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+  const payload = await parseApiResponse<{ countries: AdminOriginCountry[] }>(response);
+  return payload.data?.countries || [];
+};
+
+export type AdminHomepageModule = {
+  id: number;
+  key: string;
+  label: string;
+  display_order: number;
+  is_active: boolean;
+  updated_at?: string | null;
+};
+
+export const listAdminHomepageModules = async () => {
+  const response = await adminAuthenticatedFetch("/admin/homepage-modules/", { method: "GET" });
+  const payload = await parseApiResponse<{ modules: AdminHomepageModule[] }>(response);
+  return payload.data?.modules || [];
+};
+
+export const reorderAdminHomepageModules = async (orderedIds: number[]) => {
+  const response = await adminAuthenticatedFetch("/admin/homepage-modules/reorder/", {
+    method: "POST",
+    body: JSON.stringify({ ordered_ids: orderedIds }),
+  });
+  const payload = await parseApiResponse<{ modules: AdminHomepageModule[] }>(response);
+  return payload.data?.modules || [];
+};
+
+export const updateAdminHomepageModule = async (
+  moduleId: number,
+  input: { label?: string; is_active?: boolean; display_order?: number },
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/homepage-modules/${moduleId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  const payload = await parseApiResponse<{ module: AdminHomepageModule }>(response);
+  return payload.data?.module;
+};
+
+export type AdminFeePlan = {
+  id: number;
+  service_id: number;
+  plan_code: string;
+  label: string;
+  fee: string | number;
+  is_default: boolean;
+  is_active: boolean;
+  display_order: number;
+};
+
+export const listAdminServiceFeePlans = async (serviceId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/fee-plans/`, { method: "GET" });
+  const payload = await parseApiResponse<{ plans: AdminFeePlan[] }>(response);
+  return payload.data?.plans || [];
+};
+
+export const createAdminServiceFeePlan = async (serviceId: number, body: Record<string, unknown>) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/fee-plans/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ plan: AdminFeePlan }>(response);
+  return payload.data?.plan;
+};
+
+export const updateAdminServiceFeePlan = async (
+  serviceId: number,
+  planId: number,
+  body: Record<string, unknown>,
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/fee-plans/${planId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ plan: AdminFeePlan }>(response);
+  return payload.data?.plan;
+};
+
+export const deleteAdminServiceFeePlan = async (serviceId: number, planId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/fee-plans/${planId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
 export const requestStaffForgotPassword = async (email: string) => {
   const response = await fetch(`${API_BASE_URL}/admin/forgot-password/request/`, {
     method: "POST",
@@ -1267,7 +1911,7 @@ export const updateAdminAlertStatus = async (
 
 export const getAdminLogs = async (params?: {
   search?: string;
-  eventType?: "all" | "login" | "failed_attempt" | "website_visit" | "event";
+  eventType?: "all" | "login" | "failed_attempt" | "website_visit" | "event" | "email";
   dateFrom?: string;
   dateTo?: string;
   limit?: number;
@@ -1734,4 +2378,266 @@ export const sendAdminApostilleThreadMessage = async (fileNumber: string, subjec
     body: JSON.stringify({ file_number: fileNumber, subject, message }),
   });
   return parseApiResponse(response);
+};
+
+export type AdminBlogFaq = {
+  question: string;
+  answer: string;
+};
+
+export type AdminBlogCategory = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  display_order: number;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AdminBlogPost = {
+  id: number;
+  title: string;
+  slug: string;
+  category: AdminBlogCategory | null;
+  category_id: number | null;
+  excerpt: string;
+  content?: string;
+  featured_image_url: string;
+  author_name: string;
+  author_title: string;
+  author_bio?: string;
+  author_image_url: string;
+  read_time_minutes: number;
+  faqs?: AdminBlogFaq[];
+  cta_title: string;
+  cta_body: string;
+  cta_button_text: string;
+  cta_button_url: string;
+  meta_title: string;
+  meta_description: string;
+  is_published: boolean;
+  show_on_homepage: boolean;
+  display_order: number;
+  published_at: string | null;
+  created_at?: string;
+  updated_at?: string;
+  featured_image_url_raw?: string;
+  author_image_url_raw?: string;
+};
+
+export type AdminBlogPostInput = {
+  title?: string;
+  slug?: string;
+  category_id?: number | null;
+  excerpt?: string;
+  content?: string;
+  featured_image_url?: string;
+  featured_image?: File | null;
+  author_name?: string;
+  author_title?: string;
+  author_bio?: string;
+  author_image_url?: string;
+  author_image?: File | null;
+  read_time_minutes?: number;
+  faqs?: AdminBlogFaq[];
+  cta_title?: string;
+  cta_body?: string;
+  cta_button_text?: string;
+  cta_button_url?: string;
+  meta_title?: string;
+  meta_description?: string;
+  is_published?: boolean;
+  show_on_homepage?: boolean;
+  display_order?: number;
+  published_at?: string | null;
+};
+
+const buildAdminBlogPostBody = (input: AdminBlogPostInput): BodyInit => {
+  const hasFile =
+    (typeof File !== "undefined" && input.featured_image instanceof File) ||
+    (typeof File !== "undefined" && input.author_image instanceof File);
+
+  if (hasFile) {
+    const form = new FormData();
+    const append = (key: string, value: unknown) => {
+      if (value === undefined) return;
+      if (value === null) {
+        form.append(key, "");
+        return;
+      }
+      if (typeof value === "boolean") {
+        form.append(key, value ? "true" : "false");
+        return;
+      }
+      if (typeof value === "number") {
+        form.append(key, String(value));
+        return;
+      }
+      if (Array.isArray(value)) {
+        form.append(key, JSON.stringify(value));
+        return;
+      }
+      form.append(key, String(value));
+    };
+
+    append("title", input.title);
+    append("slug", input.slug);
+    append("category_id", input.category_id);
+    append("excerpt", input.excerpt);
+    append("content", input.content);
+    append("featured_image_url", input.featured_image_url);
+    append("author_name", input.author_name);
+    append("author_title", input.author_title);
+    append("author_bio", input.author_bio);
+    append("author_image_url", input.author_image_url);
+    append("read_time_minutes", input.read_time_minutes);
+    append("faqs", input.faqs);
+    append("cta_title", input.cta_title);
+    append("cta_body", input.cta_body);
+    append("cta_button_text", input.cta_button_text);
+    append("cta_button_url", input.cta_button_url);
+    append("meta_title", input.meta_title);
+    append("meta_description", input.meta_description);
+    append("is_published", input.is_published);
+    append("show_on_homepage", input.show_on_homepage);
+    append("display_order", input.display_order);
+    append("published_at", input.published_at);
+
+    if (input.featured_image instanceof File) {
+      form.append("featured_image", input.featured_image);
+    }
+    if (input.author_image instanceof File) {
+      form.append("author_image", input.author_image);
+    }
+    return form;
+  }
+
+  const json: Record<string, unknown> = {};
+  const set = (key: string, value: unknown) => {
+    if (value !== undefined) json[key] = value;
+  };
+  set("title", input.title);
+  set("slug", input.slug);
+  set("category_id", input.category_id);
+  set("excerpt", input.excerpt);
+  set("content", input.content);
+  set("featured_image_url", input.featured_image_url);
+  set("author_name", input.author_name);
+  set("author_title", input.author_title);
+  set("author_bio", input.author_bio);
+  set("author_image_url", input.author_image_url);
+  set("read_time_minutes", input.read_time_minutes);
+  set("faqs", input.faqs);
+  set("cta_title", input.cta_title);
+  set("cta_body", input.cta_body);
+  set("cta_button_text", input.cta_button_text);
+  set("cta_button_url", input.cta_button_url);
+  set("meta_title", input.meta_title);
+  set("meta_description", input.meta_description);
+  set("is_published", input.is_published);
+  set("show_on_homepage", input.show_on_homepage);
+  set("display_order", input.display_order);
+  set("published_at", input.published_at);
+  return JSON.stringify(json);
+};
+
+export const listAdminBlogCategories = async (): Promise<AdminBlogCategory[]> => {
+  const response = await adminAuthenticatedFetch("/admin/blog/categories/", { method: "GET" });
+  const payload = await parseApiResponse<{ categories: AdminBlogCategory[] }>(response);
+  return payload.data?.categories || [];
+};
+
+export const createAdminBlogCategory = async (body: {
+  name: string;
+  slug?: string;
+  description?: string;
+  display_order?: number;
+  is_active?: boolean;
+}) => {
+  const response = await adminAuthenticatedFetch("/admin/blog/categories/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ category: AdminBlogCategory }>(response);
+  return payload.data?.category;
+};
+
+export const updateAdminBlogCategory = async (
+  categoryId: number,
+  body: Partial<{
+    name: string;
+    slug: string;
+    description: string;
+    display_order: number;
+    is_active: boolean;
+  }>,
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/blog/categories/${categoryId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ category: AdminBlogCategory }>(response);
+  return payload.data?.category;
+};
+
+export const deleteAdminBlogCategory = async (categoryId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/blog/categories/${categoryId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
+};
+
+export const listAdminBlogPosts = async (params?: {
+  search?: string;
+  published?: "all" | "true" | "false" | boolean;
+}): Promise<AdminBlogPost[]> => {
+  const qs = new URLSearchParams();
+  if (params?.search?.trim()) qs.set("search", params.search.trim());
+  if (params?.published === true || params?.published === "true") qs.set("published", "true");
+  if (params?.published === false || params?.published === "false") qs.set("published", "false");
+  const query = qs.toString();
+  const response = await adminAuthenticatedFetch(query ? `/admin/blog/posts/?${query}` : "/admin/blog/posts/", {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<{ posts: AdminBlogPost[] }>(response);
+  return payload.data?.posts || [];
+};
+
+export const getAdminBlogPost = async (postId: number): Promise<AdminBlogPost> => {
+  const response = await adminAuthenticatedFetch(`/admin/blog/posts/${postId}/`, { method: "GET" });
+  const payload = await parseApiResponse<{ post: AdminBlogPost }>(response);
+  if (!payload.data?.post) {
+    throw new Error("Missing blog post payload.");
+  }
+  return payload.data.post;
+};
+
+export const createAdminBlogPost = async (input: AdminBlogPostInput): Promise<AdminBlogPost | undefined> => {
+  const response = await adminAuthenticatedFetch("/admin/blog/posts/", {
+    method: "POST",
+    body: buildAdminBlogPostBody(input),
+  });
+  const payload = await parseApiResponse<{ post: AdminBlogPost }>(response);
+  return payload.data?.post;
+};
+
+export const updateAdminBlogPost = async (
+  postId: number,
+  input: AdminBlogPostInput,
+): Promise<AdminBlogPost | undefined> => {
+  const response = await adminAuthenticatedFetch(`/admin/blog/posts/${postId}/`, {
+    method: "PATCH",
+    body: buildAdminBlogPostBody(input),
+  });
+  const payload = await parseApiResponse<{ post: AdminBlogPost }>(response);
+  return payload.data?.post;
+};
+
+export const deleteAdminBlogPost = async (postId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/blog/posts/${postId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse(response);
 };

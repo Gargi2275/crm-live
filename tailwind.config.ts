@@ -25,26 +25,18 @@ const config: Config = {
           "var(--font-sans)",
           "ui-sans-serif",
           "system-ui",
-          "-apple-system",
-          "Segoe UI",
-          "Roboto",
-          "Helvetica",
-          "Arial",
-          "Noto Sans",
-          "Liberation Sans",
           "sans-serif",
         ],
         body: [
           "var(--font-sans)",
           "ui-sans-serif",
           "system-ui",
-          "-apple-system",
-          "Segoe UI",
-          "Roboto",
-          "Helvetica",
-          "Arial",
-          "Noto Sans",
-          "Liberation Sans",
+          "sans-serif",
+        ],
+        sans: [
+          "var(--font-sans)",
+          "ui-sans-serif",
+          "system-ui",
           "sans-serif",
         ],
         mono: [
@@ -57,6 +49,17 @@ const config: Config = {
           "Courier New",
           "monospace",
         ],
+      },
+      fontSize: {
+        xs: ["0.8125rem", { lineHeight: "1.25rem" }], // 13px
+        sm: ["0.9375rem", { lineHeight: "1.45rem" }], // 15px
+        base: ["1.0625rem", { lineHeight: "1.65rem" }], // 17px
+        md: ["1.0625rem", { lineHeight: "1.65rem" }],
+        lg: ["1.1875rem", { lineHeight: "1.75rem" }],
+        xl: ["1.3125rem", { lineHeight: "1.85rem" }],
+        "2xl": ["1.5rem", { lineHeight: "2rem" }],
+        "3xl": ["1.875rem", { lineHeight: "2.25rem" }],
+        "4xl": ["2.25rem", { lineHeight: "2.5rem" }],
       },
       borderRadius: {
         btn: '50px',

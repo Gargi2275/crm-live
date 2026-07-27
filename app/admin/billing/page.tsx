@@ -6,11 +6,26 @@ import { motion } from "framer-motion";
 import { ReceiptText, AlertCircle, HandCoins } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 export default function BillingPage() {
   const { adminUser } = useAdminAuth();
   const canExport = ["admin", "ops_manager"].includes(adminUser?.role || "");
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+
+  useSetAdminPageChrome({
+    title: "Billing",
+    icon: ReceiptText,
+    syncKey: `${canExport}|${dashboardData ? "loaded" : "loading"}`,
+    actions: canExport ? (
+      <button
+        type="button"
+        className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]"
+      >
+        Export CSV
+      </button>
+    ) : undefined,
+  });
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -41,8 +56,6 @@ export default function BillingPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="space-y-4 font-body max-w-[1200px] mx-auto"
     >
-      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Billing</h1>
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
           <p className="text-xs text-[#627D98]">Pending invoices</p>
@@ -62,11 +75,9 @@ export default function BillingPage() {
         <p className="text-[#486581] text-sm">Pending amount: {formatInr(Number(kpiSnapshot?.pending_payments || 0))}</p>
         <p className="text-[#486581] text-sm">Refund/dispute amount: {formatInr(Number(dashboardData?.health_metrics.refunds_disputes || 0))}</p>
         <p className="text-[#486581] text-sm">Collected this week: {formatInr(weeklyCollected)}</p>
-        {canExport ? (
-          <motion.button whileTap={{ scale: 0.97 }} className="text-sm px-3 py-1.5 rounded-[10px] bg-[#009877] text-white hover:bg-[#007B61] font-heading">Export Billing CSV</motion.button>
-        ) : (
+        {!canExport ? (
           <p className="text-xs text-[#9C4F17] bg-[#B87333]/12 inline-flex px-2 py-1 rounded-full">Export hidden for Staff role</p>
-        )}
+        ) : null}
       </motion.div>
 
       <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">

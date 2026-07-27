@@ -4,8 +4,9 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { RefreshCw, Filter, ClipboardList, X } from "lucide-react";
+import { RefreshCw, ClipboardList } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { SlideOverPanel } from "@/components/console/kanban/SlideOverPanel";
 import { useAdminCaseSlideOver } from "@/components/console/kanban/useAdminCaseSlideOver";
 import {
@@ -15,6 +16,9 @@ import {
   type AdminStaffInternalMessage,
   type AdminTaskItem,
 } from "@/lib/admin-auth";
+
+const filterFieldClass =
+  "mt-1 w-full rounded-[8px] border border-[#D9E1EA] px-2.5 py-1.5 text-sm text-[#102A43] bg-white";
 
 const PENDING_STATUSES = new Set(["new", "in_progress", "blocked"]);
 
@@ -62,7 +66,6 @@ function MyActiveCasesContent() {
   const isStaff = hasMyActiveCasesAccess(adminUser?.role);
   const [tasks, setTasks] = useState<AdminTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey | null>(null);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -82,12 +85,18 @@ function MyActiveCasesContent() {
     taskTypeFilter !== "all" ||
     searchQuery.trim() !== "";
 
+  const activeFilterCount =
+    (effectiveKpi !== null ? 1 : 0) +
+    (dateFrom ? 1 : 0) +
+    (dateTo ? 1 : 0) +
+    (priorityFilter !== "all" ? 1 : 0) +
+    (taskTypeFilter !== "all" ? 1 : 0);
+
   const resetFilters = () => {
     setDateFrom("");
     setDateTo("");
     setPriorityFilter("all");
     setTaskTypeFilter("all");
-    setSearchQuery("");
     setKpiFilter(null);
   };
 
@@ -223,10 +232,90 @@ function MyActiveCasesContent() {
     { key: "completed", label: "Done", value: counts.completed },
   ];
 
+  useSetAdminPageChrome(
+    isStaff
+      ? {
+          title: "My Active Cases",
+          subtitle: "Work your queue in the drawer",
+          icon: ClipboardList,
+          search: {
+            value: searchQuery,
+            onChange: setSearchQuery,
+            placeholder: "Search ref or customer…",
+          },
+          activeFilterCount,
+          onClearFilters: resetFilters,
+          meta: loading ? "Loading…" : `${filteredTasks.length} task(s)`,
+          syncKey: `${searchQuery}|${dateFrom}|${dateTo}|${priorityFilter}|${taskTypeFilter}|${kpiFilter}|${loading}|${filteredTasks.length}|${taskTypeOptions.join(",")}`,
+          actions: (
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={loading}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          ),
+          filtersContent: (
+            <>
+              <label className="block text-sm">
+                <span className="font-medium text-[#334E68] text-xs">From date</span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className={filterFieldClass}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-[#334E68] text-xs">To date</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className={filterFieldClass}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-[#334E68] text-xs">Priority</span>
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">All</option>
+                  <option value="urgent">Urgent</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-[#334E68] text-xs">Task type</span>
+                <select
+                  value={taskTypeFilter}
+                  onChange={(e) => setTaskTypeFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">All types</option>
+                  {taskTypeOptions.map((taskType) => (
+                    <option key={taskType} value={taskType}>
+                      {taskType.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ),
+        }
+      : { title: "My Active Cases", icon: ClipboardList },
+  );
+
   if (!isStaff) {
     return (
       <div className="space-y-4 font-body">
-        <h1 className="text-2xl font-heading font-semibold text-[#102A43]">My Active Cases</h1>
         <p className="text-sm text-[#627D98]">This page is for operations managers and case staff with assigned tasks.</p>
         <Link href="/admin" className="text-sm font-semibold text-[#0B69B7] hover:underline">
           Back to dashboard
@@ -236,7 +325,7 @@ function MyActiveCasesContent() {
   }
 
   return (
-    <div className="relative space-y-4 font-body min-h-[60vh]">
+    <div className="relative space-y-3 font-body min-h-[60vh]">
       <SlideOverPanel
         isOpen={isOpen}
         onClose={closeCase}
@@ -249,241 +338,120 @@ function MyActiveCasesContent() {
         documentsError={documentsError}
         onStageResolved={handleStageResolvedWithReload}
       />
-      <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4">
-        <h2 className="text-base font-heading font-semibold text-[#102A43] mb-2">Internal Team Notes</h2>
-        {internalMessages.length === 0 ? (
-          <p className="text-sm text-[#627D98]">No notes addressed to you yet.</p>
-        ) : (
-          <div className="max-h-52 overflow-y-auto space-y-2">
-            {internalMessages.map((message) => (
-              <div key={message.id} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2">
-                <p className="text-sm font-semibold text-[#102A43]">
-                  {message.application_reference}
-                  {message.customer_name ? ` · ${message.customer_name}` : ""}
-                </p>
-                <p className="text-xs text-[#486581]">
-                  {message.sender_name} → {message.recipient_name} ·{" "}
-                  {message.created_at ? formatDateTime(message.created_at) : "—"}
-                </p>
-                <p className="text-sm text-[#334E68] mt-1 whitespace-pre-wrap">{message.message_text}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
-      <div className="space-y-2">
-        <div>
-          <h1 className="text-[22px] font-heading font-semibold text-[#102A43] flex items-center gap-2">
-            <ClipboardList className="w-5 h-5 text-[#0B69B7]" />
-            My Active Cases
-          </h1>
-          <p className="mt-1 text-sm text-[#627D98]">
-            All your assigned tasks in one list. Click a KPI to filter, or refine with search and filters below.
-          </p>
+      <details className="bg-white rounded-[10px] border border-[#D9E1EA] group">
+        <summary className="list-none cursor-pointer px-3 py-2 text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
+          Internal team notes
+          <span className="text-xs font-normal text-[#627D98]">
+            {internalMessages.length} · expand
+          </span>
+        </summary>
+        <div className="px-3 pb-3">
+          {internalMessages.length === 0 ? (
+            <p className="text-sm text-[#627D98]">No notes addressed to you yet.</p>
+          ) : (
+            <div className="max-h-40 overflow-y-auto space-y-1.5">
+              {internalMessages.map((message) => (
+                <div key={message.id} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2">
+                  <p className="text-sm font-semibold text-[#102A43]">
+                    {message.application_reference}
+                    {message.customer_name ? ` · ${message.customer_name}` : ""}
+                  </p>
+                  <p className="text-xs text-[#486581]">
+                    {message.sender_name} → {message.recipient_name} ·{" "}
+                    {message.created_at ? formatDateTime(message.created_at) : "—"}
+                  </p>
+                  <p className="text-sm text-[#334E68] mt-1 whitespace-pre-wrap">{message.message_text}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
+      </details>
 
-        {/* Toolbar row — search + Filters toggle + Refresh on one line */}
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search ref or customer…"
-            className="min-w-[160px] flex-1 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] placeholder:text-[#8A9BB0]"
-          />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {kpiButtons.map((kpi) => (
           <button
+            key={kpi.key}
             type="button"
-            onClick={() => setFiltersOpen((prev) => !prev)}
-            className={`inline-flex shrink-0 items-center gap-2 rounded-[10px] border px-3 py-2 text-sm font-semibold transition-colors ${
-              filtersOpen || hasFilters
-                ? "border-[#0B69B7] bg-[#EFF7FF] text-[#0B69B7]"
-                : "border-[#D9E1EA] bg-white text-[#102A43] hover:bg-[#F5F7FA]"
+            onClick={() => {
+              setKpiFilter((current) => {
+                if (kpi.key === "all") return current === "all" || current === null ? null : "all";
+                return current === kpi.key ? null : kpi.key;
+              });
+            }}
+            className={`rounded-[8px] border px-3 py-2 text-left transition-colors ${
+              (kpi.key === "all" && (kpiFilter === null || kpiFilter === "all")) || kpiFilter === kpi.key
+                ? "border-[#009877] bg-[#009877]/10 ring-1 ring-[#009877]/25"
+                : "border-[#D9E1EA] bg-white hover:border-[#33A1FD]/40"
             }`}
           >
-            <Filter className="w-4 h-4" />
-            Filters
-            {hasFilters ? <span className="rounded-full bg-[#0B69B7] px-1.5 text-[10px] text-white">on</span> : null}
+            <p className="text-[11px] text-[#627D98]">{kpi.label}</p>
+            <p className="text-lg font-heading font-semibold text-[#102A43] leading-tight">{kpi.value}</p>
           </button>
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            className="inline-flex shrink-0 items-center gap-2 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
-
-        {/* Collapsible filter panel */}
-        {filtersOpen ? (
-          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-[#102A43]">Filters</p>
-              {hasFilters ? (
-                <button
-                  type="button"
-                  onClick={resetFilters}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#486581] hover:text-[#102A43]"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  Clear all
-                </button>
-              ) : null}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68]">From date</span>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-[#102A43]"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68]">To date</span>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-[#102A43]"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68]">Priority</span>
-                <select
-                  value={priorityFilter}
-                  onChange={(e) => setPriorityFilter(e.target.value)}
-                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-[#102A43] bg-white"
-                >
-                  <option value="all">All</option>
-                  <option value="urgent">Urgent</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68]">Task type</span>
-                <select
-                  value={taskTypeFilter}
-                  onChange={(e) => setTaskTypeFilter(e.target.value)}
-                  className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-[#102A43] bg-white"
-                >
-                  <option value="all">All types</option>
-                  {taskTypeOptions.map((taskType) => (
-                    <option key={taskType} value={taskType}>
-                      {taskType.replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </div>
-        ) : null}
+        ))}
       </div>
 
-      <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-3">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {kpiButtons.map((kpi) => (
-            <button
-              key={kpi.key}
-              type="button"
-              onClick={() => {
-                setKpiFilter((current) => {
-                  if (kpi.key === "all") return current === "all" || current === null ? null : "all";
-                  return current === kpi.key ? null : kpi.key;
-                });
-              }}
-              className={`rounded-[10px] border px-3 py-2.5 text-left transition-colors ${
-                (kpi.key === "all" && (kpiFilter === null || kpiFilter === "all")) || kpiFilter === kpi.key
-                  ? "border-[#009877] bg-[#009877]/10 ring-1 ring-[#009877]/25"
-                  : "border-[#D9E1EA] bg-[#F8FAFC] hover:border-[#33A1FD]/40"
-              }`}
-            >
-              <p className="text-[11px] text-[#627D98]">{kpi.label}</p>
-              <p className="text-xl font-heading font-semibold text-[#102A43] leading-tight">{kpi.value}</p>
-            </button>
-          ))}
+      <div className="rounded-[10px] border border-[#D9E1EA] bg-white overflow-hidden">
+        <div className="px-3 py-2 border-b border-[#E5EAF0] flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-[#102A43]">
+            {loading ? "Loading…" : `${filteredTasks.length} task(s)`}
+          </p>
+          {hasFilters && !loading ? (
+            <p className="text-xs text-[#627D98]">Filtered view</p>
+          ) : null}
         </div>
-      </div>
-
-      <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
-        <p className="text-sm font-semibold text-[#102A43] mb-1">
-          {loading ? "Loading…" : `${filteredTasks.length} task(s)`}
-        </p>
-        {hasFilters && !loading ? (
-          <p className="text-xs text-[#627D98] mb-3">Filtered view — click a KPI again or clear filters to reset.</p>
-        ) : null}
         {loading ? (
-          <p className="text-sm text-[#627D98]">Loading your cases…</p>
+          <p className="px-3 py-4 text-sm text-[#627D98]">Loading your cases…</p>
         ) : filteredTasks.length === 0 ? (
-          <p className="text-sm text-[#627D98]">No tasks match your filters.</p>
+          <p className="px-3 py-4 text-sm text-[#627D98]">No tasks match your filters.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="divide-y divide-[#E5EAF0]">
             {filteredTasks.map((task) => {
               const status = taskStatus(task);
               const isCompleted = status === "completed";
               const isCancelled = status === "cancelled";
               return (
-                <div
+                <button
                   key={task.id}
-                  role="button"
-                  tabIndex={0}
+                  type="button"
                   onClick={() => openCase(task)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      openCase(task);
-                    }
-                  }}
-                  className={`rounded-[12px] border p-4 cursor-pointer transition-colors hover:border-[#33A1FD]/50 ${
+                  className={`w-full text-left px-3 py-2.5 transition-colors hover:bg-[#F8FCFF] ${
                     isCompleted
-                      ? "border-[#009877]/30 bg-[#F0FBF8]"
+                      ? "bg-[#F0FBF8]/60"
                       : isCancelled
-                        ? "border-[#D9E1EA] bg-[#F5F7FA] opacity-75"
-                        : "border-[#D9E1EA] bg-[#F8FAFC]"
+                        ? "bg-[#F5F7FA] opacity-75"
+                        : "bg-white"
                   }`}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
                       <p className="text-sm font-heading font-semibold text-[#102A43]">
                         {task.application_reference || `Task #${task.id}`}
+                        <span className="ml-2 font-normal text-xs text-[#627D98] capitalize">
+                          {task.task_type.replace(/_/g, " ")} · {task.customer_name || "Customer"}
+                        </span>
                       </p>
-                      <p className="text-xs text-[#627D98] capitalize mt-0.5">
-                        {task.task_type.replace(/_/g, " ")} · {task.customer_name || "Customer"}
-                      </p>
-                      <p className="text-xs text-[#627D98] mt-1">
+                      <p className="text-xs text-[#627D98] mt-0.5">
                         Deadline: {formatDateTime(task.deadline)}
                         {isCompleted && task.completed_at ? (
                           <span className="ml-2">· Completed: {formatDateTime(task.completed_at)}</span>
                         ) : null}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2 text-[11px]">
-                      <span className="rounded-full bg-[#F5F7FA] border border-[#D9E1EA] px-2.5 py-1 uppercase text-[#486581]">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="rounded-full bg-[#F5F7FA] border border-[#D9E1EA] px-2 py-0.5 uppercase text-[#486581]">
                         {task.status}
                       </span>
-                      <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 uppercase text-[#9C4F17]">
+                      <span className="rounded-full bg-[#B87333]/12 px-2 py-0.5 uppercase text-[#9C4F17]">
                         {task.priority}
+                      </span>
+                      <span className="rounded-full border border-[#33A1FD]/35 bg-[#33A1FD]/12 px-2.5 py-0.5 font-semibold text-[#0B69B7]">
+                        Open
                       </span>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openCase(task);
-                      }}
-                      className="text-xs rounded-full border border-[#33A1FD]/35 bg-[#33A1FD]/12 px-3 py-1.5 font-semibold text-[#0B69B7]"
-                    >
-                      Open case
-                    </button>
-                  </div>
-                </div>
+                </button>
               );
             })}
           </div>

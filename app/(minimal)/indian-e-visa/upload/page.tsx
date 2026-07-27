@@ -282,13 +282,10 @@ export default function UploadPage() {
     data.email,
   ]);
 
-  // Validate Required Fields
+  // Validate Required Fields — documents first (Visament-style: simple after pay)
   const isRegularFormValid =
     passportRef &&
     photoRef &&
-    arrivalDate &&
-    portOfEntry &&
-    addressInIndia &&
     applicantEmail &&
     caseNumber &&
     !passportError &&
@@ -564,7 +561,7 @@ export default function UploadPage() {
   const uploadChecklist = [
     { label: "Passport bio page", done: Boolean(passportRef) && !passportError },
     { label: "Applicant photograph", done: Boolean(photoRef) && !photoError },
-    { label: "Travel & contact details", done: Boolean(arrivalDate && portOfEntry && addressInIndia && applicantEmail) },
+    { label: "Registration email", done: Boolean(applicantEmail) },
     { label: "Consent accepted", done: consentsAccepted },
   ];
 
@@ -581,7 +578,7 @@ export default function UploadPage() {
             </span>
           </div>
         </div>
-        <ProgressStepper currentStep={5} />
+        <ProgressStepper currentStep={2} />
 
         <div className="max-w-[480px] mx-auto px-4 mt-10">
           <Reveal direction="up">
@@ -595,7 +592,14 @@ export default function UploadPage() {
               </p>
               <div className="space-y-3">
                 <motion.button
-                  onClick={() => router.push("/track")}
+                  onClick={() => {
+                    const trackCase = (caseNumber || fileNumber || "").trim();
+                    if (!trackCase || trackCase === "FO-EV-...") {
+                      router.push("/track");
+                      return;
+                    }
+                    router.push(`/track?case=${encodeURIComponent(trackCase)}`);
+                  }}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                   className="w-full bg-accent text-white font-bold text-[15px] px-6 py-3 rounded-[10px] shadow-[0_4px_14px_rgba(245,166,35,0.28)]"
@@ -630,7 +634,7 @@ export default function UploadPage() {
         </div>
       </div>
 
-      <ProgressStepper currentStep={4} />
+      <ProgressStepper currentStep={2} />
 
       <div className="max-w-[1000px] w-full mx-auto px-4 mt-6 lg:mt-8">
         <Reveal direction="up" delay={0.05}>
@@ -638,15 +642,15 @@ export default function UploadPage() {
             <div>
               <span className="inline-flex items-center gap-1.5 rounded-md bg-[#eaf4ff] border border-[#c5dcf7] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#1f4f8f] mb-2">
                 <Upload className="w-3 h-3" />
-                Step 4 of 5
+                Documents
               </span>
               <h2 className="font-heading font-extrabold text-[#0f2f66] text-2xl sm:text-[28px] tracking-tight">
-                {isCorrectionMode ? "Re-upload Requested Documents" : "Upload Required Documents"}
+                {isCorrectionMode ? "Re-upload Requested Documents" : "Upload your documents"}
               </h2>
               <p className="font-body text-[#5f7391] text-sm mt-1 max-w-xl">
                 {isCorrectionMode
-                  ? "Upload only the documents flagged by our team. Other files are not needed right now."
-                  : "Complete all required uploads and travel details to move to review."}
+                  ? "Upload only the documents flagged by our team."
+                  : "Passport and photo are required. Supporting files are optional."}
               </p>
             </div>
             <div className="inline-flex items-center gap-2 rounded-lg border border-[#c5dcf7] bg-white/80 px-3 py-2 text-xs text-[#1f4f8f] shrink-0">
@@ -748,7 +752,8 @@ export default function UploadPage() {
 
                 <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_12px_32px_rgba(20,76,160,0.08)] overflow-hidden">
                   <div className="px-5 py-3.5 bg-gradient-to-r from-[#0f2f66] to-[#1a4a8a] border-b border-[#d0dff5]">
-                    <h3 className="font-body font-bold text-white text-base">Travel &amp; Contact Details</h3>
+                    <h3 className="font-body font-bold text-white text-base">Optional travel details</h3>
+                    <p className="text-white/75 text-xs mt-0.5">Helpful if known — you can skip for now</p>
                   </div>
                   <div className="p-4 sm:p-5 space-y-3">
                     <div className="grid sm:grid-cols-2 gap-3">
@@ -763,21 +768,19 @@ export default function UploadPage() {
                         />
                       </div>
                       <div>
-                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Intended Arrival Date *</label>
+                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Intended Arrival Date</label>
                         <input
                           type="date"
-                          required
                           value={arrivalDate}
                           onChange={(e) => setArrivalDate(e.target.value)}
                           className={inputClasses}
                         />
                       </div>
                       <div>
-                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Port of Entry *</label>
+                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Port of Entry</label>
                         <input
                           type="text"
                           placeholder="e.g. New Delhi"
-                          required
                           value={portOfEntry}
                           onChange={(e) => setPortOfEntry(e.target.value)}
                           className={inputClasses}
@@ -795,10 +798,9 @@ export default function UploadPage() {
                       </div>
                     </div>
                     <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Address in India *</label>
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Address in India</label>
                       <textarea
                         placeholder="Hotel name or complete residential address"
-                        required
                         rows={2}
                         value={addressInIndia}
                         onChange={(e) => setAddressInIndia(e.target.value)}

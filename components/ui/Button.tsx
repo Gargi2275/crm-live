@@ -20,7 +20,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const baseStyles =
-    "inline-flex items-center justify-center font-heading font-semibold tracking-[0.01em] transition-all duration-300 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-btn disabled:opacity-50 disabled:pointer-events-none btn-elevate";
+    "inline-flex items-center justify-center text-base font-heading font-semibold tracking-[0.01em] transition-all duration-300 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-btn disabled:opacity-50 disabled:pointer-events-none btn-elevate";
 
   const variants = {
     primary: "bg-btn-primary text-white shadow-btn hover:shadow-btn-hover hover:-translate-y-0.5 px-6 py-3",

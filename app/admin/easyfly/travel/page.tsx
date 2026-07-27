@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { listEasyFlyBookings, type EasyFlyBooking } from "@/lib/easyfly";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { Eye, Plane } from "lucide-react";
 
 type DepartureFilter = "24h" | "48h" | "72h" | "5days" | "custom" | "all";
 type ReturnFilter = "24h" | "48h" | "72h" | "5days" | "all";
 type BookingRow = EasyFlyBooking;
+
+const filterFieldClass =
+  "mt-1 w-full rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm text-[#102A43]";
 
 const WINDOW_MS: Record<Exclude<DepartureFilter, "custom" | "all">, number> = {
   "24h": 24 * 60 * 60 * 1000,
@@ -178,16 +182,129 @@ export default function EasyFlyTravelPage() {
     return { totalUpcoming, departingSoon, returningSoon, paymentPendingCount };
   }, [customFrom, customTo, departureFilter, filteredRows, returnFilter]);
 
+  const clearFilters = useCallback(() => {
+    setDepartureFilter("72h");
+    setReturnFilter("all");
+    setCustomFrom("");
+    setCustomTo("");
+    setAirlineFilter("all");
+    setSupplierFilter("all");
+    setPaymentFilter("all");
+    setStaffFilter("all");
+  }, []);
+
+  const activeFilterCount =
+    (departureFilter !== "72h" ? 1 : 0) +
+    (returnFilter !== "all" ? 1 : 0) +
+    (airlineFilter !== "all" ? 1 : 0) +
+    (supplierFilter !== "all" ? 1 : 0) +
+    (paymentFilter !== "all" ? 1 : 0) +
+    (staffFilter !== "all" ? 1 : 0);
+
+  useSetAdminPageChrome({
+    title: "Travel Monitoring",
+    icon: Plane,
+    activeFilterCount,
+    onClearFilters: clearFilters,
+    syncKey: `${departureFilter}|${returnFilter}|${customFrom}|${customTo}|${airlineFilter}|${supplierFilter}|${paymentFilter}|${staffFilter}|${loading}`,
+    filtersContent: (
+      <>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Departure window</p>
+          <div className="inline-flex flex-wrap gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
+            <FilterButton label="24h" active={departureFilter === "24h"} onClick={() => setDepartureFilter("24h")} />
+            <FilterButton label="48h" active={departureFilter === "48h"} onClick={() => setDepartureFilter("48h")} />
+            <FilterButton label="72h" active={departureFilter === "72h"} onClick={() => setDepartureFilter("72h")} />
+            <FilterButton label="5 days" active={departureFilter === "5days"} onClick={() => setDepartureFilter("5days")} />
+            <FilterButton label="Custom" active={departureFilter === "custom"} onClick={() => setDepartureFilter("custom")} />
+            <FilterButton label="All" active={departureFilter === "all"} onClick={() => setDepartureFilter("all")} />
+          </div>
+          {departureFilter === "custom" ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                className={filterFieldClass}
+                title="From date"
+              />
+              <input
+                type="date"
+                value={customTo}
+                onChange={(event) => setCustomTo(event.target.value)}
+                className={filterFieldClass}
+                title="To date"
+              />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Return window</p>
+          <div className="inline-flex flex-wrap gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
+            <FilterButton label="24h" active={returnFilter === "24h"} onClick={() => setReturnFilter("24h")} />
+            <FilterButton label="48h" active={returnFilter === "48h"} onClick={() => setReturnFilter("48h")} />
+            <FilterButton label="72h" active={returnFilter === "72h"} onClick={() => setReturnFilter("72h")} />
+            <FilterButton label="5 days" active={returnFilter === "5days"} onClick={() => setReturnFilter("5days")} />
+            <FilterButton label="All" active={returnFilter === "all"} onClick={() => setReturnFilter("all")} />
+          </div>
+        </div>
+
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Airline</span>
+          <select value={airlineFilter} onChange={(event) => setAirlineFilter(event.target.value)} className={filterFieldClass}>
+            <option value="all">All Airlines</option>
+            {airlineOptions.map((airline) => (
+              <option key={airline} value={airline}>
+                {airline}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Supplier</span>
+          <select value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)} className={filterFieldClass}>
+            <option value="all">All Suppliers</option>
+            {supplierOptions.map((supplier) => (
+              <option key={supplier} value={supplier}>
+                {supplier}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Payment</span>
+          <select
+            value={paymentFilter}
+            onChange={(event) => setPaymentFilter(event.target.value as "all" | "paid" | "pending")}
+            className={filterFieldClass}
+          >
+            <option value="all">All Payments</option>
+            <option value="paid">Paid</option>
+            <option value="pending">Payment Pending</option>
+          </select>
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Staff</span>
+          <select
+            value={staffFilter}
+            onChange={(event) => setStaffFilter(event.target.value as "all" | "assigned" | "unassigned")}
+            className={filterFieldClass}
+          >
+            <option value="all">All Staff</option>
+            <option value="assigned">Assigned</option>
+            <option value="unassigned">Unassigned</option>
+          </select>
+        </label>
+      </>
+    ),
+  });
+
   return (
     <div className="space-y-4 font-body max-w-[1500px] mx-auto">
-      <div>
-        <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43] inline-flex items-center gap-2">
-          <Plane className="w-6 h-6 text-[#009877]" />
-          Travel Monitoring
-        </h1>
-        <p className="mt-1 text-sm text-[#627D98]">Upcoming departures and returns requiring attention.</p>
-      </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard label="Total upcoming" value={String(stats.totalUpcoming)} />
         <StatCard label="Departing soon" value={String(stats.departingSoon)} accent="text-[#0B69B7]" />
@@ -202,97 +319,6 @@ export default function EasyFlyTravelPage() {
       ) : null}
 
       <section className="rounded-[20px] border border-[#D9E1EA] bg-white shadow-[0_10px_24px_rgba(16,42,67,0.05)]">
-        <div className="border-b border-[#E5EAF0] bg-[#FBFCFE] px-4 py-4 md:px-5 space-y-4">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Departure window</p>
-            <div className="inline-flex flex-wrap gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
-              <FilterButton label="24h" active={departureFilter === "24h"} onClick={() => setDepartureFilter("24h")} />
-              <FilterButton label="48h" active={departureFilter === "48h"} onClick={() => setDepartureFilter("48h")} />
-              <FilterButton label="72h" active={departureFilter === "72h"} onClick={() => setDepartureFilter("72h")} />
-              <FilterButton label="5 days" active={departureFilter === "5days"} onClick={() => setDepartureFilter("5days")} />
-              <FilterButton label="Custom" active={departureFilter === "custom"} onClick={() => setDepartureFilter("custom")} />
-              <FilterButton label="All" active={departureFilter === "all"} onClick={() => setDepartureFilter("all")} />
-            </div>
-            {departureFilter === "custom" ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-md">
-                <input
-                  type="date"
-                  value={customFrom}
-                  onChange={(event) => setCustomFrom(event.target.value)}
-                  className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
-                  title="From date"
-                />
-                <input
-                  type="date"
-                  value={customTo}
-                  onChange={(event) => setCustomTo(event.target.value)}
-                  className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
-                  title="To date"
-                />
-              </div>
-            ) : null}
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Return window</p>
-            <div className="inline-flex flex-wrap gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
-              <FilterButton label="24h" active={returnFilter === "24h"} onClick={() => setReturnFilter("24h")} />
-              <FilterButton label="48h" active={returnFilter === "48h"} onClick={() => setReturnFilter("48h")} />
-              <FilterButton label="72h" active={returnFilter === "72h"} onClick={() => setReturnFilter("72h")} />
-              <FilterButton label="5 days" active={returnFilter === "5days"} onClick={() => setReturnFilter("5days")} />
-              <FilterButton label="All" active={returnFilter === "all"} onClick={() => setReturnFilter("all")} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            <select
-              value={airlineFilter}
-              onChange={(event) => setAirlineFilter(event.target.value)}
-              className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
-            >
-              <option value="all">All Airlines</option>
-              {airlineOptions.map((airline) => (
-                <option key={airline} value={airline}>
-                  {airline}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={supplierFilter}
-              onChange={(event) => setSupplierFilter(event.target.value)}
-              className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
-            >
-              <option value="all">All Suppliers</option>
-              {supplierOptions.map((supplier) => (
-                <option key={supplier} value={supplier}>
-                  {supplier}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={paymentFilter}
-              onChange={(event) => setPaymentFilter(event.target.value as "all" | "paid" | "pending")}
-              className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
-            >
-              <option value="all">All Payments</option>
-              <option value="paid">Paid</option>
-              <option value="pending">Payment Pending</option>
-            </select>
-
-            <select
-              value={staffFilter}
-              onChange={(event) => setStaffFilter(event.target.value as "all" | "assigned" | "unassigned")}
-              className="rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none transition-colors focus:border-[#33A1FD]"
-            >
-              <option value="all">All Staff</option>
-              <option value="assigned">Assigned</option>
-              <option value="unassigned">Unassigned</option>
-            </select>
-          </div>
-        </div>
-
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1480px] text-sm">
             <thead className="bg-[#F5F7FA] text-[#486581]">

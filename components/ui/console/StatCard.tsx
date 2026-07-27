@@ -12,28 +12,53 @@ interface StatCardProps {
   colorClass: string;
   bgClass: string;
   icon: LucideIcon;
+  active?: boolean;
+  onClick?: () => void;
 }
 
-export function StatCard({ title, value, trend, isPositive, colorClass, bgClass, icon: Icon }: StatCardProps) {
+export function StatCard({
+  title,
+  value,
+  trend,
+  isPositive,
+  colorClass,
+  bgClass,
+  icon: Icon,
+  active = false,
+  onClick,
+}: StatCardProps) {
+  const interactive = Boolean(onClick);
+
   return (
-    <motion.div
+    <motion.button
+      type="button"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
-      whileHover={{ y: -3 }}
-      className="relative overflow-hidden bg-white rounded-[12px] shadow-sm border-[0.5px] border-[#D9E1EA] p-4 sm:p-5 hover:border-[#009877]/35 transition-all duration-300"
+      whileHover={interactive ? { y: -3 } : undefined}
+      onClick={onClick}
+      disabled={!interactive}
+      aria-pressed={interactive ? active : undefined}
+      className={cn(
+        "relative w-full overflow-hidden rounded-[10px] border-[0.5px] bg-white p-3 text-left transition-colors duration-200",
+        active
+          ? "border-[#009877] ring-1 ring-[#009877]/30 bg-[#009877]/5"
+          : "border-[#D9E1EA]",
+        interactive
+          ? "cursor-pointer hover:border-[#009877]/35"
+          : "cursor-default",
+      )}
     >
-      <span aria-hidden className="pointer-events-none absolute -right-8 -top-8 h-20 w-20 rounded-full bg-[#33A1FD]/8 blur-2xl" />
-      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
-        <div className="space-y-2 min-w-0">
-          <p className="text-xs sm:text-sm font-heading font-medium text-[#486581] leading-tight">{title}</p>
-          <div className="flex flex-wrap items-baseline gap-2">
-            <h3 className="text-xl sm:text-2xl font-heading font-semibold text-[#102A43] leading-none">{value}</h3>
+      <div className="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-start">
+        <div className="space-y-1 min-w-0">
+          <p className="text-[11px] sm:text-xs font-heading font-medium text-[#486581] leading-tight">{title}</p>
+          <div className="flex flex-wrap items-baseline gap-1.5">
+            <h3 className="text-lg sm:text-xl font-heading font-semibold text-[#102A43] leading-none">{value}</h3>
             {trend && (
-              <span 
+              <span
                 className={cn(
-                  "text-[10px] sm:text-xs font-heading font-semibold px-2 py-0.5 rounded-full whitespace-nowrap",
-                  isPositive ? "bg-[#009877]/12 text-[#006F57]" : "bg-[#B42318]/12 text-[#B42318]"
+                  "text-[10px] font-heading font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap",
+                  isPositive ? "bg-[#009877]/12 text-[#006F57]" : "bg-[#B42318]/12 text-[#B42318]",
                 )}
               >
                 {trend}
@@ -41,10 +66,10 @@ export function StatCard({ title, value, trend, isPositive, colorClass, bgClass,
             )}
           </div>
         </div>
-        <div className={cn("p-2.5 sm:p-3 rounded-lg flex items-center justify-center self-start", bgClass, colorClass)}>
-          <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
+        <div className={cn("p-2 rounded-lg flex items-center justify-center self-start", bgClass, colorClass)}>
+          <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
         </div>
       </div>
-    </motion.div>
+    </motion.button>
   );
 }

@@ -73,6 +73,7 @@ export type EasyFlyBooking = {
   amountPaid: number;
   amountReceived: number;
   amountDue: number;
+  extraAmount: number;
   paymentDueDate: string | null;
   refundStatus: RefundStatus;
   scheduleChange: ScheduleChange;
@@ -113,6 +114,7 @@ type EasyFlyBookingApi = {
   amount_paid: number;
   amount_received: number;
   amount_due: number;
+  extra_amount?: number;
   payment_due_date: string | null;
   refund_status: RefundStatus;
   schedule_change: ScheduleChange;
@@ -202,6 +204,7 @@ const toBooking = (booking: EasyFlyBookingApi): EasyFlyBooking => ({
   amountPaid: booking.amount_paid,
   amountReceived: booking.amount_received,
   amountDue: booking.amount_due,
+  extraAmount: Number(booking.extra_amount ?? 0),
   paymentDueDate: booking.payment_due_date ?? null,
   refundStatus: booking.refund_status,
   scheduleChange: booking.schedule_change,
@@ -251,6 +254,8 @@ export type EasyFlyBookingFilters = {
   airline?: string;
   depFrom?: string;
   depTo?: string;
+  bookedFrom?: string;
+  bookedTo?: string;
   scheduleChange?: string;
   createdBy?: number | null;
 };
@@ -264,6 +269,8 @@ export const listEasyFlyBookings = async (
   if (filters.airline) query.set("airline", filters.airline);
   if (filters.depFrom) query.set("dep_from", filters.depFrom);
   if (filters.depTo) query.set("dep_to", filters.depTo);
+  if (filters.bookedFrom) query.set("booked_from", filters.bookedFrom);
+  if (filters.bookedTo) query.set("booked_to", filters.bookedTo);
   if (filters.scheduleChange) query.set("schedule_change", filters.scheduleChange);
   if (typeof filters.createdBy === "number") query.set("created_by", String(filters.createdBy));
 

@@ -84,7 +84,7 @@ export default function ReviewPage() {
       </div>
 
       <div className="pt-2">
-        <ProgressStepper currentStep={5} />
+        <ProgressStepper currentStep={2} />
       </div>
 
       <div className="max-w-[900px] mx-auto px-4 mt-6 relative z-10">
@@ -100,7 +100,7 @@ export default function ReviewPage() {
             <span className="text-[#2563eb]"> In Process</span>
           </h1>
           <p className="font-body text-[14px] sm:text-[15px] text-[#5f7694] mt-3 max-w-[760px] leading-relaxed">
-            Step 5 is completed. Your file is now in processing and live updates are available in the tracking dashboard.
+            Your documents step is completed. Your file is now in processing and live updates are available in the tracking dashboard.
           </p>
 
           <div className="mt-6">

@@ -4,6 +4,7 @@ import { Breadcrumb } from "@/components/console/Breadcrumb";
 import { StatCard } from "@/components/ui/console/StatCard";
 import { ShieldAlert, Users, FileLock, KeyRound, Check, X, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 const AUDIT_LOGS = [
   { id: 1, user: "Aman D.", action: "Downloaded File", target: "OCI-1002_passport.pdf", time: "10:45 AM", flag: false },
@@ -25,15 +26,14 @@ const PERMISSIONS = [
 ];
 
 export default function SecurityPage() {
+  useSetAdminPageChrome({
+    title: "Security",
+    icon: ShieldAlert,
+    syncKey: "security",
+  });
+
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 max-w-7xl mx-auto font-body">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Security & Audit</h1>
-          <p className="text-[#486581] text-sm mt-1">Monitor access, logs, and system permissions</p>
-        </div>
-      </div>
-      
       <Breadcrumb />
 
       {/* Security Stats */}

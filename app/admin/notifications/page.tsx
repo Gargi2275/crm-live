@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Bell, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   createAdminNotificationModule,
   deleteAdminNotificationModule,
@@ -120,25 +121,25 @@ export default function AdminNotificationsPage() {
     }
   };
 
+  useSetAdminPageChrome({
+    title: "Notifications",
+    subtitle: "Toggle categories to control in-app alerts and email.",
+    icon: Bell,
+    syncKey: `${loading}|${prefs.length}|${catalog.length}|${isAdmin}`,
+    actions: (
+      <button
+        type="button"
+        onClick={() => void load()}
+        className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+      >
+        <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        Refresh
+      </button>
+    ),
+  });
+
   return (
     <div className="space-y-6 font-body">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-heading font-semibold text-[#102A43]">Notifications</h1>
-          <p className="mt-1 text-sm text-[#627D98]">
-            Toggle categories to control in-app alerts and email. Changes apply immediately.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-lg border border-[#D9E1EA] px-3 py-2 text-sm font-medium text-[#486581] hover:bg-[#F8FAFC]"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
-      </div>
-
       <section className="rounded-xl border border-[#D9E1EA] bg-white overflow-hidden">
         <div className="border-b border-[#E5EAF0] px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-[#102A43]">

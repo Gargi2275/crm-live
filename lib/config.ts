@@ -91,6 +91,9 @@ export const API_ENDPOINTS = {
     TESTIMONIALS: '/public/testimonials/',
     FAQS: '/public/faqs/',
     PRICING: '/public/pricing/',
+    DOCUMENT_REQUIREMENTS: '/public/services/:service_type/document-requirements/',
+    SERVICE_QUESTIONS: '/public/services/:service_type/questions/',
+    RESOLVE_CHECKLIST: '/public/services/:service_type/resolve-checklist/',
   },
   // Cookies
   COOKIES: {

@@ -18,7 +18,7 @@ const contactItems = [
     icon: MessageCircle,
     title: "WhatsApp (Messages Only)",
     subtitle: "For quick updates and secure communication.",
-    link: { href: "https://wa.me/447000000000", label: "+44 7000 000000" },
+    link: { href: "https://wa.me/442078086162", label: "+44 20 7808 6162" },
   },
   {
     icon: Clock,

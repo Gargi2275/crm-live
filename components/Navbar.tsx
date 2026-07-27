@@ -1,32 +1,23 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Menu, X, ChevronDown, CircleUserRound } from "lucide-react";
+import { Menu, X, ChevronDown, CircleUserRound, ArrowRight } from "lucide-react";
 import { Button } from "./ui/Button";
 import Image from "next/image";
 import { useAuth } from "@/context/AuthContext";
 import { authenticatedFetch } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
+import { usePublicPricing } from "@/hooks/usePublicPricing";
+import { groupServicesByCategory } from "@/lib/service-categories";
 
-const navLinks = [
+const baseNavLinks = [
   { name: "Home", href: "/" },
-  {
-    name: "Services",
-    href: "/services",
-    dropdown: [
-      { name: "New OCI Card", href: "/services/new-oci" },
-      { name: "OCI Renewal / Transfer", href: "/services/oci-renewal" },
-      { name: "OCI Update (Gratis)", href: "/services/oci-update" },
-      { name: "Indian e-Visa", href: "/services/indian-evisa" },
-      { name: "Indian Passport Renewal", href: "/services/passport-renewal" },
-      { name: "Apostille Services", href: "/apostille-services" },
-    ],
-  },
+  { name: "Services", href: "/services", servicesMenu: true },
   { name: "How It Works", href: "/how-it-works" },
-  { name: "Document Audit", href: "/document-audit" },
   { name: "Pricing", href: "/pricing" },
   { name: "FAQs", href: "/faqs" },
   { name: "About", href: "/about" },
@@ -36,6 +27,13 @@ const navLinks = [
 export function Navbar() {
   const router = useRouter();
   const { isAuthenticated, logout, loading } = useAuth();
+  const { services, loading: pricingLoading, assessmentFee } = usePublicPricing();
+  const navLinks = useMemo(() => {
+    if (assessmentFee == null || assessmentFee <= 0) return baseNavLinks;
+    const links = [...baseNavLinks];
+    links.splice(3, 0, { name: "Early Assessment", href: "/document-audit" });
+    return links;
+  }, [assessmentFee]);
   const [isScrolled, setIsScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState(false);
@@ -43,10 +41,51 @@ export function Navbar() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   // const [dashboardQuoteHref, setDashboardQuoteHref] = useState<string>("/dashboard");
   const [hasQuoteNotification, setHasQuoteNotification] = useState(false);
+  const [portalReady, setPortalReady] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
   const { scrollY } = useScroll();
   const isDashboardRoute = pathname === "/dashboard";
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  const serviceGroups = useMemo(
+    () => groupServicesByCategory(services),
+    [services],
+  );
+
+  const serviceHrefs = useMemo(
+    () => serviceGroups.flatMap((group) => [group.href, ...group.services.map((s) => s.href)]),
+    [serviceGroups],
+  );
+
+  const totalServiceCount = useMemo(
+    () => serviceGroups.reduce((sum, group) => sum + group.services.length, 0),
+    [serviceGroups],
+  );
+
+  const servicesCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const openServicesMenu = () => {
+    if (servicesCloseTimer.current) {
+      clearTimeout(servicesCloseTimer.current);
+      servicesCloseTimer.current = null;
+    }
+    setActiveDropdown(true);
+  };
+
+  const closeServicesMenu = () => {
+    if (servicesCloseTimer.current) clearTimeout(servicesCloseTimer.current);
+    servicesCloseTimer.current = setTimeout(() => setActiveDropdown(false), 120);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (servicesCloseTimer.current) clearTimeout(servicesCloseTimer.current);
+    };
+  }, []);
 
   const handleLogout = async () => {
     if (isLoggingOut) return;
@@ -61,11 +100,7 @@ export function Navbar() {
   };
 
   useMotionValueEvent(scrollY, "change", (latest) => {
-    if (latest > 80) {
-      setIsScrolled(true);
-    } else {
-      setIsScrolled(false);
-    }
+    setIsScrolled(latest > 12);
   });
 
   // Close menu when route changes
@@ -145,13 +180,16 @@ export function Navbar() {
   return (
     <>
       <motion.nav
-        initial={{ backgroundColor: "rgba(255, 255, 255, 0.9)", borderBottomColor: "rgba(51, 161, 253, 0.08)" }}
+        initial={false}
         animate={{
-          backgroundColor: isScrolled ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.95)",
-          borderBottomColor: isScrolled ? "rgba(51, 161, 253, 0.2)" : "rgba(51, 161, 253, 0.08)",
+          backgroundColor: isScrolled ? "rgba(255, 255, 255, 1)" : "rgba(255, 255, 255, 0.92)",
+          borderBottomColor: isScrolled ? "rgba(15, 42, 67, 0.08)" : "rgba(51, 161, 253, 0.1)",
+          boxShadow: isScrolled
+            ? "0 1px 0 rgba(15,42,67,0.04), 0 8px 24px rgba(15,42,67,0.06)"
+            : "0 0 0 rgba(0,0,0,0)",
         }}
-        transition={{ duration: 0.3 }}
-        className={`fixed top-0 w-full z-50 border-b transition-shadow backdrop-blur-xl ${isScrolled ? "shadow-navbar" : ""}`}
+        transition={{ duration: 0.2 }}
+        className={`fixed top-0 z-50 w-full border-b ${isScrolled ? "" : "backdrop-blur-md"}`}
       >
         <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10">
           <div className="flex h-18 items-center justify-between gap-4 lg:h-20">
@@ -174,53 +212,40 @@ export function Navbar() {
               {navLinks.map((link) => {
                 const isActive =
                   pathname === link.href ||
-                  (link.dropdown?.some((sub) => pathname === sub.href) ?? false);
+                  (link.servicesMenu
+                    ? serviceHrefs.includes(pathname) || pathname.startsWith("/services/")
+                    : false);
 
                 return (
                 <div
                   key={link.name}
-                  className="relative group"
-                  onMouseEnter={() => link.dropdown && setActiveDropdown(true)}
-                  onMouseLeave={() => link.dropdown && setActiveDropdown(false)}
+                  className="relative"
+                  onMouseEnter={() => link.servicesMenu && openServicesMenu()}
+                  onMouseLeave={() => link.servicesMenu && closeServicesMenu()}
                 >
                   <Link
                     href={link.href}
-                    className={`relative flex items-center whitespace-nowrap rounded-md px-2 py-2 text-sm font-medium no-underline transition-colors duration-250 xl:px-3 ${
-                      isActive ? "text-primary" : "text-dark/90 hover:text-primary"
+                    className={`relative flex items-center whitespace-nowrap rounded-md px-2 py-2 text-base font-medium no-underline transition-colors duration-250 xl:px-3 ${
+                      isActive || (link.servicesMenu && activeDropdown)
+                        ? "text-primary"
+                        : "text-dark/90 hover:text-primary"
                     } after:absolute after:bottom-0 after:left-2 after:right-2 after:h-[2px] after:rounded-full after:bg-primary after:transition-transform after:duration-250 after:content-[''] ${
-                      isActive ? "after:scale-x-100" : "after:scale-x-0 hover:after:scale-x-100"
+                      isActive || (link.servicesMenu && activeDropdown)
+                        ? "after:scale-x-100"
+                        : "after:scale-x-0 hover:after:scale-x-100"
                     }`}
+                    aria-expanded={link.servicesMenu ? activeDropdown : undefined}
+                    aria-haspopup={link.servicesMenu ? "menu" : undefined}
                   >
                     {link.name}
-                    {link.dropdown && <ChevronDown className="ml-1 h-4 w-4 shrink-0" />}
+                    {link.servicesMenu && (
+                      <ChevronDown
+                        className={`ml-1 h-4 w-4 shrink-0 transition-transform duration-200 ${
+                          activeDropdown ? "rotate-180" : ""
+                        }`}
+                      />
+                    )}
                   </Link>
-
-                  {/* Dropdown Menu */}
-                  {link.dropdown && (
-                    <AnimatePresence>
-                      {activeDropdown && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 10 }}
-                          transition={{ duration: 0.2 }}
-                          className="absolute left-0 mt-2 w-56 rounded-2xl bg-white/95 backdrop-blur-md shadow-[0_14px_36px_rgba(51,161,253,0.16)] ring-1 ring-primary/10 overflow-hidden focus:outline-none"
-                        >
-                          <div className="py-2">
-                            {link.dropdown.map((sublink) => (
-                              <Link
-                                key={sublink.name}
-                                href={sublink.href}
-                                className="block px-4 py-3 text-sm text-dark hover:bg-bg-blue/70 hover:text-primary transition-colors"
-                              >
-                                {sublink.name}
-                              </Link>
-                            ))}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  )}
                 </div>
                 );
               })}
@@ -233,13 +258,13 @@ export function Navbar() {
                 <>
                   <Link
                     href="/track"
-                    className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 mr-2"
+                    className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-base font-semibold text-blue-700 transition-colors hover:bg-blue-100 mr-2"
                   >
                     Track application
                   </Link>
                   <Link
                     href="/contact"
-                    className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                    className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                   >
                     Need Help
                   </Link>
@@ -290,16 +315,16 @@ export function Navbar() {
                   )}
                 </>
               ) : loading ? (
-                <Button variant="outline" className="text-sm" disabled>Loading...</Button>
+                <Button variant="outline" className="text-base" disabled>Loading...</Button>
               ) : isAuthenticated ? (
                 <>
                   <Link href="/dashboard" className="relative">
                     {hasQuoteNotification ? <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-rose-500" aria-hidden="true" /> : null}
-                    <Button variant="outline" className="text-sm">Dashboard</Button>
+                    <Button variant="outline" className="text-base">Dashboard</Button>
                   </Link>
                   <Button
                     variant="primary"
-                    className="text-sm"
+                    className="text-base"
                     onClick={handleLogout}
                     disabled={isLoggingOut}
                   >
@@ -308,7 +333,7 @@ export function Navbar() {
                 </>
               ) : (
                 <Link href="/auth/login">
-                  <Button variant="outline" className="text-sm">Login</Button>
+                  <Button variant="outline" className="text-base">Login</Button>
                 </Link>
               )}
             </div>
@@ -408,16 +433,28 @@ export function Navbar() {
                       >
                         {link.name}
                       </Link>
-                      {link.dropdown && (
-                        <div className="mt-3 ml-4 pl-4 border-l-2 border-primary/20 space-y-3">
-                          {link.dropdown.map((sublink) => (
-                            <Link
-                              key={sublink.name}
-                              href={sublink.href}
-                              className="block text-base text-textMuted hover:text-primary"
-                            >
-                              {sublink.name}
-                            </Link>
+                      {link.servicesMenu && (
+                        <div className="mt-3 ml-1 space-y-5 border-l-2 border-primary/20 pl-4">
+                          {serviceGroups.map((group) => (
+                            <div key={group.id}>
+                              <Link
+                                href={group.href}
+                                className="block text-sm font-bold text-[#1c69dd]"
+                              >
+                                {group.title}
+                              </Link>
+                              <div className="mt-2 space-y-1">
+                                {group.services.map((service) => (
+                                  <Link
+                                    key={String(service.id)}
+                                    href={service.href}
+                                    className="block py-1.5 text-[15px] font-medium text-[#334e68] hover:text-primary"
+                                  >
+                                    {service.name}
+                                  </Link>
+                                ))}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -453,6 +490,105 @@ export function Navbar() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {portalReady && !isDashboardRoute
+        ? createPortal(
+            <AnimatePresence>
+              {activeDropdown ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 6 }}
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  className="pointer-events-none fixed inset-x-0 top-[4.5rem] z-[60] hidden justify-center px-4 pt-2 lg:flex lg:top-20"
+                >
+                  <div
+                    role="menu"
+                    className="pointer-events-auto w-full max-w-5xl overflow-hidden rounded-2xl border border-[#d6e8ff] bg-white shadow-[0_24px_56px_rgba(15,42,67,0.16)]"
+                    onMouseEnter={openServicesMenu}
+                    onMouseLeave={closeServicesMenu}
+                  >
+                    <div className="border-b border-[#eef3f9] px-6 py-4">
+                      <p className="text-sm font-semibold text-[#102a43]">Browse services by category</p>
+                      <p className="mt-0.5 text-sm text-[#627d98]">
+                        Pick a category, then choose the service that fits your case.
+                      </p>
+                    </div>
+
+                    <div
+                      className={`grid gap-0 px-3 py-5 sm:px-5 ${
+                        serviceGroups.length >= 4
+                          ? "grid-cols-2 xl:grid-cols-4"
+                          : serviceGroups.length === 3
+                            ? "grid-cols-1 md:grid-cols-3"
+                            : "grid-cols-1 sm:grid-cols-2"
+                      }`}
+                    >
+                      {pricingLoading && serviceGroups.length === 0
+                        ? Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="animate-pulse space-y-3 px-4 py-2">
+                              <div className="h-4 w-32 rounded bg-[#e8f1ff]" />
+                              <div className="h-5 w-full rounded bg-[#f0f5ff]" />
+                              <div className="h-5 w-5/6 rounded bg-[#f0f5ff]" />
+                            </div>
+                          ))
+                        : serviceGroups.map((group, index) => (
+                            <div
+                              key={group.id}
+                              className={`px-4 py-2 ${
+                                index > 0 ? "border-t border-[#eef3f9] xl:border-t-0 xl:border-l" : ""
+                              }`}
+                            >
+                              <Link
+                                href={group.href}
+                                className="mb-3 block text-[15px] font-bold leading-snug text-[#1c69dd] transition-colors hover:text-[#155fc4]"
+                              >
+                                {group.title}
+                              </Link>
+                              <ul className="space-y-1">
+                                {group.services.map((service) => (
+                                  <li key={String(service.id)}>
+                                    <Link
+                                      href={service.href}
+                                      className="block rounded-lg px-2 py-2.5 text-[15px] font-medium leading-snug text-[#102a43] transition-colors hover:bg-[#f4f8ff] hover:text-[#1c69dd]"
+                                    >
+                                      {service.name}
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                    </div>
+
+                    <div className="flex flex-col gap-2 border-t border-[#e8f1ff] bg-[#f8fbff] px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                      <Link
+                        href="/services"
+                        className="inline-flex items-center gap-1.5 text-[15px] font-bold text-[#1c69dd] transition-colors hover:text-[#155fc4]"
+                      >
+                        View all {totalServiceCount || ""} services
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                      <p className="text-sm text-[#627d98]">
+                        Unsure where to begin?{" "}
+                        {assessmentFee != null && assessmentFee > 0 ? (
+                          <Link href="/document-audit" className="font-semibold text-[#1c69dd] hover:underline">
+                            Start with an early assessment
+                          </Link>
+                        ) : (
+                          <Link href="/services" className="font-semibold text-[#1c69dd] hover:underline">
+                            Browse services
+                          </Link>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

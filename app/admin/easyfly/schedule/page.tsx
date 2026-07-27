@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { listEasyFlyBookings, type EasyFlyBooking } from "@/lib/easyfly";
-import { CalendarClock, Search, Eye } from "lucide-react";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
+import { CalendarClock, Eye } from "lucide-react";
 
-type ScheduleChange = "none" | "minor" | "major";
 type BookingRow = EasyFlyBooking;
+
+const filterFieldClass =
+  "mt-1 w-full rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm text-[#102A43]";
 
 const formatDate = (dateString: string) =>
   new Date(dateString).toLocaleDateString("en-IN", {
@@ -155,6 +158,58 @@ export default function EasyFlySchedulePage() {
   const majorCount = scheduleRows.filter((booking) => booking.scheduleChange === "major").length;
   const minorCount = scheduleRows.filter((booking) => booking.scheduleChange === "minor").length;
 
+  const clearFilters = useCallback(() => {
+    setChangeFilter("all");
+    setSupplierFilter("all");
+  }, []);
+
+  const activeFilterCount =
+    (changeFilter !== "all" ? 1 : 0) + (supplierFilter !== "all" ? 1 : 0);
+
+  useSetAdminPageChrome({
+    title: "Schedule Changes",
+    icon: CalendarClock,
+    search: {
+      value: search,
+      onChange: setSearch,
+      placeholder: "Search pax name, PNR",
+    },
+    activeFilterCount,
+    onClearFilters: clearFilters,
+    syncKey: `${search}|${changeFilter}|${supplierFilter}|${loading}|${scheduleRows.length}`,
+    filtersContent: (
+      <>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Change type</span>
+          <select
+            value={changeFilter}
+            onChange={(e) => setChangeFilter(e.target.value as "all" | "minor" | "major")}
+            className={filterFieldClass}
+          >
+            <option value="all">All</option>
+            <option value="minor">Minor</option>
+            <option value="major">Major</option>
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Supplier</span>
+          <select
+            value={supplierFilter}
+            onChange={(e) => setSupplierFilter(e.target.value)}
+            className={filterFieldClass}
+          >
+            <option value="all">All Suppliers</option>
+            {supplierOptions.map((supplier) => (
+              <option key={supplier} value={supplier}>
+                {supplier}
+              </option>
+            ))}
+          </select>
+        </label>
+      </>
+    ),
+  });
+
   if (loading) {
     return (
       <div className="font-body max-w-[1200px] mx-auto">
@@ -179,23 +234,13 @@ export default function EasyFlySchedulePage() {
 
   return (
     <div className="space-y-4 font-body max-w-[1400px] mx-auto">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43] inline-flex items-center gap-2">
-            <CalendarClock className="w-6 h-6 text-[#009877]" />
-            Schedule Changes
-          </h1>
-          <p className="mt-1 text-sm text-[#627D98]">Bookings with flight schedule changes</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="inline-flex rounded-full border border-[#009877]/35 bg-[#009877]/12 px-3 py-1 text-xs font-semibold text-[#006F57]">
-            Minor: {minorCount}
-          </span>
-          <span className="inline-flex rounded-full border border-[#F1A7A0]/45 bg-[#FDECEC] px-3 py-1 text-xs font-semibold text-[#B42318]">
-            Major: {majorCount}
-          </span>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex rounded-full border border-[#009877]/35 bg-[#009877]/12 px-3 py-1 text-xs font-semibold text-[#006F57]">
+          Minor: {minorCount}
+        </span>
+        <span className="inline-flex rounded-full border border-[#F1A7A0]/45 bg-[#FDECEC] px-3 py-1 text-xs font-semibold text-[#B42318]">
+          Major: {majorCount}
+        </span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -210,43 +255,6 @@ export default function EasyFlySchedulePage() {
         <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
           <p className="text-xs text-[#627D98]">Major Changes</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#B42318]">{majorCount}</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <label className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#7B8794]" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search pax name, PNR"
-              className="w-full rounded-[10px] border border-[#D9E1EA] bg-white pl-9 pr-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]"
-            />
-          </label>
-
-          <select
-            value={changeFilter}
-            onChange={(e) => setChangeFilter(e.target.value as "all" | "minor" | "major")}
-            className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]"
-          >
-            <option value="all">All</option>
-            <option value="minor">Minor</option>
-            <option value="major">Major</option>
-          </select>
-
-          <select
-            value={supplierFilter}
-            onChange={(e) => setSupplierFilter(e.target.value)}
-            className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]"
-          >
-            <option value="all">All Suppliers</option>
-            {supplierOptions.map((supplier) => (
-              <option key={supplier} value={supplier}>
-                {supplier}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 

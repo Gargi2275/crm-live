@@ -3,6 +3,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { ArrowRight, BadgeCheck, CheckCircle2, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "@/context/AuthContext";
 
 const container = {
   hidden: {},
@@ -58,6 +59,11 @@ export function ServicePageLayout({
   processSteps,
 }: ServicePageLayoutProps) {
   const reduceMotion = useReducedMotion();
+  const { isAuthenticated } = useAuth();
+  const startHref =
+    isAuthenticated || !pricing.ctaHref.startsWith("/")
+      ? pricing.ctaHref
+      : `/auth/login?next=${encodeURIComponent(pricing.ctaHref)}`;
 
   return (
     <>
@@ -172,7 +178,7 @@ export function ServicePageLayout({
                       {pricing.footnote}
                     </p>
                   )}
-                  <Link href={pricing.ctaHref} className="group mt-6 block">
+                  <Link href={startHref} className="group mt-6 block">
                     <motion.span
                       whileHover={reduceMotion ? undefined : { scale: 1.02 }}
                       whileTap={reduceMotion ? undefined : { scale: 0.98 }}

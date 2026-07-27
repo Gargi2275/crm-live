@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -29,6 +29,7 @@ import {
 } from "@/lib/stripe-checkout";
 import { adminAuthenticatedFetch } from "@/lib/admin-auth";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   ChevronLeft,
   Pencil,
@@ -55,6 +56,7 @@ type BookingFormState = {
   returnDate: string;
   amountPaid: string;
   amountReceived: string;
+  extraAmount: string;
   paymentDueDate: string;
   paymentMode: PaymentMode;
   depositType: "office" | "home";
@@ -146,6 +148,7 @@ const mapBookingToForm = (data: BookingRow): BookingFormState => ({
   returnDate: data.returnDate,
   amountPaid: String(data.amountPaid),
   amountReceived: String(data.amountReceived),
+  extraAmount: String(data.extraAmount || 0),
   paymentDueDate: data.paymentDueDate || "",
   paymentMode: data.paymentMode,
   depositType: data.depositType,
@@ -173,6 +176,7 @@ const buildBookingUpdatePayload = (
   return_date: form.returnDate,
   amount_paid: Number.parseInt(form.amountPaid, 10) || 0,
   amount_received: Number.parseInt(form.amountReceived, 10) || 0,
+  extra_amount: Number.parseInt(form.extraAmount, 10) || 0,
   payment_due_date: form.paymentDueDate || null,
   payment_mode: form.paymentMode,
   deposit_type: form.depositType,
@@ -420,6 +424,7 @@ export default function EasyFlyBookingDetailPage() {
     returnDate: "",
     amountPaid: "0",
     amountReceived: "0",
+    extraAmount: "0",
     paymentDueDate: "",
     paymentMode: "card",
     depositType: "office",
@@ -507,6 +512,36 @@ export default function EasyFlyBookingDetailPage() {
       active = false;
     };
   }, [bookingId]);
+
+  const saveFnRef = useRef<() => Promise<void>>(async () => {});
+
+  useSetAdminPageChrome({
+    title: "Booking Detail",
+    subtitle: form.pnr || booking?.pnr || undefined,
+    icon: FileText,
+    syncKey: `${loading}|${booking?.id ?? ""}|${form.pnr}|${error ?? ""}`,
+    actions: (
+      <>
+        <Link
+          href="/admin/easyfly"
+          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          Back
+        </Link>
+        {booking ? (
+          <button
+            type="button"
+            onClick={() => void saveFnRef.current()}
+            className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Save
+          </button>
+        ) : null}
+      </>
+    ),
+  });
 
   if (loading) {
     return (
@@ -849,43 +884,19 @@ export default function EasyFlyBookingDetailPage() {
     }
   };
 
+  saveFnRef.current = handleSave;
+
   return (
     <div className="space-y-4 font-body max-w-[1300px] mx-auto pb-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-2">
-          <Link
-            href="/admin/easyfly"
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-sm text-[#486581] hover:bg-[#F5F7FA]"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Back
-          </Link>
-          <div className="flex items-center gap-2">
-            <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Booking Detail</h1>
-            <span className="rounded-full bg-[#F5F7FA] border border-[#D9E1EA] px-3 py-1 text-xs text-[#486581] font-semibold">
-              {form.pnr}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSave}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm font-semibold text-[#486581] hover:bg-[#F5F7FA]"
-          >
-            <Pencil className="h-4 w-4" />
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#B42318] px-3 py-2 text-sm font-semibold text-white hover:bg-[#9E1C13]"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </button>
-        </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleDelete}
+          className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#B42318] px-3 py-2 text-sm font-semibold text-white hover:bg-[#9E1C13]"
+        >
+          <Trash2 className="h-4 w-4" />
+          Delete
+        </button>
       </div>
 
       <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-4">
@@ -955,7 +966,7 @@ export default function EasyFlyBookingDetailPage() {
               className={passengerFieldClassName}
             />
           </FormField>
-          <FormField label="Amount Paid">
+          <FormField label="Supplier Paid Amount">
             <input
               type="number"
               min="0"
@@ -965,13 +976,23 @@ export default function EasyFlyBookingDetailPage() {
               className={passengerFieldClassName}
             />
           </FormField>
-          <FormField label="Amount Received">
+          <FormField label="Client / Customer Received">
             <input
               type="number"
               min="0"
               step="1"
               value={form.amountReceived}
               onChange={(event) => updateForm({ amountReceived: event.target.value })}
+              className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="Extra Charges Paid To">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.extraAmount}
+              onChange={(event) => updateForm({ extraAmount: event.target.value })}
               className={passengerFieldClassName}
             />
           </FormField>
@@ -1016,12 +1037,17 @@ export default function EasyFlyBookingDetailPage() {
           </FormField>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <LabelValue label="Total Payment" value={formatInr(totalPayment)} />
           <LabelValue
-            label="Payment Pending"
+            label="Client Pending"
             value={formatInr(Math.max(0, paymentPending))}
             valueClassName="text-[#8D5E12]"
+          />
+          <LabelValue
+            label="Extra Paid"
+            value={formatInr(Number.parseInt(form.extraAmount, 10) || 0)}
+            valueClassName="text-[#1E40AF]"
           />
           <LabelValue
             label="Earnings"

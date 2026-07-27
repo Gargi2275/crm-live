@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Shuffle, Filter, X } from "lucide-react";
+import { RefreshCw, Shuffle, UserCog } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   StaffWorkloadSlideOver,
   type StaffWorkloadSummary,
@@ -25,6 +26,9 @@ import {
   type AdminStaffInternalMessage,
   type AdminTaskItem,
 } from "@/lib/admin-auth";
+
+const filterFieldClass =
+  "mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white";
 
 type KpiFilterKey = "all" | "assigned" | "pending" | "completed" | "unassigned";
 type WorkloadTab = "overview" | "notes";
@@ -58,7 +62,6 @@ export default function AdminWorkloadPage() {
   const [loading, setLoading] = useState(true);
   const [selectedStaff, setSelectedStaff] = useState<StaffWorkloadSummary | null>(null);
   const [internalMessages, setInternalMessages] = useState<AdminStaffInternalMessage[]>([]);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkloadTab>("overview");
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey | null>(null);
   const [staffSearch, setStaffSearch] = useState("");
@@ -379,12 +382,18 @@ export default function AdminWorkloadPage() {
 
   const clearFilters = () => {
     setKpiFilter(null);
-    setStaffSearch("");
     setRoleFilter("all");
     setLoadFilter("all");
     setStaffIdFilter("all");
     setTaskTypeFilter("all");
   };
+
+  const panelFilterCount =
+    (effectiveKpi !== null ? 1 : 0) +
+    (roleFilter !== "all" ? 1 : 0) +
+    (loadFilter !== "all" ? 1 : 0) +
+    (staffIdFilter !== "all" ? 1 : 0) +
+    (taskTypeFilter !== "all" ? 1 : 0);
 
   const getStaffTasks = (staffId: number) => {
     return taskItems
@@ -544,15 +553,6 @@ export default function AdminWorkloadPage() {
     }
   };
 
-  if (!canManageTasks) {
-    return (
-      <div className="space-y-4 font-body">
-        <h1 className="text-2xl font-heading font-semibold text-[#102A43]">Workload</h1>
-        <p className="text-sm text-[#627D98]">Available for admin and operations manager only.</p>
-      </div>
-    );
-  }
-
   const kpiButtons = [
     { key: "all" as const, label: "All", value: teamKpis.totalTasks },
     { key: "assigned" as const, label: "Assigned", value: teamKpis.assigned },
@@ -560,6 +560,125 @@ export default function AdminWorkloadPage() {
     { key: "completed" as const, label: "Done", value: teamKpis.completed },
     { key: "unassigned" as const, label: "Unassigned", value: teamKpis.unassignedPending },
   ];
+
+  useSetAdminPageChrome(
+    canManageTasks
+      ? {
+          title: "Workload",
+          subtitle: "Staff load, assignment & queue",
+          icon: UserCog,
+          search: {
+            value: staffSearch,
+            onChange: setStaffSearch,
+            placeholder: "Search staff or case ref…",
+          },
+          activeFilterCount: panelFilterCount,
+          onClearFilters: clearFilters,
+          syncKey: `${staffSearch}|${roleFilter}|${loadFilter}|${staffIdFilter}|${taskTypeFilter}|${kpiFilter}|${loading}|${taskActionLoading}|${autoAssignEligibleCount}|${staffKpiRows.length}`,
+          actions: (
+            <>
+              <button
+                type="button"
+                onClick={() => void loadDashboard()}
+                disabled={loading || taskActionLoading === "auto"}
+                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAutoAssignTasks()}
+                disabled={taskActionLoading === "auto"}
+                title={
+                  autoAssignEligibleCount === 0
+                    ? "No unassigned pending tasks"
+                    : autoAssignStaffCount === 0
+                      ? "No eligible staff to receive tasks"
+                      : `Distribute ${autoAssignEligibleCount} task(s) across ${autoAssignStaffCount} staff`
+                }
+                className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#33A1FD] px-2.5 py-1.5 text-sm font-semibold text-white hover:bg-[#0B69B7] disabled:opacity-60"
+              >
+                {taskActionLoading === "auto" ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Shuffle className="w-4 h-4" />}
+                Auto assign{autoAssignEligibleCount > 0 ? ` (${autoAssignEligibleCount})` : ""}
+              </button>
+            </>
+          ),
+          filtersContent: (
+            <>
+              <label className="block text-sm">
+                <span className="text-xs text-[#627D98]">Staff</span>
+                <select
+                  value={staffIdFilter}
+                  onChange={(e) => setStaffIdFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">All staff</option>
+                  <option value="unassigned">Unassigned only</option>
+                  {staffKpiRows.map((staff) => (
+                    <option key={staff.id} value={String(staff.id)}>
+                      {staff.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs text-[#627D98]">Role</span>
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">All roles</option>
+                  {roleOptions.map((role) => (
+                    <option key={role} value={role}>
+                      {role.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs text-[#627D98]">Load</span>
+                <select
+                  value={loadFilter}
+                  onChange={(e) => setLoadFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">Any</option>
+                  <option value="active">Active</option>
+                  <option value="busy">Busy</option>
+                  <option value="overloaded">Overloaded</option>
+                  <option value="overdue">Overdue tasks</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs text-[#627D98]">Task type</span>
+                <select
+                  value={taskTypeFilter}
+                  onChange={(e) => setTaskTypeFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">All task types</option>
+                  {taskTypeOptions.map((taskType) => (
+                    <option key={taskType} value={taskType}>
+                      {formatTaskTypeLabel(taskType)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ),
+        }
+      : { title: "Workload", icon: UserCog },
+  );
+
+  if (!canManageTasks) {
+    return (
+      <div className="space-y-4 font-body">
+        <p className="text-sm text-[#627D98]">Available for admin and operations manager only.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3 font-body">
@@ -571,57 +690,6 @@ export default function AdminWorkloadPage() {
         allTasks={selectedStaffAllTasks}
         internalNotes={selectedStaffNotes}
       />
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-heading font-semibold text-[#102A43] shrink-0">Workload</h1>
-        <div className="flex flex-wrap items-center gap-2 flex-1 justify-end min-w-0">
-          <input
-            type="search"
-            value={staffSearch}
-            onChange={(e) => setStaffSearch(e.target.value)}
-            placeholder="Search staff or case ref…"
-            className="w-full min-w-[180px] max-w-sm rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] placeholder:text-[#8A9BB0]"
-          />
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((open) => !open)}
-            className={`inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-sm font-semibold transition-colors ${
-              filtersOpen || hasFilters
-                ? "border-[#009877] bg-[#009877]/10 text-[#006F57]"
-                : "border-[#D9E1EA] bg-white text-[#102A43] hover:bg-[#F5F7FA]"
-            }`}
-          >
-            <Filter className="w-4 h-4" />
-            Filters
-            {hasFilters ? <span className="rounded-full bg-[#009877] px-1.5 text-[10px] text-white">on</span> : null}
-          </button>
-          <button
-            type="button"
-            onClick={() => void loadDashboard()}
-            disabled={loading || taskActionLoading === "auto"}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleAutoAssignTasks()}
-            disabled={taskActionLoading === "auto"}
-            title={
-              autoAssignEligibleCount === 0
-                ? "No unassigned pending tasks"
-                : autoAssignStaffCount === 0
-                  ? "No eligible staff to receive tasks"
-                  : `Distribute ${autoAssignEligibleCount} task(s) across ${autoAssignStaffCount} staff`
-            }
-            className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#33A1FD] px-3 py-2 text-sm font-semibold text-white hover:bg-[#0B69B7] disabled:opacity-60"
-          >
-            {taskActionLoading === "auto" ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Shuffle className="w-4 h-4" />}
-            Auto assign{autoAssignEligibleCount > 0 ? ` (${autoAssignEligibleCount})` : ""}
-          </button>
-        </div>
-      </div>
 
       <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-3">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
@@ -647,87 +715,6 @@ export default function AdminWorkloadPage() {
           ))}
         </div>
       </div>
-
-      {filtersOpen ? (
-        <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-[#102A43]">Filters</p>
-            {hasFilters ? (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#486581] hover:text-[#102A43]"
-              >
-                <X className="w-3.5 h-3.5" />
-                Clear all
-              </button>
-            ) : null}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <label className="block text-sm">
-              <span className="text-xs text-[#627D98]">Staff</span>
-              <select
-                value={staffIdFilter}
-                onChange={(e) => setStaffIdFilter(e.target.value)}
-                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
-              >
-                <option value="all">All staff</option>
-                <option value="unassigned">Unassigned only</option>
-                {staffKpiRows.map((staff) => (
-                  <option key={staff.id} value={String(staff.id)}>
-                    {staff.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-[#627D98]">Role</span>
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
-              >
-                <option value="all">All roles</option>
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-[#627D98]">Load</span>
-              <select
-                value={loadFilter}
-                onChange={(e) => setLoadFilter(e.target.value)}
-                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
-              >
-                <option value="all">Any</option>
-                <option value="active">Active</option>
-                <option value="busy">Busy</option>
-                <option value="overloaded">Overloaded</option>
-                <option value="overdue">Overdue tasks</option>
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="text-xs text-[#627D98]">Task type</span>
-              <select
-                value={taskTypeFilter}
-                onChange={(e) => setTaskTypeFilter(e.target.value)}
-                className="mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
-              >
-                <option value="all">All task types</option>
-                {taskTypeOptions.map((taskType) => (
-                  <option key={taskType} value={taskType}>
-                    {formatTaskTypeLabel(taskType)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-      ) : null}
 
       <div className="flex gap-1 border-b border-[#D9E1EA]">
         <button

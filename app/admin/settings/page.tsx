@@ -3,10 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { getAdminDashboardOverview, type AdminDashboardOverview } from "@/lib/admin-auth";
 import { motion } from "framer-motion";
+import { Settings } from "lucide-react";
 import toast from "react-hot-toast";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 export default function SettingsPage() {
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+
+  useSetAdminPageChrome({
+    title: "Settings",
+    icon: Settings,
+    syncKey: dashboardData ? "loaded" : "loading",
+  });
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -51,8 +59,6 @@ export default function SettingsPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="space-y-4 font-body max-w-[1200px] mx-auto"
     >
-      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Settings</h1>
-
       <motion.div whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
         <h2 className="text-[#102A43] font-heading font-semibold mb-2">Live Operational Controls</h2>
         <div className="space-y-3 text-sm text-[#486581]">

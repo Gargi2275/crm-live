@@ -465,6 +465,8 @@ export type ApplicationDetailResponse = {
   audit_credit_pence?: number;
   amount_due_pence?: number;
   service_total_pence?: number;
+  fee_plan_code?: string;
+  fee_plan_fee_pence?: number;
   quote_status?: string;
   quoted_fee?: string;
   full_payment_status?: string;
@@ -842,6 +844,389 @@ export const getPublicTestimonials = async (): Promise<PublicTestimonial[]> => {
   }
 }
 
+export type PublicBlogCategory = {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+  display_order?: number;
+  is_active?: boolean;
+};
+
+export type PublicBlogFaq = {
+  question: string;
+  answer: string;
+};
+
+export type PublicBlogPost = {
+  id: number;
+  title: string;
+  slug: string;
+  category: PublicBlogCategory | null;
+  category_id?: number | null;
+  excerpt: string;
+  featured_image_url?: string;
+  author_name?: string;
+  author_title?: string;
+  author_bio?: string;
+  author_image_url?: string;
+  read_time_minutes?: number;
+  cta_title?: string;
+  cta_body?: string;
+  cta_button_text?: string;
+  cta_button_url?: string;
+  meta_title?: string;
+  meta_description?: string;
+  is_published?: boolean;
+  show_on_homepage?: boolean;
+  display_order?: number;
+  published_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  content?: string;
+  faqs?: PublicBlogFaq[];
+};
+
+export type PublicBlogListResponse = {
+  success?: boolean;
+  message?: string;
+  data?: {
+    posts: PublicBlogPost[];
+    categories: PublicBlogCategory[];
+  };
+};
+
+export type PublicBlogDetailResponse = {
+  success?: boolean;
+  message?: string;
+  data?: {
+    post: PublicBlogPost;
+    related: PublicBlogPost[];
+  };
+};
+
+export type GetPublicBlogPostsParams = {
+  homepage?: boolean;
+  limit?: number;
+  category?: string;
+};
+
+export type PublicOriginCountryFaq = {
+  question: string;
+  answer: string;
+};
+
+export type PublicOriginCountryVisaOption = {
+  id: number;
+  service_id: number;
+  service_type: string;
+  service_name: string;
+  label: string;
+  fee: string;
+  entries: string;
+  max_stay: string;
+  validity: string;
+  travel_purpose: string;
+  display_order: number;
+  is_active: boolean;
+  cta_href: string;
+  duration: string;
+};
+
+export type PublicOriginCountry = {
+  id: number;
+  country_code: string;
+  name: string;
+  slug: string;
+  destination_code: string;
+  badge: string;
+  service_label: string;
+  href: string;
+  cta_href?: string;
+  secondary_label?: string;
+  secondary_href?: string;
+  image_url: string;
+  page_title?: string;
+  page_subtitle?: string;
+  faqs?: PublicOriginCountryFaq[];
+  visa_options?: PublicOriginCountryVisaOption[];
+  service_id?: number | null;
+  display_order?: number;
+  is_active?: boolean;
+};
+
+export type PublicOriginCountriesPayload = {
+  title: string;
+  subtitle: string;
+  countries: PublicOriginCountry[];
+};
+
+export type PublicHomepageModule = {
+  id: number;
+  key: string;
+  label: string;
+  display_order: number;
+  is_active: boolean;
+};
+
+export const getPublicHomepageModules = async (): Promise<PublicHomepageModule[]> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/public/homepage-modules/`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+    const raw = await response.json();
+    const modules = raw?.data?.modules;
+    return Array.isArray(modules) ? modules : [];
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to load homepage modules");
+  }
+};
+
+export type PublicOriginCountryDetailPayload = {
+  country: PublicOriginCountry;
+  other_countries: PublicOriginCountry[];
+};
+
+export const getPublicOriginCountries = async (): Promise<PublicOriginCountriesPayload> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/public/origin-countries/`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    const data = (raw?.data || {}) as Partial<PublicOriginCountriesPayload>;
+    return {
+      title: data.title || 'Apply for an Indian Visa from These Countries',
+      subtitle:
+        data.subtitle ||
+        'Apply for Indian visas from the USA, UK, Canada, Australia, and other countries with FlyOCI.',
+      countries: Array.isArray(data.countries) ? data.countries : [],
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to load origin countries');
+  }
+};
+
+export const getPublicOriginCountry = async (
+  slug: string,
+): Promise<PublicOriginCountryDetailPayload> => {
+  try {
+    const response = await apiCall(
+      `${API_BASE_URL}/public/origin-countries/${encodeURIComponent(slug)}/`,
+      {
+        method: 'GET',
+        cache: 'no-store',
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    const data = (raw?.data || {}) as Partial<PublicOriginCountryDetailPayload>;
+    if (!data.country) {
+      throw new Error('Country not found');
+    }
+    return {
+      country: data.country,
+      other_countries: Array.isArray(data.other_countries) ? data.other_countries : [],
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to load country page');
+  }
+};
+
+export type HubCitySummary = {
+  id: number;
+  name: string;
+  slug: string;
+  is_active?: boolean;
+  display_order?: number;
+};
+
+export type HubCountrySummary = {
+  id: number;
+  name: string;
+  slug: string;
+  currency_code: string;
+  currency_symbol: string;
+  is_active?: boolean;
+  display_order?: number;
+  cities?: HubCitySummary[];
+};
+
+export type HubServiceDocument = {
+  name: string;
+  description: string;
+  is_mandatory: boolean;
+  display_order: number;
+};
+
+export type HubOffering = {
+  service: {
+    id: number;
+    service_name: string;
+    service_type: string;
+    description: string;
+    category: { id: number; name: string; slug: string } | null;
+    documents: HubServiceDocument[];
+  };
+  govt_fee: string | null;
+  service_fee: string;
+  total_fee: string;
+  processing_time: string;
+  validity: string;
+  is_popular: boolean;
+  display_order: number;
+  fee_source: "country" | "city" | string;
+};
+
+export type HubCountryServicesPayload = {
+  country: HubCountrySummary;
+  cities: HubCitySummary[];
+  offerings: HubOffering[];
+};
+
+export type HubCityServicesPayload = {
+  country: HubCountrySummary;
+  city: HubCitySummary & { country_slug?: string };
+  offerings: HubOffering[];
+};
+
+export const getHubCountries = async (): Promise<HubCountrySummary[]> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/countries/`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+    const raw = await response.json();
+    const data = raw?.data || {};
+    return Array.isArray(data.countries) ? data.countries : [];
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to load hub countries");
+  }
+};
+
+export const getCountryHubServices = async (
+  countrySlug: string,
+): Promise<HubCountryServicesPayload> => {
+  const response = await apiCall(
+    `${API_BASE_URL}/countries/${encodeURIComponent(countrySlug)}/services/`,
+    { method: "GET", cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  const data = (raw?.data || {}) as Partial<HubCountryServicesPayload>;
+  if (!data.country) {
+    throw new Error("Country not found");
+  }
+  return {
+    country: data.country,
+    cities: Array.isArray(data.cities) ? data.cities : [],
+    offerings: Array.isArray(data.offerings) ? data.offerings : [],
+  };
+};
+
+export const getCityHubServices = async (
+  countrySlug: string,
+  citySlug: string,
+): Promise<HubCityServicesPayload> => {
+  const response = await apiCall(
+    `${API_BASE_URL}/countries/${encodeURIComponent(countrySlug)}/cities/${encodeURIComponent(citySlug)}/services/`,
+    { method: "GET", cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  const data = (raw?.data || {}) as Partial<HubCityServicesPayload>;
+  if (!data.country || !data.city) {
+    throw new Error("City not found");
+  }
+  return {
+    country: data.country,
+    city: data.city,
+    offerings: Array.isArray(data.offerings) ? data.offerings : [],
+  };
+};
+
+export const getPublicBlogPosts = async (
+  params: GetPublicBlogPostsParams = {}
+): Promise<{ posts: PublicBlogPost[]; categories: PublicBlogCategory[] }> => {
+  try {
+    const query = new URLSearchParams();
+    if (params.homepage) query.set('homepage', 'true');
+    if (params.limit != null) query.set('limit', String(params.limit));
+    if (params.category) query.set('category', params.category);
+
+    const qs = query.toString();
+    const url = qs
+      ? `${API_BASE_URL}/public/blog/?${qs}`
+      : `${API_BASE_URL}/public/blog/`;
+    const response = await apiCall(url, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw: PublicBlogListResponse = await response.json();
+    return {
+      posts: raw?.data?.posts || [],
+      categories: raw?.data?.categories || [],
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to load blog posts');
+  }
+};
+
+export const getPublicBlogPost = async (
+  slug: string
+): Promise<{ post: PublicBlogPost; related: PublicBlogPost[] }> => {
+  try {
+    const response = await apiCall(
+      `${API_BASE_URL}/public/blog/${encodeURIComponent(slug)}/`,
+      {
+        method: 'GET',
+        cache: 'no-store',
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw: PublicBlogDetailResponse = await response.json();
+    if (!raw?.data?.post) {
+      throw new Error('Post not found');
+    }
+
+    return {
+      post: raw.data.post,
+      related: raw.data.related || [],
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to load blog post');
+  }
+};
+
 export const submitTestimonial = async (payload: SubmitTestimonialPayload): Promise<PublicTestimonial> => {
   try {
     const response = await apiCall(`${API_BASE_URL}/public/testimonials/`, {
@@ -1058,13 +1443,15 @@ export const skipAuditWithDisclaimer = async (
  * Creates a Stripe Checkout session for full service payment.
  */
 export const createFullPaymentOrder = async (
-  referenceNumber: string
+  referenceNumber: string,
+  feePlanCode?: string,
 ): Promise<CreateFullPaymentOrderResponse> => {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/payment/full/create-order/`, {
       method: 'POST',
       body: JSON.stringify({
         reference_number: referenceNumber,
+        ...(feePlanCode ? { fee_plan_code: feePlanCode } : {}),
       }),
     });
 
@@ -1076,6 +1463,40 @@ export const createFullPaymentOrder = async (
     return (raw?.data || raw) as CreateFullPaymentOrderResponse;
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Failed to create full payment order');
+  }
+};
+
+export type SelectFullPaymentPlanResponse = {
+  reference_number: string;
+  fee_plan_code: string;
+  fee_plan_label?: string;
+  service_total_pence: number;
+  audit_credit_pence: number;
+  amount_due_pence: number;
+};
+
+/** Select standard/express fee plan before full payment; returns updated amounts. */
+export const selectFullPaymentPlan = async (
+  referenceNumber: string,
+  feePlanCode: string,
+): Promise<SelectFullPaymentPlanResponse> => {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/payment/full/select-plan/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reference_number: referenceNumber,
+        fee_plan_code: feePlanCode,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as SelectFullPaymentPlanResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to update payment plan');
   }
 };
 

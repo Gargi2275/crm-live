@@ -13,17 +13,15 @@ export default function NewOCIPage() {
       highlights={[
         { label: "Region", value: "UK & US Applicants" },
         { label: "Support", value: "End-to-End Guidance" },
-        { label: "Benefit", value: "£15 Audit Credit" },
+        { label: "Process", value: "Start directly online" },
       ]}
       pricing={{
         lines: [
-          { label: "Service fee", value: "£88" },
-          { label: "Audit credit", value: "-£15" },
-          { label: "After audit", value: "£73", highlight: true },
+          { label: "Service fee", value: "£88", highlight: true },
         ],
         footnote: "Government fees are paid separately as per latest rules.",
         ctaLabel: "Start application",
-        ctaHref: "/document-audit",
+        ctaHref: "/dashboard/document-audit?start=1&service=new_oci",
       }}
       whoFor={{
         title: "Who Is This Service For?",
@@ -32,7 +30,7 @@ export default function NewOCIPage() {
           "Children born abroad to eligible Indian origin parents",
           "Spouses of OCI / Indian origin in eligible cases",
         ],
-        footnote: "We will confirm your eligibility during the Document Audit.",
+        footnote: "We confirm eligibility during your application checklist.",
       }}
       whatYouGet={{
         title: "What You Get",
@@ -44,7 +42,7 @@ export default function NewOCIPage() {
         ],
       }}
       processSteps={[
-        "Document Audit (Recommended)",
+        "Start application for New OCI",
         "Form Filling & Online Submission",
         "Document Preparation & Printing Checklist",
         "Appointment / VFS Guidance",

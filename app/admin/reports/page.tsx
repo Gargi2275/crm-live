@@ -1,258 +1,1148 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   getAdminDashboardOverview,
   getStaffAccuracyAll,
+  listAdminApplications,
+  type AdminApplication,
   type AdminDashboardOverview,
   type StaffAccuracyRow,
 } from "@/lib/admin-auth";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from "recharts";
-import { motion } from "framer-motion";
-import { Lock } from "lucide-react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  Legend,
+} from "recharts";
+import {
+  Lock,
+  BarChart3,
+  Download,
+  IndianRupee,
+  Users,
+  Clock,
+  Activity,
+  Workflow,
+  ShieldCheck,
+  Layers,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
+
+type ReportPeriod = "today" | "week" | "month" | "all";
+type ReportType =
+  | "revenue"
+  | "leads"
+  | "pending_payments"
+  | "staff_performance"
+  | "pipeline_sla"
+  | "audit"
+  | "service_mix";
+
+const filterFieldClass =
+  "mt-1 w-full rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm text-[#102A43]";
+
+const CHART_COLORS = ["#009877", "#33A1FD", "#B87333", "#0F766E", "#D9E1EA", "#5F3DC4"];
+
+const REPORT_OPTIONS: { id: ReportType; label: string; description: string; icon: typeof IndianRupee }[] = [
+  {
+    id: "revenue",
+    label: "Revenue summary",
+    description: "Daily/monthly collections and earnings trend",
+    icon: IndianRupee,
+  },
+  {
+    id: "leads",
+    label: "Leads & conversion",
+    description: "Lead volume, converted cases, conversion rate",
+    icon: Users,
+  },
+  {
+    id: "pending_payments",
+    label: "Pending payments",
+    description: "Applications with amount due or payment pending",
+    icon: Clock,
+  },
+  {
+    id: "staff_performance",
+    label: "Staff performance",
+    description: "Accuracy, assigned, completed, pending workload",
+    icon: Activity,
+  },
+  {
+    id: "pipeline_sla",
+    label: "Pipeline & SLA",
+    description: "Open cases by stage and SLA breaches",
+    icon: Workflow,
+  },
+  {
+    id: "audit",
+    label: "Audit outcomes",
+    description: "Audit success ratio and audit fee revenue",
+    icon: ShieldCheck,
+  },
+  {
+    id: "service_mix",
+    label: "Service mix",
+    description: "Revenue and case count by service type",
+    icon: Layers,
+  },
+];
+
+const PENDING_PAY_STATUSES = new Set([
+  "payment_pending",
+  "pending_quote",
+  "quoted",
+  "final_submission_pending",
+]);
+
+const PAID_STATUSES = new Set([
+  "paid",
+  "payment_received",
+  "completed",
+  "dispatched",
+  "approved",
+  "submitted",
+]);
+
+function formatInr(amount: number) {
+  return `₹${amount.toLocaleString("en-IN")}`;
+}
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function daysAgo(n: number) {
+  const d = startOfToday();
+  d.setDate(d.getDate() - n);
+  return d;
+}
+
+function appCreatedAt(app: AdminApplication) {
+  const raw = app.created_at || app.application_date;
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function inPeriod(date: Date | null, period: ReportPeriod) {
+  if (!date) return period === "all";
+  if (period === "all") return true;
+  if (period === "today") return date >= startOfToday();
+  if (period === "week") return date >= daysAgo(6);
+  return date >= daysAgo(29);
+}
+
+function isPaidApplication(app: AdminApplication) {
+  const status = String(app.application_status || "").toLowerCase();
+  return (
+    Boolean(app.payment_confirmed) ||
+    String(app.full_payment_status || "").toLowerCase() === "paid" ||
+    PAID_STATUSES.has(status)
+  );
+}
+
+function isPendingPayment(app: AdminApplication) {
+  const status = String(app.application_status || "").toLowerCase();
+  return Number(app.amount_due_pence || 0) > 0 || PENDING_PAY_STATUSES.has(status);
+}
+
+function csvEscape(value: string | number | boolean | null | undefined) {
+  const text = String(value ?? "");
+  if (text.includes(",") || text.includes("\n") || text.includes('"')) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number>>) {
+  const csv = [headers.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 shadow-sm">
+      <p className="text-xs font-medium uppercase tracking-wide text-[#627D98]">{label}</p>
+      <p className="mt-2 text-xl font-heading font-semibold text-[#102A43]">{value}</p>
+      {hint ? <p className="mt-1 text-[11px] text-[#829AB1]">{hint}</p> : null}
+    </div>
+  );
+}
 
 export default function ReportsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { adminUser } = useAdminAuth();
-  const [tab, setTab] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
+  const canViewReports = ["admin", "ops_manager", "reviewer"].includes(adminUser?.role || "");
+  const canViewStaffAccuracy = adminUser?.role === "admin" || adminUser?.role === "ops_manager";
+
+  const initialType = (searchParams.get("type") || "revenue") as ReportType;
+  const [reportType, setReportTypeState] = useState<ReportType>(
+    REPORT_OPTIONS.some((o) => o.id === initialType) ? initialType : "revenue",
+  );
+  const [period, setPeriod] = useState<ReportPeriod>("month");
+  const [serviceFilter, setServiceFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [accuracyRows, setAccuracyRows] = useState<StaffAccuracyRow[]>([]);
-  const canViewReports = ["admin", "ops_manager", "reviewer"].includes(adminUser?.role || "");
+  const [applications, setApplications] = useState<AdminApplication[]>([]);
 
-  const getDateWindow = () => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - 29);
-    const to = end.toISOString().slice(0, 10);
-    const from = start.toISOString().slice(0, 10);
-    return { from, to };
-  };
+  const setReportType = useCallback(
+    (next: ReportType) => {
+      setReportTypeState(next);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("type", next);
+      router.replace(`/admin/reports?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
 
   useEffect(() => {
-    const loadDashboard = async () => {
-      try {
-        const payload = await getAdminDashboardOverview();
-        setDashboardData(payload);
+    const next = searchParams.get("type") as ReportType | null;
+    if (next && REPORT_OPTIONS.some((o) => o.id === next)) {
+      setReportTypeState(next);
+    }
+  }, [searchParams]);
 
-        if (adminUser?.role === "admin" || adminUser?.role === "ops_manager") {
-          const { from, to } = getDateWindow();
-          const accuracyPayload = await getStaffAccuracyAll(from, to);
-          setAccuracyRows(accuracyPayload.results || []);
-        } else {
-          setAccuracyRows([]);
-        }
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load reports data.");
+  const loadReports = useCallback(async () => {
+    if (!canViewReports) return;
+    setLoading(true);
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 29);
+      const to = end.toISOString().slice(0, 10);
+      const from = start.toISOString().slice(0, 10);
+
+      const [overview, apps] = await Promise.all([
+        getAdminDashboardOverview(),
+        listAdminApplications(),
+      ]);
+      setDashboardData(overview);
+      setApplications(apps);
+
+      if (canViewStaffAccuracy) {
+        const accuracyPayload = await getStaffAccuracyAll(from, to);
+        setAccuracyRows(accuracyPayload.results || []);
+      } else {
+        setAccuracyRows([]);
       }
-    };
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load reports data.");
+    } finally {
+      setLoading(false);
+    }
+  }, [canViewReports, canViewStaffAccuracy]);
 
-    void loadDashboard();
-  }, [adminUser?.role]);
+  useEffect(() => {
+    void loadReports();
+  }, [loadReports]);
 
-  const formatInr = (amount: number) => `₹${amount.toLocaleString("en-IN")}`;
+  const serviceOptions = useMemo(
+    () =>
+      Array.from(new Set(applications.map((app) => app.service_name).filter(Boolean) as string[])).sort(),
+    [applications],
+  );
+
+  const statusOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(applications.map((app) => String(app.application_status || "").toLowerCase()).filter(Boolean)),
+      ).sort(),
+    [applications],
+  );
+
+  const filteredApps = useMemo(() => {
+    return applications.filter((app) => {
+      const created = appCreatedAt(app);
+      if (!inPeriod(created, period)) return false;
+      if (serviceFilter !== "all" && app.service_name !== serviceFilter) return false;
+      if (statusFilter !== "all" && String(app.application_status || "").toLowerCase() !== statusFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [applications, period, serviceFilter, statusFilter]);
+
   const kpiSnapshot = dashboardData?.kpi_snapshot;
   const healthMetrics = dashboardData?.health_metrics;
   const dailyRevenue = dashboardData?.daily_revenue ?? [];
   const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
   const serviceRevenueBreakdown = dashboardData?.service_revenue_breakdown ?? [];
+  const pipelineOverview = dashboardData?.pipeline_overview ?? [];
   const staffMembers = dashboardData?.staff_members ?? [];
 
-  const topStaff = useMemo(() => {
+  const leadsInPeriod = filteredApps.length;
+  const convertedInPeriod = filteredApps.filter(isPaidApplication).length;
+  const conversionRate =
+    leadsInPeriod > 0 ? `${((convertedInPeriod / leadsInPeriod) * 100).toFixed(1)}%` : "0%";
+  const pendingApps = filteredApps.filter(isPendingPayment);
+  const pendingAmount = pendingApps.reduce((sum, app) => sum + Number(app.amount_due_pence || 0), 0) / 100;
+
+  const serviceMixFromApps = useMemo(() => {
+    const map = new Map<string, { name: string; cases: number; paid: number }>();
+    for (const app of filteredApps) {
+      const name = app.service_name || "Other";
+      const row = map.get(name) || { name, cases: 0, paid: 0 };
+      row.cases += 1;
+      if (isPaidApplication(app)) row.paid += 1;
+      map.set(name, row);
+    }
+    return Array.from(map.values()).sort((a, b) => b.cases - a.cases);
+  }, [filteredApps]);
+
+  const staffRows = useMemo(() => {
     if (accuracyRows.length > 0) {
       return [...accuracyRows]
-        .sort((left, right) => right.overall_accuracy - left.overall_accuracy)
-        .slice(0, 5)
-        .map((item) => ({
-          id: item.staff_id,
-          name: item.staff_name,
-          accuracy: item.overall_accuracy,
-          badge: item.badge,
-        }));
+        .sort((a, b) => b.overall_accuracy - a.overall_accuracy)
+        .map((row) => {
+          const member = staffMembers.find((s) => s.id === row.staff_id);
+          return {
+            id: row.staff_id,
+            name: row.staff_name,
+            accuracy: row.overall_accuracy,
+            badge: row.badge,
+            assigned: member?.assigned ?? 0,
+            completed: member?.completed ?? 0,
+          };
+        });
     }
-
     return [...staffMembers]
-      .sort((left, right) => right.accuracy - left.accuracy)
-      .slice(0, 5)
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        accuracy: item.accuracy,
+      .filter((s) => String(s.role || "").toLowerCase() !== "admin")
+      .sort((a, b) => b.accuracy - a.accuracy)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        accuracy: s.accuracy,
         badge: "-",
+        assigned: s.assigned,
+        completed: s.completed,
       }));
   }, [accuracyRows, staffMembers]);
 
-  const weeklyRevenue = useMemo(
-    () => dailyRevenue.reduce((sum, item) => sum + Number(item.actual || 0), 0),
-    [dailyRevenue],
+  const auditApps = useMemo(() => {
+    return filteredApps.filter((app) => {
+      const result = String(app.audit_result || "").toLowerCase();
+      const payment = String(app.audit_payment_status || "").toLowerCase();
+      return Boolean(result) || payment === "paid" || payment === "succeeded" || payment === "pending";
+    });
+  }, [filteredApps]);
+
+  const auditOutcomeBreakdown = useMemo(() => {
+    const counts = { green: 0, amber: 0, red: 0, pending: 0, none: 0 };
+    for (const app of filteredApps) {
+      const result = String(app.audit_result || "").toLowerCase();
+      if (result === "green") counts.green += 1;
+      else if (result === "amber") counts.amber += 1;
+      else if (result === "red") counts.red += 1;
+      else if (result === "pending") counts.pending += 1;
+      else counts.none += 1;
+    }
+    return [
+      { name: "Pass (green)", value: counts.green, fill: "#009877" },
+      { name: "Fix (amber)", value: counts.amber, fill: "#B87333" },
+      { name: "Fail (red)", value: counts.red, fill: "#B42318" },
+      { name: "Pending", value: counts.pending, fill: "#33A1FD" },
+      { name: "No audit", value: counts.none, fill: "#D9E1EA" },
+    ].filter((row) => row.value > 0);
+  }, [filteredApps]);
+
+  const staffAuditChart = useMemo(
+    () =>
+      staffMembers
+        .filter((s) => String(s.role || "").toLowerCase() !== "admin")
+        .map((s) => ({
+          name: s.name.split(" ")[0] || s.name,
+          fullName: s.name,
+          passed: s.auditsPassed || 0,
+          failed: s.auditsFailed || 0,
+        }))
+        .filter((s) => s.passed + s.failed > 0)
+        .slice(0, 10),
+    [staffMembers],
   );
 
-  const currentMonthRevenue = monthlyRevenue.length > 0 ? Number(monthlyRevenue[monthlyRevenue.length - 1]?.revenue || 0) : 0;
-  const breachCount = dashboardData?.pipeline_overview.reduce((sum, item) => sum + Number(item.breached || 0), 0) ?? 0;
+  const statusBreakdown = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const app of filteredApps) {
+      const status = String(app.application_status || "unknown").replace(/_/g, " ");
+      map.set(status, (map.get(status) || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+  }, [filteredApps]);
 
-  const snapshotRows = [
-    {
-      period: "Daily",
-      leads: kpiSnapshot?.todays_leads ?? 0,
-      conversion: kpiSnapshot?.conversion ?? "0%",
-      revenue: Number(kpiSnapshot?.revenue_today || 0),
-      breaches: breachCount,
-    },
-    {
-      period: "Weekly",
-      leads: kpiSnapshot?.total_leads ?? 0,
-      conversion: kpiSnapshot?.conversion ?? "0%",
-      revenue: weeklyRevenue,
-      breaches: breachCount,
-    },
-    {
-      period: "Monthly",
-      leads: kpiSnapshot?.total_leads ?? 0,
-      conversion: healthMetrics?.conversion ?? "0%",
-      revenue: currentMonthRevenue,
-      breaches: breachCount,
-    },
-  ];
+  const pipelineChartData = useMemo(
+    () =>
+      pipelineOverview.map((row) => ({
+        stage: row.stage.length > 14 ? `${row.stage.slice(0, 12)}…` : row.stage,
+        fullStage: row.stage,
+        open: Number(row.openCases || 0),
+        breached: Number(row.breached || 0),
+      })),
+    [pipelineOverview],
+  );
+
+  const clearFilters = useCallback(() => {
+    setPeriod("month");
+    setServiceFilter("all");
+    setStatusFilter("all");
+    setReportType("revenue");
+  }, []);
+
+  const activeFilterCount =
+    (period !== "month" ? 1 : 0) +
+    (serviceFilter !== "all" ? 1 : 0) +
+    (statusFilter !== "all" ? 1 : 0) +
+    (reportType !== "revenue" ? 1 : 0);
+
+  const handleExport = () => {
+    if (reportType === "pending_payments") {
+      downloadCsv(
+        `pending-payments-${period}.csv`,
+        ["reference", "customer", "service", "status", "amount_due", "created_at"],
+        pendingApps.map((app) => [
+          app.reference_number,
+          app.customer_name || "",
+          app.service_name || "",
+          app.application_status || "",
+          (Number(app.amount_due_pence || 0) / 100).toFixed(2),
+          app.created_at || "",
+        ]),
+      );
+      toast.success("Pending payments CSV exported.");
+      return;
+    }
+    if (reportType === "staff_performance") {
+      downloadCsv(
+        `staff-performance-${period}.csv`,
+        ["staff", "accuracy", "assigned", "completed", "badge"],
+        staffRows.map((row) => [row.name, row.accuracy, row.assigned, row.completed, row.badge]),
+      );
+      toast.success("Staff performance CSV exported.");
+      return;
+    }
+    if (reportType === "service_mix") {
+      downloadCsv(
+        `service-mix-${period}.csv`,
+        ["service", "cases", "paid_cases"],
+        serviceMixFromApps.map((row) => [row.name, row.cases, row.paid]),
+      );
+      toast.success("Service mix CSV exported.");
+      return;
+    }
+    if (reportType === "pipeline_sla") {
+      downloadCsv(
+        `pipeline-sla.csv`,
+        ["stage", "open_cases", "avg_age", "breached"],
+        pipelineOverview.map((row) => [row.stage, row.openCases, row.avgAge, row.breached]),
+      );
+      toast.success("Pipeline SLA CSV exported.");
+      return;
+    }
+    if (reportType === "leads") {
+      downloadCsv(
+        `leads-conversion-${period}.csv`,
+        ["reference", "customer", "service", "status", "converted", "created_at"],
+        filteredApps.map((app) => [
+          app.reference_number,
+          app.customer_name || "",
+          app.service_name || "",
+          app.application_status || "",
+          isPaidApplication(app) ? "yes" : "no",
+          app.created_at || "",
+        ]),
+      );
+      toast.success("Leads CSV exported.");
+      return;
+    }
+    downloadCsv(
+      `revenue-summary-${period}.csv`,
+      ["day", "expected", "actual"],
+      dailyRevenue.map((row) => [row.day, Number(row.expected || 0), Number(row.actual || 0)]),
+    );
+    toast.success("Revenue CSV exported.");
+  };
+
+  useSetAdminPageChrome(
+    canViewReports
+      ? {
+          title: "Reports",
+          subtitle: "Mandatory operational & finance reports",
+          icon: BarChart3,
+          activeFilterCount,
+          onClearFilters: clearFilters,
+          syncKey: `${reportType}|${period}|${serviceFilter}|${statusFilter}|${loading}|${filteredApps.length}`,
+          meta: loading ? "Loading…" : `${filteredApps.length} apps in period`,
+          actions: (
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </button>
+          ),
+          filtersContent: (
+            <>
+              <label className="block text-sm">
+                <span className="text-xs font-semibold text-[#486581]">Report</span>
+                <select
+                  value={reportType}
+                  onChange={(e) => setReportType(e.target.value as ReportType)}
+                  className={filterFieldClass}
+                >
+                  {REPORT_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-semibold text-[#486581]">Period</span>
+                <select
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value as ReportPeriod)}
+                  className={filterFieldClass}
+                >
+                  <option value="today">Today</option>
+                  <option value="week">Last 7 days</option>
+                  <option value="month">Last 30 days</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-semibold text-[#486581]">Service</span>
+                <select
+                  value={serviceFilter}
+                  onChange={(e) => setServiceFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">All services</option>
+                  {serviceOptions.map((service) => (
+                    <option key={service} value={service}>
+                      {service}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs font-semibold text-[#486581]">Status</span>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className={filterFieldClass}
+                >
+                  <option value="all">All statuses</option>
+                  {statusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {status.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ),
+        }
+      : null,
+  );
 
   if (!canViewReports) {
     return (
-      <div className="max-w-[900px] mx-auto font-body">
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-5 text-[#486581] inline-flex items-center gap-2">
-          <Lock className="w-4 h-4 text-[#9C4F17]" /> Reports are available for Admin / CEO and Operations Manager only.
+      <div className="mx-auto max-w-[900px] font-body">
+        <div className="inline-flex items-center gap-2 rounded-[12px] border border-[#D9E1EA] bg-white p-5 text-[#486581]">
+          <Lock className="h-4 w-4 text-[#9C4F17]" /> Reports are available for Admin and Operations Manager roles.
         </div>
       </div>
     );
   }
 
+  const activeReport = REPORT_OPTIONS.find((item) => item.id === reportType)!;
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: "easeOut" }}
-      className="space-y-6 font-body max-w-[1300px] mx-auto"
-    >
-      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Reports</h1>
-
-      <div className="flex gap-2">
-        {(["Daily", "Weekly", "Monthly"] as const).map((item) => (
-          <motion.button
-            key={item}
-            onClick={() => setTab(item)}
-            whileTap={{ scale: 0.97 }}
-            className={`px-3 py-1.5 rounded-full text-sm font-heading ${tab === item ? "bg-[#009877] text-white" : "bg-white border-[0.5px] border-[#D9E1EA] text-[#486581]"}`}
-          >
-            {item}
-          </motion.button>
-        ))}
-      </div>
-
-      {tab === "Daily" && (
-        <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-          {[
-            `Leads Today: ${kpiSnapshot?.todays_leads ?? 0}`,
-            `Converted: ${kpiSnapshot?.converted ?? 0}`,
-            `Revenue: ${formatInr(Number(kpiSnapshot?.revenue_today || 0))}`,
-            `Pending Payments: ${formatInr(Number(kpiSnapshot?.pending_payments || 0))}`,
-            `SLA Breaches: ${breachCount}`,
-            `Avg Ticket: ${formatInr(Number(kpiSnapshot?.avg_ticket_size || 0))}`,
-          ].map((item) => (
-            <motion.div key={item} whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 text-[#334E68] text-sm shadow-sm">
-              {item}
-            </motion.div>
-          ))}
+    <div className="mx-auto max-w-[1500px] space-y-4 font-body">
+      <section className="rounded-[12px] border border-[#D9E1EA] bg-white p-2">
+        <div className="flex flex-wrap gap-1.5">
+          {REPORT_OPTIONS.map((option) => {
+            const Icon = option.icon;
+            const active = reportType === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setReportType(option.id)}
+                title={option.description}
+                className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  active
+                    ? "border-[#009877] bg-[#009877] text-white"
+                    : "border-[#D9E1EA] bg-[#F8FAFC] text-[#486581] hover:border-[#33A1FD]/40 hover:bg-white"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {option.label}
+              </button>
+            );
+          })}
         </div>
-      )}
+      </section>
 
-      {tab === "Weekly" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <motion.div whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 lg:col-span-2 shadow-sm">
-            <p className="text-[#102A43] font-heading font-semibold mb-2">Conversion rate trend</p>
-            <div className="h-[260px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dailyRevenue}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                  <XAxis dataKey="day" tick={{ fill: "#486581" }} />
-                  <YAxis tick={{ fill: "#486581" }} />
-                  <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                  <Line dataKey="actual" stroke="#33A1FD" strokeWidth={3} />
-                </LineChart>
-              </ResponsiveContainer>
+      <section className="min-h-[calc(100vh-210px)] rounded-[12px] border border-[#D9E1EA] bg-white p-4 flex flex-col">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-2 shrink-0">
+          <div>
+            <h2 className="text-base font-heading font-semibold text-[#102A43]">{activeReport.label}</h2>
+            <p className="text-xs text-[#627D98] mt-0.5">{activeReport.description}</p>
+          </div>
+          {loading ? <span className="text-xs text-[#627D98]">Loading…</span> : null}
+        </div>
+
+        <div className="flex-1 space-y-4">
+        {reportType === "revenue" ? (
+          <div className="space-y-4 h-full">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <MetricCard label="Revenue today" value={formatInr(Number(kpiSnapshot?.revenue_today || 0))} />
+              <MetricCard
+                label="Audit revenue today"
+                value={formatInr(Number(kpiSnapshot?.audit_revenue_today || 0))}
+              />
+              <MetricCard label="Avg ticket" value={formatInr(Number(kpiSnapshot?.avg_ticket_size || 0))} />
+              <MetricCard
+                label="Pending payments"
+                value={formatInr(Number(kpiSnapshot?.pending_payments || 0))}
+                hint="From live snapshot"
+              />
             </div>
-          </motion.div>
-          <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
-            <p className="text-[#102A43] font-heading font-semibold mb-2">Top performing staff</p>
-            {topStaff.map((s, i) => (
-              <p key={s.id} className="text-sm text-[#486581]">
-                {i + 1}. {s.name} ({Number(s.accuracy).toFixed(2)}%) {s.badge !== "-" ? `- ${s.badge}` : ""}
-              </p>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === "Monthly" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 space-y-2 text-[#334E68] text-sm shadow-sm">
-            <p>Total revenue (this month): {formatInr(currentMonthRevenue)}</p>
-            <p>Growth %: {kpiSnapshot?.conversion ?? "0%"}</p>
-            <p>Pending payments: {formatInr(Number(healthMetrics?.pending_payments || 0))}</p>
-            <p>Customer satisfaction score: {healthMetrics?.customer_satisfaction ?? "0 / 5"}</p>
-            <p>Audit success ratio: {healthMetrics?.audit_success_ratio ?? "0%"}</p>
-          </div>
-          <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
-            <p className="text-[#102A43] font-heading font-semibold mb-2">Audit fail reasons</p>
-            <div className="h-[240px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={90}>
-                    {serviceRevenueBreakdown.map((_, i) => <Cell key={i} fill={["#33A1FD", "#B87333", "#009877", "#D9E1EA"][i]} />)}
-                  </Pie>
-                  <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 min-h-[360px]">
+              <div className="lg:col-span-2 rounded-[10px] border border-[#E5EAF0] p-3 flex flex-col min-h-[340px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Daily revenue trend</p>
+                <div className="flex-1 min-h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={dailyRevenue}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                      <XAxis dataKey="day" tick={{ fill: "#486581", fontSize: 12 }} />
+                      <YAxis tick={{ fill: "#486581", fontSize: 12 }} />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Legend />
+                      <Line dataKey="actual" stroke="#009877" strokeWidth={3} name="Actual" />
+                      <Line dataKey="expected" stroke="#33A1FD" strokeWidth={2} name="Expected" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 flex flex-col min-h-[340px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Monthly revenue</p>
+                <div className="flex-1 min-h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyRevenue}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                      <XAxis dataKey="month" tick={{ fill: "#486581", fontSize: 11 }} />
+                      <YAxis tick={{ fill: "#486581", fontSize: 12 }} />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Bar dataKey="revenue" fill="#009877" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Service revenue mix</p>
+                <div className="h-[240px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={90}>
+                        {serviceRevenueBreakdown.map((_, i) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Legend />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Status mix (filtered apps)</p>
+                <div className="h-[240px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={statusBreakdown} layout="vertical" margin={{ left: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                      <XAxis type="number" tick={{ fill: "#486581", fontSize: 11 }} />
+                      <YAxis type="category" dataKey="name" width={110} tick={{ fill: "#486581", fontSize: 11 }} />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Bar dataKey="value" fill="#33A1FD" radius={[0, 6, 6, 0]} name="Cases" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        ) : null}
 
-      <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden">
-        <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
-          <h2 className="text-sm font-heading font-semibold text-[#102A43]">Report snapshot table</h2>
-          <span className="text-xs text-[#627D98]">Live data</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-[#F5F7FA] text-[#486581]">
-              <tr>
-                <th className="px-4 py-2.5 text-left">Period</th>
-                <th className="px-4 py-2.5 text-left">Leads</th>
-                <th className="px-4 py-2.5 text-left">Conversion</th>
-                <th className="px-4 py-2.5 text-left">Revenue</th>
-                <th className="px-4 py-2.5 text-left">SLA Breaches</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              {snapshotRows.map((row) => (
-                <tr key={row.period}>
-                  <td className="px-4 py-2.5">{row.period}</td>
-                  <td className="px-4 py-2.5">{row.leads}</td>
-                  <td className="px-4 py-2.5">{row.conversion}</td>
-                  <td className="px-4 py-2.5">{formatInr(row.revenue)}</td>
-                  <td className="px-4 py-2.5">{row.breaches}</td>
-                </tr>
+        {reportType === "leads" ? (
+          <div className="space-y-4 h-full flex flex-col">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 shrink-0">
+              <MetricCard label="Leads in period" value={String(leadsInPeriod)} />
+              <MetricCard label="Converted" value={String(convertedInPeriod)} />
+              <MetricCard label="Conversion" value={conversionRate} />
+              <MetricCard label="Today's leads" value={String(kpiSnapshot?.todays_leads ?? 0)} />
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 flex-1 min-h-[420px]">
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Status breakdown</p>
+                <div className="h-[240px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={statusBreakdown} dataKey="value" nameKey="name" outerRadius={85}>
+                        {statusBreakdown.map((_, i) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Legend />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="lg:col-span-2 overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[520px]">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Reference</th>
+                      <th className="px-3 py-2 text-left font-semibold">Customer</th>
+                      <th className="px-3 py-2 text-left font-semibold">Service</th>
+                      <th className="px-3 py-2 text-left font-semibold">Status</th>
+                      <th className="px-3 py-2 text-left font-semibold">Converted</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+                    {filteredApps.slice(0, 80).map((app) => (
+                      <tr key={app.id} className="hover:bg-[#F8FCFF]">
+                        <td className="px-3 py-2 font-medium text-[#102A43]">{app.reference_number}</td>
+                        <td className="px-3 py-2">{app.customer_name || "—"}</td>
+                        <td className="px-3 py-2">{app.service_name || "—"}</td>
+                        <td className="px-3 py-2 capitalize">{String(app.application_status || "—").replace(/_/g, " ")}</td>
+                        <td className="px-3 py-2">{isPaidApplication(app) ? "Yes" : "No"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filteredApps.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-sm text-[#627D98]">No leads match these filters.</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {reportType === "pending_payments" ? (
+          <div className="space-y-4 h-full flex flex-col">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 shrink-0">
+              <MetricCard label="Pending cases" value={String(pendingApps.length)} />
+              <MetricCard label="Amount due (filtered)" value={formatInr(pendingAmount)} />
+              <MetricCard
+                label="Snapshot pending"
+                value={formatInr(Number(kpiSnapshot?.pending_payments || 0))}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 flex-1 min-h-[420px]">
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Pending by service</p>
+                <div className="h-[240px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={Object.values(
+                        pendingApps.reduce(
+                          (acc, app) => {
+                            const name = app.service_name || "Other";
+                            acc[name] = acc[name] || { name, count: 0, due: 0 };
+                            acc[name].count += 1;
+                            acc[name].due += Number(app.amount_due_pence || 0) / 100;
+                            return acc;
+                          },
+                          {} as Record<string, { name: string; count: number; due: number }>,
+                        ),
+                      )}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                      <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Bar dataKey="count" fill="#B87333" name="Cases" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="lg:col-span-2 overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[520px]">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Reference</th>
+                      <th className="px-3 py-2 text-left font-semibold">Customer</th>
+                      <th className="px-3 py-2 text-left font-semibold">Service</th>
+                      <th className="px-3 py-2 text-left font-semibold">Status</th>
+                      <th className="px-3 py-2 text-left font-semibold">Amount due</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+                    {pendingApps.slice(0, 80).map((app) => (
+                      <tr key={app.id} className="hover:bg-[#F8FCFF]">
+                        <td className="px-3 py-2 font-medium text-[#102A43]">{app.reference_number}</td>
+                        <td className="px-3 py-2">{app.customer_name || "—"}</td>
+                        <td className="px-3 py-2">{app.service_name || "—"}</td>
+                        <td className="px-3 py-2 capitalize">{String(app.application_status || "—").replace(/_/g, " ")}</td>
+                        <td className="px-3 py-2 font-semibold text-[#8D5E12]">
+                          {formatInr(Number(app.amount_due_pence || 0) / 100)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {pendingApps.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-sm text-[#627D98]">No pending payments in this filter.</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {reportType === "staff_performance" ? (
+          <div className="space-y-4 h-full flex flex-col">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 shrink-0">
+              <MetricCard label="Staff in report" value={String(staffRows.length)} />
+              <MetricCard
+                label="Avg accuracy"
+                value={
+                  staffRows.length
+                    ? `${(staffRows.reduce((s, r) => s + Number(r.accuracy), 0) / staffRows.length).toFixed(1)}%`
+                    : "0%"
+                }
+              />
+              <MetricCard
+                label="Assigned total"
+                value={String(staffRows.reduce((s, r) => s + r.assigned, 0))}
+              />
+              <MetricCard
+                label="Completed total"
+                value={String(staffRows.reduce((s, r) => s + r.completed, 0))}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 flex-1 min-h-[420px]">
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[300px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Accuracy by staff</p>
+                <div className="h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={staffRows.slice(0, 10).map((r) => ({ name: r.name.split(" ")[0], accuracy: r.accuracy }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                      <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 11 }} />
+                      <YAxis domain={[0, 100]} tick={{ fill: "#486581", fontSize: 11 }} />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Bar dataKey="accuracy" fill="#009877" radius={[6, 6, 0, 0]} name="Accuracy %" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[420px]">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Staff</th>
+                      <th className="px-3 py-2 text-left font-semibold">Accuracy</th>
+                      <th className="px-3 py-2 text-left font-semibold">Assigned</th>
+                      <th className="px-3 py-2 text-left font-semibold">Completed</th>
+                      <th className="px-3 py-2 text-left font-semibold">Badge</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+                    {staffRows.map((row) => (
+                      <tr key={row.id} className="hover:bg-[#F8FCFF]">
+                        <td className="px-3 py-2 font-medium text-[#102A43]">{row.name}</td>
+                        <td className="px-3 py-2">{Number(row.accuracy).toFixed(1)}%</td>
+                        <td className="px-3 py-2">{row.assigned}</td>
+                        <td className="px-3 py-2">{row.completed}</td>
+                        <td className="px-3 py-2">{row.badge}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {staffRows.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-sm text-[#627D98]">No staff performance rows available.</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {reportType === "pipeline_sla" ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+              <MetricCard label="Open stages" value={String(pipelineOverview.length)} />
+              <MetricCard
+                label="Total SLA breaches"
+                value={String(pipelineOverview.reduce((sum, row) => sum + Number(row.breached || 0), 0))}
+              />
+              <MetricCard
+                label="Open cases"
+                value={String(pipelineOverview.reduce((sum, row) => sum + Number(row.openCases || 0), 0))}
+              />
+            </div>
+            <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[320px]">
+              <p className="mb-2 text-sm font-semibold text-[#102A43]">Open cases vs SLA breaches by stage</p>
+              <div className="h-[280px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={pipelineChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                    <XAxis dataKey="stage" tick={{ fill: "#486581", fontSize: 11 }} />
+                    <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
+                    <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                    <Legend />
+                    <Bar dataKey="open" fill="#33A1FD" name="Open" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="breached" fill="#B42318" name="SLA breach" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {pipelineOverview.map((row) => (
+                <div key={row.stage} className="rounded-[10px] border border-[#E5EAF0] bg-[#F8FAFC] p-3">
+                  <p className="text-sm font-semibold text-[#102A43]">{row.stage}</p>
+                  <p className="mt-2 text-xs text-[#486581] flex justify-between">
+                    <span>Open</span>
+                    <span className="font-semibold text-[#102A43]">{row.openCases}</span>
+                  </p>
+                  <p className="mt-1 text-xs text-[#486581] flex justify-between">
+                    <span>Avg age</span>
+                    <span className="font-semibold text-[#102A43]">{row.avgAge}</span>
+                  </p>
+                  <p className="mt-1 text-xs text-[#486581] flex justify-between">
+                    <span>SLA breach</span>
+                    <span className={`font-semibold ${Number(row.breached) > 0 ? "text-[#B42318]" : "text-[#006F57]"}`}>
+                      {row.breached}
+                    </span>
+                  </p>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </div>
+          </div>
+        ) : null}
 
-      <details className="bg-white border border-[#D9E1EA] rounded-[12px] p-3 group">
-        <summary className="list-none cursor-pointer text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
-          Reporting interpretation notes
-          <span className="text-[#627D98] group-open:rotate-180 transition-transform">⌄</span>
-        </summary>
-        <p className="mt-2 text-sm text-[#486581]">Use weekly trend data to identify conversion bottlenecks and monthly view for growth, ROI, and staffing adjustments.</p>
-      </details>
-    </motion.div>
+        {reportType === "audit" ? (
+          <div className="space-y-4 h-full flex flex-col">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 shrink-0">
+              <MetricCard
+                label="Audits requested"
+                value={String(healthMetrics?.audits_requested ?? auditApps.length)}
+              />
+              <MetricCard
+                label="Audit success ratio"
+                value={String(healthMetrics?.audit_success_ratio ?? "0%")}
+              />
+              <MetricCard
+                label="Audit revenue today"
+                value={formatInr(Number(kpiSnapshot?.audit_revenue_today || 0))}
+              />
+              <MetricCard
+                label="Avg processing time"
+                value={String(healthMetrics?.avg_processing_time ?? "0h")}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 min-h-[320px]">
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[300px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Audit outcomes (filtered apps)</p>
+                <div className="h-[260px]">
+                  {auditOutcomeBreakdown.length === 0 ? (
+                    <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No audit outcomes in filter.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={auditOutcomeBreakdown} dataKey="value" nameKey="name" outerRadius={95}>
+                          {auditOutcomeBreakdown.map((row, i) => (
+                            <Cell key={row.name} fill={row.fill || CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Legend />
+                        <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[300px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Staff audits passed vs failed</p>
+                <div className="h-[260px]">
+                  {staffAuditChart.length === 0 ? (
+                    <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No staff audit totals yet.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={staffAuditChart}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                        <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 11 }} />
+                        <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
+                        <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                        <Legend />
+                        <Bar dataKey="passed" fill="#009877" name="Passed" radius={[6, 6, 0, 0]} />
+                        <Bar dataKey="failed" fill="#B42318" name="Failed" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] flex-1 max-h-[380px]">
+              <table className="w-full min-w-[800px] text-sm">
+                <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Reference</th>
+                    <th className="px-3 py-2 text-left font-semibold">Customer</th>
+                    <th className="px-3 py-2 text-left font-semibold">Service</th>
+                    <th className="px-3 py-2 text-left font-semibold">Audit result</th>
+                    <th className="px-3 py-2 text-left font-semibold">Audit payment</th>
+                    <th className="px-3 py-2 text-left font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+                  {(auditApps.length ? auditApps : filteredApps).slice(0, 80).map((app) => {
+                    const result = String(app.audit_result || "none");
+                    return (
+                      <tr key={app.id} className="hover:bg-[#F8FCFF]">
+                        <td className="px-3 py-2 font-medium text-[#102A43]">{app.reference_number}</td>
+                        <td className="px-3 py-2">{app.customer_name || "—"}</td>
+                        <td className="px-3 py-2">{app.service_name || "—"}</td>
+                        <td className="px-3 py-2 capitalize">
+                          <span
+                            className={
+                              result === "green"
+                                ? "text-[#006F57] font-semibold"
+                                : result === "red"
+                                  ? "text-[#B42318] font-semibold"
+                                  : result === "amber"
+                                    ? "text-[#8D5E12] font-semibold"
+                                    : "text-[#627D98]"
+                            }
+                          >
+                            {result.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 capitalize">
+                          {String(app.audit_payment_status || "—").replace(/_/g, " ")}
+                        </td>
+                        <td className="px-3 py-2 capitalize">
+                          {String(app.application_status || "—").replace(/_/g, " ")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredApps.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-[#627D98]">No applications match these filters.</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {reportType === "service_mix" ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+              <MetricCard label="Services" value={String(serviceMixFromApps.length)} />
+              <MetricCard label="Cases in period" value={String(leadsInPeriod)} />
+              <MetricCard label="Paid cases" value={String(convertedInPeriod)} />
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 min-h-[420px]">
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[340px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Revenue by service (snapshot)</p>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={110}>
+                        {serviceRevenueBreakdown.map((_, i) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Legend />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[340px]">
+                <p className="mb-2 text-sm font-semibold text-[#102A43]">Cases by service (filtered)</p>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={serviceMixFromApps}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                      <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
+                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Legend />
+                      <Bar dataKey="cases" fill="#33A1FD" name="Cases" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="paid" fill="#009877" name="Paid" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+            <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[280px]">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Service</th>
+                    <th className="px-3 py-2 text-left font-semibold">Cases</th>
+                    <th className="px-3 py-2 text-left font-semibold">Paid</th>
+                    <th className="px-3 py-2 text-left font-semibold">Conversion</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+                  {serviceMixFromApps.map((row) => (
+                    <tr key={row.name} className="hover:bg-[#F8FCFF]">
+                      <td className="px-3 py-2 font-medium text-[#102A43]">{row.name}</td>
+                      <td className="px-3 py-2">{row.cases}</td>
+                      <td className="px-3 py-2">{row.paid}</td>
+                      <td className="px-3 py-2">
+                        {row.cases ? `${((row.paid / row.cases) * 100).toFixed(1)}%` : "0%"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {serviceMixFromApps.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-[#627D98]">No services match these filters.</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        </div>
+      </section>
+    </div>
   );
 }

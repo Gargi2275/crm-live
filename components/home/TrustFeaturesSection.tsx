@@ -8,11 +8,11 @@ import {
   Globe,
   MessageCircle,
   Shield,
-  ShieldCheck,
   Stamp,
   UserCheck,
 } from "lucide-react";
 import Link from "next/link";
+import { home } from "@/components/home/homeTheme";
 
 const container = {
   hidden: {},
@@ -108,51 +108,51 @@ const trustFeatures: TrustFeature[] = [
 function TrustCard({ feature, index }: { feature: TrustFeature; index: number }) {
   const Icon = feature.icon;
   const reduceMotion = useReducedMotion();
-  const accents = ["#1c69dd", "#2563eb", "#7c3aed", "#059669", "#1d4ed8", "#0f4cad"];
+  const accents = ["#33A1FD", "#0F7EE8", "#009877", "#33A1FD", "#0F7EE8", "#009877"];
   const accent = accents[index % accents.length];
 
   return (
     <motion.div variants={cardItem}>
       <Link href={feature.href} className="group block h-full">
         <motion.article
-          whileHover={reduceMotion ? undefined : { y: -10 }}
+          whileHover={reduceMotion ? undefined : { y: -8 }}
           transition={{ type: "spring", stiffness: 280, damping: 20 }}
-          className="relative h-full rounded-2xl border border-[#dbeafe] bg-white p-6 shadow-[0_8px_28px_rgba(30,74,135,0.07)] transition-all duration-300 group-hover:border-[#1c69dd]/30 group-hover:shadow-[0_24px_56px_rgba(28,105,221,0.14)]"
+          className={`relative h-full ${home.card} p-6 transition-all duration-300 group-hover:border-primary/35`}
         >
-          <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl scale-x-0 bg-gradient-to-r from-[#1c69dd] via-[#60a5fa] to-[#1c69dd] transition-transform duration-500 group-hover:scale-x-100" />
+          <div className="absolute inset-x-0 top-0 h-1 scale-x-0 rounded-t-2xl bg-gradient-to-r from-primary via-accent to-primary transition-transform duration-500 group-hover:scale-x-100" />
 
           <div className="flex items-start justify-between gap-3">
             <motion.div
               whileHover={reduceMotion ? undefined : { scale: 1.12, rotate: 5 }}
-              className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#eff6ff] to-[#dbeafe] shadow-inner"
+              className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#ecf6ff]"
             >
               <div style={{ color: accent }}>
                 <Icon className="h-5 w-5" />
               </div>
             </motion.div>
-            <span className="rounded-full border border-[#dbeafe] bg-[#f8fbff] px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-[#486581]">
+            <span className="rounded-full border border-border bg-[#f7fbff] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wider text-textMuted">
               Trusted
             </span>
           </div>
 
-          <h3 className="mt-4 font-heading text-lg font-bold text-[#041020] transition-colors group-hover:text-[#1c69dd]">
+          <h3 className="mt-4 font-heading text-lg font-bold text-dark transition-colors group-hover:text-primary">
             {feature.title}
           </h3>
-          <p className="mt-2 text-sm font-medium leading-relaxed text-[#486581]">{feature.description}</p>
+          <p className="mt-2 text-sm leading-relaxed text-textMuted">{feature.description}</p>
 
           <ul className="mt-4 space-y-2">
             {feature.points.map((point) => (
-              <li key={point} className="flex items-start gap-2.5 text-[13px] font-medium text-[#334e68]">
-                <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
+              <li key={point} className="flex items-start gap-2.5 text-[13px] text-textMuted">
+                <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <span>{point}</span>
               </li>
             ))}
           </ul>
 
           <div className="mt-5 flex items-center justify-between border-t border-[#eef4ff] pt-4">
-            <span className="text-sm font-bold text-[#1c69dd]">Learn more</span>
+            <span className="text-sm font-semibold text-primary">Learn more</span>
             <motion.span
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#eff6ff] text-[#1c69dd]"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ecf6ff] text-primary"
               whileHover={reduceMotion ? undefined : { x: 4 }}
             >
               <ArrowRight className="h-4 w-4" />
@@ -168,25 +168,19 @@ export function TrustFeaturesSection() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden bg-[#f8fbff] py-12 lg:py-16">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(28,105,221,0.06),transparent_50%)]" />
+    <section className={home.sectionSoft}>
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(51,161,253,0.06),transparent_50%)]" />
 
-      <div className="relative mx-auto px-4 sm:px-6 lg:px-8">
+      <div className={home.container}>
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, y: 24 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-          className="mb-14 text-center"
+          className="mb-12 text-center"
         >
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#dbeafe] bg-white px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[#1c69dd]">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Why trust us
-          </div>
-          <h2 className="font-heading text-3xl font-black text-[#041020] md:text-4xl">
-            Why UK &amp; US Families Trust Us
-          </h2>
-          <p className="mx-auto mt-4 max-w-3xl text-base font-medium leading-relaxed text-[#486581]">
+          <h2 className={home.h2}>Why UK &amp; US families trust us</h2>
+          <p className={`${home.lead} mx-auto`}>
             A specialist process, clear communication, and transparent pricing from start to finish.
           </p>
         </motion.div>

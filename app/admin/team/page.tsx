@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   getAdminDashboardOverview,
   getStaffAccuracyAll,
@@ -8,11 +9,19 @@ import {
   type StaffAccuracyRow,
 } from "@/lib/admin-auth";
 import { motion } from "framer-motion";
+import { Users } from "lucide-react";
 import toast from "react-hot-toast";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 export default function TeamPage() {
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [accuracyRows, setAccuracyRows] = useState<StaffAccuracyRow[]>([]);
+
+  useSetAdminPageChrome({
+    title: "Team overview",
+    icon: Users,
+    syncKey: `${dashboardData ? "loaded" : "loading"}|${accuracyRows.length}`,
+  });
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -97,44 +106,40 @@ export default function TeamPage() {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
-      className="space-y-4 font-body max-w-[1300px] mx-auto"
+      className="space-y-3 font-body max-w-[1300px] mx-auto"
     >
-      <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">Team Management</h1>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
-          <p className="text-xs text-[#627D98]">Total staff</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{mergedRows.length}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
-          <p className="text-xs text-[#627D98]">Assigned tasks</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{totalAssigned}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
-          <p className="text-xs text-[#627D98]">Completed tasks</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{totalCompleted}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-[#627D98]">Snapshot of load and accuracy — use Workload to assign</p>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/workload" className="inline-flex items-center rounded-[8px] bg-[#009877] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]">
+            Assign workload
+          </Link>
+          <Link href="/admin/team-performance" className="inline-flex items-center rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]">
+            Performance grid
+          </Link>
+          <Link href="/admin/staff" className="inline-flex items-center rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]">
+            Staff accounts
+          </Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        {mergedRows.map((item) => (
-          <motion.div key={item.id} whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
-            <p className="text-[#102A43] font-heading font-semibold">{item.name}</p>
-            <p className="text-xs text-[#627D98]">{item.role}</p>
-            <p className="text-sm text-[#486581] mt-2">Tasks: <span className="text-[#0B69B7]">{item.assigned}</span> | Completed: <span className="text-[#006F57]">{item.completed}</span></p>
-            <p className="text-sm text-[#486581]">Pending: <span className="text-[#9C4F17]">{item.pending}</span> | Status: <span className="text-[#334E68]">{item.loadStatus}</span></p>
-            <p className="text-sm text-[#486581]">Badge: <span className="text-[#102A43] font-semibold">{item.badge}</span></p>
-          </motion.div>
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[10px] px-3 py-2.5">
+          <p className="text-[11px] text-[#627D98]">Total staff</p>
+          <p className="mt-0.5 text-lg font-heading font-semibold text-[#102A43]">{mergedRows.length}</p>
+        </div>
+        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[10px] px-3 py-2.5">
+          <p className="text-[11px] text-[#627D98]">Assigned tasks</p>
+          <p className="mt-0.5 text-lg font-heading font-semibold text-[#102A43]">{totalAssigned}</p>
+        </div>
+        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[10px] px-3 py-2.5">
+          <p className="text-[11px] text-[#627D98]">Completed tasks</p>
+          <p className="mt-0.5 text-lg font-heading font-semibold text-[#102A43]">{totalCompleted}</p>
+        </div>
       </div>
 
-      <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
-        <h2 className="text-[#102A43] font-heading font-semibold mb-2">Management note</h2>
-        <p className="text-sm text-[#486581]">Prioritize balancing high-load members first to reduce SLA pressure across active queues.</p>
-      </div>
-
-      <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden">
-        <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
+      <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[10px] overflow-hidden">
+        <div className="px-3 py-2 border-b border-[#E5EAF0] flex items-center justify-between">
           <h2 className="text-sm font-heading font-semibold text-[#102A43]">Team performance table</h2>
           <span className="text-xs text-[#627D98]">Live data</span>
         </div>
@@ -142,46 +147,36 @@ export default function TeamPage() {
           <table className="w-full text-sm">
             <thead className="bg-[#F5F7FA] text-[#486581]">
               <tr>
-                <th className="px-4 py-2.5 text-left">Name</th>
-                <th className="px-4 py-2.5 text-left">Assigned</th>
-                <th className="px-4 py-2.5 text-left">Completed</th>
-                <th className="px-4 py-2.5 text-left">SLA Breach</th>
-                <th className="px-4 py-2.5 text-left">Audit %</th>
-                <th className="px-4 py-2.5 text-left">Form %</th>
-                <th className="px-4 py-2.5 text-left">SLA %</th>
-                <th className="px-4 py-2.5 text-left">Correction %</th>
-                <th className="px-4 py-2.5 text-left">Overall %</th>
-                <th className="px-4 py-2.5 text-left">Badge</th>
+                <th className="px-3 py-2 text-left text-xs">Name</th>
+                <th className="px-3 py-2 text-left text-xs">Assigned</th>
+                <th className="px-3 py-2 text-left text-xs">Completed</th>
+                <th className="px-3 py-2 text-left text-xs">Pending</th>
+                <th className="px-3 py-2 text-left text-xs">Load</th>
+                <th className="px-3 py-2 text-left text-xs">SLA Breach</th>
+                <th className="px-3 py-2 text-left text-xs">Overall %</th>
+                <th className="px-3 py-2 text-left text-xs">Badge</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
               {mergedRows.map((member) => (
-                <tr key={member.id}>
-                  <td className="px-4 py-2.5">{member.name}</td>
-                  <td className="px-4 py-2.5">{member.assigned}</td>
-                  <td className="px-4 py-2.5">{member.completed}</td>
-                  <td className="px-4 py-2.5">{member.slaBreach}</td>
-                  <td className="px-4 py-2.5">{Number(member.auditAccuracy).toFixed(2)}%</td>
-                  <td className="px-4 py-2.5">{Number(member.formAccuracy).toFixed(2)}%</td>
-                  <td className="px-4 py-2.5">{Number(member.slaCompliance).toFixed(2)}%</td>
-                  <td className="px-4 py-2.5">{Number(member.correctionRate).toFixed(2)}%</td>
-                  <td className="px-4 py-2.5">{Number(member.accuracy).toFixed(2)}%</td>
-                  <td className="px-4 py-2.5">{member.badge}</td>
+                <tr key={member.id} className="hover:bg-[#F8FCFF]">
+                  <td className="px-3 py-2 text-xs">
+                    <span className="font-semibold text-[#102A43]">{member.name}</span>
+                    <span className="block text-[10px] text-[#627D98]">{member.role}</span>
+                  </td>
+                  <td className="px-3 py-2 text-xs">{member.assigned}</td>
+                  <td className="px-3 py-2 text-xs">{member.completed}</td>
+                  <td className="px-3 py-2 text-xs">{member.pending}</td>
+                  <td className="px-3 py-2 text-xs">{member.loadStatus}</td>
+                  <td className="px-3 py-2 text-xs">{member.slaBreach}</td>
+                  <td className="px-3 py-2 text-xs">{Number(member.accuracy).toFixed(2)}%</td>
+                  <td className="px-3 py-2 text-xs">{member.badge}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-
-      <details className="bg-white border border-[#D9E1EA] rounded-[12px] p-3 group">
-        <summary className="list-none cursor-pointer text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
-          Weekly coaching focus
-          <span className="text-[#627D98] group-open:rotate-180 transition-transform">⌄</span>
-        </summary>
-        <p className="mt-2 text-sm text-[#486581]">Review cases with repeated SLA breaches, assign one quality audit buddy per staff member, and cap concurrent high-priority work.</p>
-      </details>
     </motion.div>
   );
 }
-

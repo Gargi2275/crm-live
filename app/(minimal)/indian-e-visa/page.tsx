@@ -6,16 +6,34 @@ import { motion } from "framer-motion";
 import { useForm, Controller, FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { AlertTriangle, ArrowRight, Loader2, Shield, Sparkles, Star } from "lucide-react";
+import { AlertTriangle, ArrowRight, Loader2, Plus, Shield, Sparkles, Star, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { useEVisa } from "@/context/EVisaContext";
-import { ProgressStepper } from "@/components/ProgressStepper";
+import { useAuth } from "@/context/AuthContext";
+import {
+  CheckoutShell,
+  OrderSummaryCard,
+  ServiceOptionList,
+  checkoutFieldClass,
+  checkoutLabelClass,
+} from "@/components/checkout/CheckoutShell";
 import { eVisaApi } from "@/lib/api-client";
 import { EVISA_DEFAULTS } from "@/lib/evisa-config";
 import { authService } from "@/lib/auth";
 import { authenticatedFetch, getPublicTestimonials, submitTestimonial } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
+
+type ExtraApplicant = {
+  id: string;
+  fullName: string;
+  countryCode: string;
+  phone: string;
+  email: string;
+  relationship: string;
+};
+
+const RELATIONSHIP_OPTIONS = ["Father", "Mother", "Spouse", "Son", "Daughter"] as const;
 
 const registrationSchema = z.object({
   visaDuration: z.enum(["1-Year", "5-Year"], { message: "Select visa duration" }),
@@ -76,8 +94,10 @@ function SearchableSelectField({
   onChange,
 }: SearchableSelectFieldProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState(value || "");
   const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   useEffect(() => {
     setQuery(value || "");
@@ -104,6 +124,16 @@ function SearchableSelectField({
     return options.filter((option) => option.toLowerCase().includes(trimmedQuery));
   }, [options, query]);
 
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [query, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !listRef.current) return;
+    const active = listRef.current.querySelector<HTMLElement>('[data-highlighted="true"]');
+    active?.scrollIntoView({ block: "nearest" });
+  }, [highlightedIndex, isOpen, filteredOptions]);
+
   const commitSelection = (selectedValue: string) => {
     onChange(selectedValue);
     setQuery(selectedValue);
@@ -120,6 +150,14 @@ function SearchableSelectField({
         placeholder={placeholder}
         disabled={disabled}
         autoComplete="off"
+        role="combobox"
+        aria-expanded={isOpen}
+        aria-autocomplete="list"
+        aria-activedescendant={
+          isOpen && filteredOptions[highlightedIndex]
+            ? `country-option-${highlightedIndex}`
+            : undefined
+        }
         className={className}
         onFocus={() => {
           if (!disabled) {
@@ -132,16 +170,45 @@ function SearchableSelectField({
         }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
+            event.preventDefault();
             setIsOpen(false);
             setQuery(value || "");
             return;
           }
 
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            if (!isOpen) {
+              setIsOpen(true);
+              return;
+            }
+            if (filteredOptions.length === 0) return;
+            setHighlightedIndex((current) => (current + 1) % filteredOptions.length);
+            return;
+          }
+
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            if (!isOpen) {
+              setIsOpen(true);
+              return;
+            }
+            if (filteredOptions.length === 0) return;
+            setHighlightedIndex((current) =>
+              current <= 0 ? filteredOptions.length - 1 : current - 1,
+            );
+            return;
+          }
+
           if (event.key === "Enter") {
             event.preventDefault();
-            const exactMatch = filteredOptions.find((option) => option.toLowerCase() === query.trim().toLowerCase()) || filteredOptions[0];
-            if (exactMatch) {
-              commitSelection(exactMatch);
+            if (!isOpen || filteredOptions.length === 0) return;
+            const selected =
+              filteredOptions[highlightedIndex] ||
+              filteredOptions.find((option) => option.toLowerCase() === query.trim().toLowerCase()) ||
+              filteredOptions[0];
+            if (selected) {
+              commitSelection(selected);
             }
           }
         }}
@@ -154,21 +221,37 @@ function SearchableSelectField({
       />
 
       {isOpen && !disabled && (
-        <div className="absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-[14px] border border-[#d9e4f7] bg-white shadow-[0_18px_40px_rgba(22,62,120,0.14)] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div
+          ref={listRef}
+          role="listbox"
+          className="absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-[14px] border border-[#d9e4f7] bg-white shadow-[0_18px_40px_rgba(22,62,120,0.14)] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        >
           {showLoading ? (
             <div className="px-3 py-2 text-[13px] text-[#7a8bab]">Loading...</div>
           ) : filteredOptions.length > 0 ? (
-            filteredOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className="block w-full px-3 py-2 text-left text-[13px] text-[#1d2f4f] transition-colors hover:bg-[#edf3ff]"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => commitSelection(option)}
-              >
-                {option}
-              </button>
-            ))
+            filteredOptions.map((option, index) => {
+              const highlighted = index === highlightedIndex;
+              return (
+                <button
+                  key={option}
+                  id={`country-option-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={highlighted}
+                  data-highlighted={highlighted ? "true" : undefined}
+                  className={`block w-full px-3 py-2 text-left text-[13px] transition-colors ${
+                    highlighted
+                      ? "bg-[#edf3ff] text-[#0F1F3D]"
+                      : "text-[#1d2f4f] hover:bg-[#edf3ff]"
+                  }`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onClick={() => commitSelection(option)}
+                >
+                  {option}
+                </button>
+              );
+            })
           ) : (
             <div className="px-3 py-2 text-[13px] text-[#7a8bab]">No matches found</div>
           )}
@@ -368,6 +451,10 @@ export default function RegistrationPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data, updateData, resetData } = useEVisa();
+  const originOptionIdRef = useRef<number | null>(null);
+  const { user, isAuthenticated } = useAuth();
+  const [extraApplicants, setExtraApplicants] = useState<ExtraApplicant[]>([]);
+  const [emailAutofilled, setEmailAutofilled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitError, setHasSubmitError] = useState(false);
   const [hasActiveDraftSession, setHasActiveDraftSession] = useState(false);
@@ -476,6 +563,9 @@ export default function RegistrationPage() {
   const detailsMode = searchParams.get("view") === "details";
   const isExistingCase = Boolean(caseFromQuery);
   const isReadOnlyApplication = searchParams.get("readonly") === "1";
+  const originSlugFromQuery = (searchParams.get("origin") || "").trim();
+  const optionFromQuery = Number(searchParams.get("option") || "");
+  const durationFromQuery = (searchParams.get("duration") || "").trim();
   const shouldHydrateFromPersistedState = Boolean(magicToken || caseFromQuery || resumeMode || detailsMode || hasActiveDraftSession);
   const nationalityOptions = useMemo(
     () => appendOtherOption(dedupeAndSortOptions(countryOptions.map((option) => option.nationality || option.country))),
@@ -523,23 +613,111 @@ export default function RegistrationPage() {
     };
   }, []);
 
-  const { register, handleSubmit, control, setValue, watch, reset, resetField } = useForm<RegistrationData>({
+  const { register, handleSubmit, control, setValue, watch, reset, resetField, formState: { errors } } = useForm<RegistrationData>({
     resolver: zodResolver(registrationSchema),
     defaultValues: {
-      visaDuration: shouldHydrateFromPersistedState ? data.visaDuration || undefined : undefined,
+      visaDuration: shouldHydrateFromPersistedState ? data.visaDuration || "1-Year" : "1-Year",
       email: shouldHydrateFromPersistedState ? data.email || "" : "",
       countryCode: shouldHydrateFromPersistedState ? data.countryCode || defaultDialCode : defaultDialCode,
       phone: shouldHydrateFromPersistedState ? data.phone || "" : "",
       fullName: shouldHydrateFromPersistedState ? data.fullName || "" : "",
       nationality: shouldHydrateFromPersistedState ? data.nationality || "" : "",
       countryOfResidence: shouldHydrateFromPersistedState ? data.countryOfResidence || "" : "",
-      purposeOfVisit: shouldHydrateFromPersistedState && data.purposeOfVisit && purposeOptions.has(data.purposeOfVisit) ? (data.purposeOfVisit as RegistrationData["purposeOfVisit"]) : undefined,
+      purposeOfVisit:
+        shouldHydrateFromPersistedState && data.purposeOfVisit && purposeOptions.has(data.purposeOfVisit)
+          ? (data.purposeOfVisit as RegistrationData["purposeOfVisit"])
+          : "Tourism",
       consent: shouldHydrateFromPersistedState && data.consentAccepted ? true : undefined,
     }
   });
 
+  useEffect(() => {
+    const optionId = Number.isFinite(optionFromQuery) && optionFromQuery > 0 ? optionFromQuery : null;
+    const duration =
+      durationFromQuery === "5-Year" || durationFromQuery === "1-Year"
+        ? durationFromQuery
+        : null;
+    if (!optionId && !originSlugFromQuery && !duration) return;
+    originOptionIdRef.current = optionId;
+    updateData({
+      ...(optionId ? { originOptionId: optionId } : {}),
+      ...(originSlugFromQuery ? { originSlug: originSlugFromQuery } : {}),
+      ...(duration ? { visaDuration: duration } : {}),
+    });
+    if (duration) {
+      setValue("visaDuration", duration);
+    }
+  }, [optionFromQuery, originSlugFromQuery, durationFromQuery, updateData, setValue]);
+
+  const selectedVisaDuration = watch("visaDuration") || "1-Year";
+  const selectedFeePounds = selectedVisaDuration === "5-Year" ? 150 : 88;
+  const selectedFeeLabel = `£${selectedFeePounds}`;
+  const selectedServiceLabel =
+    selectedVisaDuration === "5-Year" ? "5-Year Indian Tourist e-Visa" : "1-Year Indian Tourist e-Visa";
+  const watchedFullName = watch("fullName") || "";
+  const watchedEmail = watch("email") || "";
+  const applicantCount = 1 + extraApplicants.length;
+  const orderTotalLabel = `£${selectedFeePounds * applicantCount}`;
   const phoneValue = watch("phone");
   const didAutoStripRef = useRef(false);
+
+  // Autofill registered account email (and name when blank)
+  useEffect(() => {
+    if (!isAuthenticated || !user?.email) return;
+    if (caseFromQuery || magicToken || resumeMode || detailsMode) return;
+
+    const currentEmail = (watch("email") || "").trim();
+    if (!currentEmail) {
+      setValue("email", user.email, { shouldDirty: false, shouldValidate: true });
+      setEmailAutofilled(true);
+      updateData({ email: user.email });
+    } else if (currentEmail.toLowerCase() === user.email.toLowerCase()) {
+      setEmailAutofilled(true);
+    }
+
+    const currentName = (watch("fullName") || "").trim();
+    if (!currentName) {
+      const fullName = [user.first_name || "", user.last_name || ""].filter(Boolean).join(" ").trim();
+      if (fullName) {
+        setValue("fullName", fullName, { shouldDirty: false, shouldValidate: true });
+        updateData({ fullName });
+      }
+    }
+  }, [
+    isAuthenticated,
+    user?.email,
+    user?.first_name,
+    user?.last_name,
+    caseFromQuery,
+    magicToken,
+    resumeMode,
+    detailsMode,
+    setValue,
+    watch,
+    updateData,
+  ]);
+
+  const addExtraApplicant = () => {
+    setExtraApplicants((prev) => [
+      ...prev,
+      {
+        id: `applicant-${Date.now()}-${prev.length + 2}`,
+        fullName: "",
+        countryCode: watch("countryCode") || defaultDialCode,
+        phone: "",
+        email: "",
+        relationship: "",
+      },
+    ]);
+  };
+
+  const updateExtraApplicant = (id: string, patch: Partial<ExtraApplicant>) => {
+    setExtraApplicants((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
+
+  const removeExtraApplicant = (id: string) => {
+    setExtraApplicants((prev) => prev.filter((row) => row.id !== id));
+  };
 
   useEffect(() => {
     if (!phoneValue?.startsWith("+")) {
@@ -619,77 +797,19 @@ export default function RegistrationPage() {
     loadedResumeCaseRef.current = "";
     processedResumeMagicRef.current = "";
 
-    // Profile prefill runs AFTER reset
-    // so it never gets wiped
-    if (!authService.isLoggedIn()) return;
+    // Profile prefill runs AFTER reset so it never gets wiped
+    if (!isAuthenticated || !user?.email) return;
 
-    // const prefillFromProfile = async () => {
-    //   try {
-    //     const res = await authenticatedFetch(
-    //       `${API_BASE_URL}/auth/me/`,
-    //       { method: "GET" }
-    //     );
-    //     if (!res.ok) return;
+    setValue("email", user.email, { shouldDirty: false, shouldValidate: true });
+    setEmailAutofilled(true);
+    updateData({ email: user.email });
 
-    //     const json = await res.json().catch(() => ({}));
-    //     const coreUser = (json as any)?.data?.core_user;
-    //     if (!coreUser) return;
-
-    //     console.log("[prefillFromProfile] coreUser data:", coreUser);
-
-    //     // Phone
-    //     const rawPhone = coreUser.phone_number || "";
-    //     console.log("[prefillFromProfile] rawPhone:", rawPhone);
-    //     if (rawPhone) {
-    //       const { countryCode, phone } =
-    //         splitPhoneNumber(rawPhone);
-    //       console.log("[prefillFromProfile] split phone:", { countryCode, phone });
-    //       setValue("countryCode", countryCode);
-    //       setValue("phone", phone);
-    //       updateData({ phone, countryCode });
-    //     }
-
-    //     // Nationality and Country of Residence
-    //     const nationality = coreUser.nationality || "";
-    //     const country = coreUser.country || "";
-    //     console.log("[prefillFromProfile] nationality:", nationality, "country:", country);
-
-    //     if (coreUser.nationality) {
-    //       const nationalityMap: Record<string, string> = {
-    //         "British": "British",
-    //         "American": "American",
-    //         "Canadian": "Canadian",
-    //         "Indian": "Indian",
-    //         "Australian": "Other",
-    //       };
-    //       const mapped = nationalityMap[coreUser.nationality] ?? "Other";
-    //       setValue("nationality", mapped as RegistrationData["nationality"], { shouldDirty: true, shouldTouch: true });
-    //       updateData({ nationality: mapped });
-    //     }
-
-    //     // Email
-    //     if (coreUser.email) {
-    //       setValue("email", coreUser.email);
-    //       updateData({ email: coreUser.email });
-    //     }
-
-    //     // Full name
-    //     const fullName = [
-    //       coreUser.first_name || "",
-    //       coreUser.last_name || "",
-    //     ].filter(Boolean).join(" ").trim();
-    //     if (fullName) {
-    //       setValue("fullName", fullName);
-    //       updateData({ fullName });
-    //     }
-
-    //   } catch {
-    //     // Silent fail
-    //   }
-    // };
-
-    // void prefillFromProfile();
-  }, [draftSessionChecked, shouldHydrateFromPersistedState, resetData, reset]);
+    const fullName = [user.first_name || "", user.last_name || ""].filter(Boolean).join(" ").trim();
+    if (fullName) {
+      setValue("fullName", fullName, { shouldDirty: false, shouldValidate: true });
+      updateData({ fullName });
+    }
+  }, [draftSessionChecked, shouldHydrateFromPersistedState, resetData, reset, isAuthenticated, user, setValue, updateData]);
 
   useEffect(() => {
     if (!hasActiveDraftSession || caseFromQuery || magicToken || resumeMode || detailsMode) {
@@ -949,6 +1069,23 @@ export default function RegistrationPage() {
   const onSubmit = async (data: RegistrationData) => {
     setIsSubmitting(true);
     setHasSubmitError(false);
+
+    const incompleteExtras = extraApplicants.filter(
+      (row) => row.fullName.trim() || row.email.trim() || row.phone.trim()
+        ? !(row.fullName.trim() && row.email.trim() && row.phone.trim())
+        : false
+    );
+    if (incompleteExtras.length > 0) {
+      toast.error("Please complete name, email, and mobile for each added applicant — or remove them.");
+      setIsSubmitting(false);
+      setHasSubmitError(true);
+      setTimeout(() => setHasSubmitError(false), 500);
+      return;
+    }
+
+    const readyExtras = extraApplicants.filter(
+      (row) => row.fullName.trim() && row.email.trim() && row.phone.trim()
+    );
     
     try {
       if (isExistingCase) {
@@ -985,6 +1122,8 @@ export default function RegistrationPage() {
         return;
       }
 
+      const originOptionId = originOptionIdRef.current;
+
       const response = await eVisaApi.register({
         email: data.email,
         confirm_email: data.email,
@@ -995,10 +1134,43 @@ export default function RegistrationPage() {
         purpose_of_visit: data.purposeOfVisit,
         visa_duration: data.visaDuration,
         consent: data.consent,
+        ...(originOptionId ? { origin_option_id: originOptionId } : {}),
       });
 
       const fileNumber = response.data.case_number;
-      toast.success(response.message || "Registration successful.");
+
+      // Register additional applicants as separate cases (same visa / residence details)
+      if (readyExtras.length > 0) {
+        let extrasOk = 0;
+        for (const extra of readyExtras) {
+          try {
+            await eVisaApi.register({
+              email: extra.email.trim(),
+              confirm_email: extra.email.trim(),
+              mobile_number: `${extra.countryCode || data.countryCode}${extra.phone.trim()}`,
+              full_name: extra.fullName.trim(),
+              nationality: data.nationality,
+              country_of_residence: data.countryOfResidence,
+              purpose_of_visit: data.purposeOfVisit,
+              visa_duration: data.visaDuration,
+              consent: data.consent,
+              ...(originOptionId ? { origin_option_id: originOptionId } : {}),
+            });
+            extrasOk += 1;
+          } catch {
+            // Continue with remaining extras; primary case already created
+          }
+        }
+        if (extrasOk > 0) {
+          toast.success(`Primary case created. ${extrasOk} additional applicant${extrasOk > 1 ? "s" : ""} registered.`);
+        } else {
+          toast.success(response.message || "Registration successful.");
+          toast.error("Additional applicants could not be registered. You can add them later.");
+        }
+      } else {
+        toast.success(response.message || "Registration successful.");
+      }
+
       if (typeof window !== "undefined") {
         sessionStorage.removeItem(REGISTER_DRAFT_SESSION_KEY);
       }
@@ -2294,466 +2466,316 @@ if (profileRes.ok) {
     );
   }
 
+  const fieldClass = `${checkoutFieldClass} ${fieldDisabledClass}`;
+
+  const summaryLines = [
+    {
+      id: "applicant-1",
+      title: watchedFullName.trim() || "Applicant 1",
+      subtitle: selectedServiceLabel,
+      meta: watchedEmail || undefined,
+      amountLabel: selectedFeeLabel,
+    },
+    ...extraApplicants.map((applicant, index) => ({
+      id: applicant.id,
+      title: applicant.fullName.trim() || `Applicant ${index + 2}`,
+      subtitle: selectedServiceLabel,
+      meta: applicant.relationship || undefined,
+      amountLabel: selectedFeeLabel,
+    })),
+  ];
+
   return (
-    <div className="relative w-full bg-[#f0f5fc] text-black pb-6 sm:pb-8 pt-6 sm:pt-8 overflow-hidden">
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute -top-20 -left-16 h-56 w-56 rounded-full bg-[#56a7ff]/30 blur-3xl"
-        animate={{ x: [0, 20, 0], y: [0, 12, 0], opacity: [0.3, 0.45, 0.3] }}
-        transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        aria-hidden
-        className="pointer-events-none absolute top-20 right-0 h-48 w-48 rounded-full bg-[#9cc8ff]/35 blur-3xl"
-        animate={{ x: [0, -22, 0], y: [0, -10, 0], opacity: [0.25, 0.4, 0.25] }}
-        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-      />
+    <CheckoutShell
+      title="Start your order"
+      subtitle="Choose your visa and enter applicant details."
+      currentStep={0}
+      summary={
+        <OrderSummaryCard
+          lines={summaryLines}
+          totalLabel={orderTotalLabel}
+          footerNote={`${applicantCount} applicant${applicantCount > 1 ? "s" : ""} · ${selectedVisaDuration}`}
+        />
+      }
+      form={
+        <form onSubmit={handleSubmit(onSubmit, onError)} className="space-y-3">
+          <input type="hidden" {...register("purposeOfVisit")} />
+          <input type="hidden" {...register("nationality")} />
 
-      {!detailsMode && (
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 mb-1 sm:mb-2">
-          <ProgressStepper currentStep={0} />
-        </div>
-      )}
-
-      <section className="max-w-[1200px] mx-auto px-4 sm:px-6">
-        <div className={`grid grid-cols-1 ${detailsMode ? "" : "lg:grid-cols-[0.38fr_0.62fr]"} gap-6 lg:gap-8 items-stretch`}>
-          <aside className={`${detailsMode ? "hidden" : "px-1 sm:px-2 lg:px-0 lg:pr-2 h-full"}`}>
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="show"
-              whileHover={{ y: -3 }}
-              className="max-w-[430px] lg:max-w-none h-full rounded-xl border border-[#dde8f5] bg-white/95 backdrop-blur-sm p-5 sm:p-6 flex flex-col shadow-[0_20px_48px_rgba(23,72,145,0.08)]"
-            >
-              <motion.div variants={itemVariants} className="inline-flex items-center gap-2 bg-[#e8f0fe] border border-[#c7dafb] text-[#1a56db] px-3 py-1.5 rounded-full font-body text-xs font-semibold mb-5">
-                <span className="h-2 w-2 rounded-full bg-[#1a56db]" />
-                Indian e-Visa assistance
-              </motion.div>
-
-              <motion.h1 variants={itemVariants} className="font-heading text-[22px] sm:text-[24px] lg:text-[26px] font-semibold leading-tight text-[#0f1f3d] mb-3">
-                Apply for <span className="italic text-[#1a56db]">Indian e-Visa</span>
-              </motion.h1>
-
-              <motion.p variants={itemVariants} className="font-body text-[13px] text-[#6b7d92] mb-6">
-                Fast, secure assistance for UK & US travellers
-              </motion.p>
-
-              <motion.p variants={itemVariants} className="font-body text-[12px] text-[#6b7d92] mb-6 max-w-[420px] leading-relaxed">
-                Register in under 60 seconds. Complete payment to upload documents. We submit on your behalf.
-              </motion.p>
-
-              <motion.div variants={itemVariants} className="hidden sm:block space-y-4 mb-6">
-                {[
-                  "Choose visa type",
-                  "Use email you check regularly",
-                  "Enter passport name exactly",
-                  "Pay to unlock upload",
-                ].map((item, idx) => (
-                  <div key={item} className="flex items-start gap-3">
-                    <span className="h-5 w-5 rounded-full bg-[#1a56db] text-white text-[11px] font-semibold flex items-center justify-center shrink-0 mt-0.5">
-                      {idx + 1}
-                    </span>
-                    <p className="font-body text-[13px] text-[#6b7d92] leading-relaxed">{item}</p>
-                  </div>
-                ))}
-              </motion.div>
-
-              <motion.div variants={itemVariants} className="hidden sm:block mt-auto space-y-3">
-                <details className="group rounded-lg border border-[#d7e3f2] bg-[#f8fafd] p-3">
-                  <summary className="cursor-pointer list-none font-body text-[12px] font-semibold text-[#0f1f3d] flex items-center justify-between">
-                    Why we ask these details
-                    <span className="text-[#7b8fa7] group-open:rotate-180 transition-transform">⌄</span>
-                  </summary>
-                  <p className="mt-2 font-body text-[11px] text-[#6b7d92] leading-relaxed">
-                    This helps us prepare your application correctly and reduce delays caused by document mismatches.
-                  </p>
-                </details>
-
-                <details className="group rounded-lg border border-[#d7e3f2] bg-[#f8fafd] p-3">
-                  <summary className="cursor-pointer list-none font-body text-[12px] font-semibold text-[#0f1f3d] flex items-center justify-between">
-                    What happens next
-                    <span className="text-[#7b8fa7] group-open:rotate-180 transition-transform">⌄</span>
-                  </summary>
-                  <p className="mt-2 font-body text-[11px] text-[#6b7d92] leading-relaxed">
-                    After registration you complete payment, then upload passport and photo for submission.
-                  </p>
-                </details>
-
-                <div className="bg-white border border-[#c9dbf3] rounded-xl p-3">
-                <p className="font-body text-[11px] text-[#74889f] leading-relaxed">
-                  We assist with preparation and submission of your Indian e-Visa application based on the information and documents you provide. Independent service. Not affiliated with the Government of India.
-                </p>
-                </div>
-              </motion.div>
-            </motion.div>
-          </aside>
-
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-            className={`relative ${detailsMode ? "bg-[#ececf4] border border-[#dadde9] rounded-2xl p-5 sm:p-6 lg:p-7" : "bg-white/95 backdrop-blur-sm border border-[#dde8f5] rounded-xl border-t-[3px] border-t-[#1a56db] p-5 sm:p-6 lg:p-7 h-full lg:max-h-[860px] lg:overflow-y-auto lg:pr-4 shadow-[0_24px_54px_rgba(20,76,160,0.10)]"}`}
-          >
-            <motion.div
-              aria-hidden
-              className="pointer-events-none absolute right-3 top-3 hidden sm:block"
-              animate={{ rotate: [0, 8, 0], scale: [1, 1.06, 1] }}
-              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-            >
-              <Sparkles className="h-4 w-4 text-[#1a56db]/40" />
-            </motion.div>
-            <div className="mb-5">
-              {detailsMode && (
-                <div className="mb-4 rounded-xl border border-[#c7dafb] bg-[#eef4ff] px-4 py-3 text-[12px] text-[#1a56db] font-semibold">
-                  Application Details Form loaded. You can update and save this information.
-                </div>
-              )}
-              {isReadOnlyApplication && (
-                <div className="mb-4 rounded-xl border border-[#c7dafb] bg-[#eef4ff] px-4 py-3 text-[12px] text-[#1a56db] font-semibold">
-                  View only mode: this application is prefilled and locked for editing.
-                </div>
-              )}
-              <h3 className="font-heading text-[22px] sm:text-[24px] font-semibold leading-tight text-[#0f1f3d] mb-2">
-                {detailsMode ? (
-                  <>
-                    Application <span className="italic text-[#1a56db]">Details Form</span>
-                  </>
-                ) : (
-                  <>
-                    Apply for <span className="italic text-[#1a56db]">Indian e-Visa</span>
-                  </>
-                )}
-              </h3>
-              <p className="font-body text-[13px] text-[#6b7d92] mb-2">
-                {detailsMode ? "Review or update applicant details in form format." : "Fast, secure assistance for UK & US travellers"}
-              </p>
-              {detailsMode && caseFromQuery && (
-                <p className="inline-flex items-center rounded-full border border-[#d3e2f9] bg-[#f4f8ff] px-3 py-1 text-[11px] font-semibold text-[#1a56db] mb-2">
-                  Case: {caseFromQuery}
-                </p>
-              )}
-              <p className="font-body text-[12px] text-[#6b7d92] leading-relaxed mb-2">
-                Register in under 60 seconds. Complete payment to upload documents. We submit on your behalf.
-              </p>
-              {detailsMode && (
-                <div className="mt-2 mb-1 rounded-xl border border-[#d6d9e6] bg-[#f7f8fc] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h4 className="font-heading text-[36px] leading-none text-[#4452ff]">|</h4>
-                    <h4 className="font-heading text-[30px] sm:text-[34px] font-semibold text-[#1f2940] flex-1">1. Applicant Personal Details</h4>
-                    <span className="rounded-full bg-[#ffe9ec] px-3 py-1 text-[13px] font-semibold text-[#df5c6f]">
-                      {detailsMissingCount} Items Missing
-                    </span>
-                  </div>
-                </div>
-              )}
-              <p className="font-body text-[11px] text-[#8a9bb0] leading-relaxed">
-                We assist with preparation and submission of your Indian e-Visa application based on the information and documents you provide. Independent service. Not affiliated with the Government of India.
-              </p>
+          {/* Primary applicant — same screen */}
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <div>
+              <label className={checkoutLabelClass}>
+                Name of Applicant <span className="text-[#E11D48]">*</span>
+              </label>
+              <input
+                {...register("fullName")}
+                type="text"
+                disabled={isSubmitting || isReadOnlyApplication}
+                readOnly={isReadOnlyApplication}
+                placeholder="As on passport"
+                className={fieldClass}
+              />
+              {errors.fullName ? <p className="mt-1 text-[11px] text-[#E11D48]">{errors.fullName.message}</p> : null}
             </div>
-            <div className="w-full h-[1px] bg-[#e5edf7] mb-5" />
 
-            <form onSubmit={handleSubmit(onSubmit, onError)} className={`space-y-4 ${detailsMode ? "rounded-2xl border border-[#d6d9e6] bg-[#f7f8fc] p-4 sm:p-5" : ""}`}>
-              
-              {!detailsMode && (
-                <div>
-                  <label className="block font-body font-semibold text-[#0f1f3d] text-[12px] mb-2">Select visa duration *</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Controller
-                      name="visaDuration"
-                      control={control}
-                      render={({ field }) => (
-                        <>
-                          <button
-                            type="button"
-                            disabled={isReadOnlyApplication}
-                            onClick={() => field.onChange("1-Year")}
-                            className={`relative rounded-[10px] border p-3 text-left transition-all ${
-                              field.value === "1-Year"
-                                ? "border-[#1a56db] bg-[#f0f6ff]"
-                                : "border-[#d7e3f2] bg-white"
-                            }`}
-                          >
-                            <span className="absolute top-2 right-2 bg-[#1a56db] text-white text-[9px] px-2 py-0.5 rounded-full font-semibold">Popular</span>
-                            <p className="font-body text-[12px] text-[#6b7d92]">1-year e-Visa</p>
-                            <p className="font-mono text-[22px] font-bold text-[#1a56db] mt-1">£88</p>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isReadOnlyApplication}
-                            onClick={() => field.onChange("5-Year")}
-                            className={`rounded-[10px] border p-3 text-left transition-all ${
-                              field.value === "5-Year"
-                                ? "border-[#1a56db] bg-[#f0f6ff]"
-                                : "border-[#d7e3f2] bg-white"
-                            }`}
-                          >
-                            <p className="font-body text-[12px] text-[#6b7d92]">5-year e-Visa</p>
-                            <p className="font-mono text-[22px] font-bold text-[#1a56db] mt-1">£150</p>
-                          </button>
-                        </>
-                      )}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {detailsMode && (
-                <>
-                  <input type="hidden" {...register("visaDuration")} />
-                  <input type="hidden" {...register("purposeOfVisit")} />
-                  <input type="hidden" {...register("consent")} />
-                </>
-              )}
-
-              <div>
-                <p className="font-body text-[10px] tracking-[0.14em] uppercase text-[#8da1b8] font-semibold mb-2">{detailsMode ? "Personal Details" : "Contact Details"}</p>
-                <div className="h-[1px] bg-[#e5edf7]" />
-              </div>
-
-              {/* Email */}
-             <div className="grid sm:grid-cols-1 gap-4">
- <div className="grid sm:grid-cols-1 gap-4">
-  <div>
-    <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>
-      Email address *
-    </label>
-    <input
-      {...register("email")}
-      type="email"
-      disabled={isSubmitting || isReadOnlyApplication}
-      readOnly={isReadOnlyApplication}
-      placeholder="your@email.com"
-      className={inputClasses() + " " + fieldDisabledClass}
-      onBlur={async (e) => {
-        const typedEmail = e.target.value.trim();
-        if (!typedEmail || !authService.isLoggedIn()) return;
-        try {
-          const res = await authenticatedFetch(`${API_BASE_URL}/auth/me/`, { method: "GET" });
-          if (!res.ok) return;
-          const json = await res.json().catch(() => ({}));
-          const accountEmail = (json as any)?.data?.core_user?.email || "";
-          if (accountEmail && typedEmail.toLowerCase() !== accountEmail.toLowerCase()) {
-            toast.error(`Please use your registered email: ${accountEmail}`);
-          }
-        } catch {
-          // silent
-        }
-      }}
-    />
-  </div>
-</div>
-</div>
-              {/* Field 4: Mobile */}
-              <div>
-                <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Mobile number *</label>
-                <div className="flex gap-2.5">
-                  <Controller
-                    name="countryCode"
-                    control={control}
-                    render={({ field }) => (
-                      <SearchableDialCode
-                        value={field.value}
-                        options={countryOptions}
-                        loading={isCountryOptionsLoading}
-                        disabled={isSubmitting || isReadOnlyApplication}
-                        className={`${detailsMode ? "w-[160px] px-3 py-3 border border-[#d7dbe8] rounded-[14px] font-body text-[13px] bg-[#f1f2f6] outline-none focus:border-[#7f86a5] focus:shadow-[0_0_0_3px_rgba(127,134,165,0.2)] transition-all duration-200" : "w-[140px] px-3 py-2.5 border border-[#d7e3f2] rounded-lg font-body text-[12px] bg-[#f8fafd] outline-none focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.16)] transition-all duration-200"} ${fieldDisabledClass}`}
-                        onChange={field.onChange}
-                      />
-                    )}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <input
-                      {...register("phone")}
-                      type="tel"
+            <div>
+              <label className={checkoutLabelClass}>Mobile Number</label>
+              <div className="flex gap-2">
+                <Controller
+                  name="countryCode"
+                  control={control}
+                  render={({ field }) => (
+                    <SearchableDialCode
+                      value={field.value}
+                      options={countryOptions}
+                      loading={isCountryOptionsLoading}
                       disabled={isSubmitting || isReadOnlyApplication}
-                      readOnly={isReadOnlyApplication}
-                      placeholder="e.g. 7700 900000"
-                      className={inputClasses() + " " + fieldDisabledClass}
+                      className={`w-[92px] shrink-0 ${fieldClass}`}
+                      onChange={field.onChange}
                     />
-                  </div>
-                </div>
-              </div>
-
-              {!detailsMode && (
-              <div>
-                <p className="font-body text-[10px] tracking-[0.14em] uppercase text-[#8da1b8] font-semibold mb-2">Travel Details</p>
-                <div className="h-[1px] bg-[#e5edf7]" />
-              </div>
-              )}
-
-              {/* Field 5: Full Name */}
-              <div>
-                <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Full name (as per passport) *</label>
+                  )}
+                />
                 <input
-                  {...register("fullName")}
-                  type="text"
+                  {...register("phone")}
+                  type="tel"
                   disabled={isSubmitting || isReadOnlyApplication}
                   readOnly={isReadOnlyApplication}
-                  placeholder="As per your passport"
-                  className={inputClasses() + " " + fieldDisabledClass}
+                  placeholder="Phone number"
+                  className={`min-w-0 flex-1 ${fieldClass}`}
                 />
               </div>
+              {errors.phone ? <p className="mt-1 text-[11px] text-[#E11D48]">{errors.phone.message}</p> : null}
+            </div>
 
-              {/* Fields 6 & 7: Nationality and Residence */}
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Nationality *</label>
-                  <Controller
-                    name="nationality"
-                    control={control}
-                    render={({ field }) => (
-                      <SearchableSelectField
-                        value={field.value}
-                        options={nationalityOptions}
-                        placeholder="Search and select nationality"
-                        loading={isCountryOptionsLoading}
-                        disabled={isSubmitting || isReadOnlyApplication}
-                        className={inputClasses() + " bg-white " + fieldDisabledClass}
-                        onChange={field.onChange}
-                      />
-                    )}
+            <div>
+              <label className={checkoutLabelClass}>
+                Email Address <span className="text-[#E11D48]">*</span>
+              </label>
+              <input
+                {...register("email")}
+                type="email"
+                disabled={isSubmitting || isReadOnlyApplication || (emailAutofilled && isAuthenticated)}
+                readOnly={isReadOnlyApplication || (emailAutofilled && isAuthenticated)}
+                placeholder="you@email.com"
+                className={`${fieldClass} ${emailAutofilled && isAuthenticated ? "bg-[#F0F7FF]" : ""}`}
+              />
+              {errors.email ? (
+                <p className="mt-1 text-[11px] text-[#E11D48]">{errors.email.message}</p>
+              ) : emailAutofilled && isAuthenticated ? (
+                <p className="mt-1 text-[11px] text-[#1A56DB]">Registered email</p>
+              ) : (
+                <p className="mt-1 text-[11px] text-[#829AB1]">Verification code goes here</p>
+              )}
+            </div>
+
+            <div>
+              <label className={checkoutLabelClass}>
+                Applying From <span className="text-[#E11D48]">*</span>
+              </label>
+              <Controller
+                name="countryOfResidence"
+                control={control}
+                render={({ field }) => (
+                  <SearchableSelectField
+                    value={field.value}
+                    options={residenceOptions}
+                    placeholder="Select country"
+                    loading={isCountryOptionsLoading}
+                    disabled={isSubmitting || isReadOnlyApplication}
+                    className={fieldClass}
+                    onChange={(value) => {
+                      field.onChange(value);
+                      const nationalityMatch =
+                        nationalityOptions.find((option) => option.toLowerCase() === value.toLowerCase()) ||
+                        nationalityOptions.find((option) => {
+                          const first = value.toLowerCase().split(" ")[0] || "";
+                          return (
+                            value.toLowerCase().includes(option.toLowerCase()) ||
+                            (first.length > 3 && option.toLowerCase().includes(first))
+                          );
+                        });
+                      setValue("nationality", nationalityMatch || value, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      });
+                    }}
                   />
-                </div>
-                <div>
-                  <label className={`block font-body font-semibold ${detailsMode ? "uppercase tracking-wide text-[#66728a] text-[12px]" : "text-[#0f1f3d] text-[12px]"} mb-2`}>Country of residence *</label>
-                  <Controller
-                    name="countryOfResidence"
-                    control={control}
-                    render={({ field }) => (
-                      <SearchableSelectField
-                        value={field.value}
-                        options={residenceOptions}
-                        placeholder="Search and select country"
-                        loading={isCountryOptionsLoading}
-                        disabled={isSubmitting || isReadOnlyApplication}
-                        className={inputClasses() + " bg-white " + fieldDisabledClass}
-                        onChange={field.onChange}
-                      />
-                    )}
-                  />
-                </div>
+                )}
+              />
+              {(errors.countryOfResidence || errors.nationality) ? (
+                <p className="mt-1 text-[11px] text-[#E11D48]">
+                  {errors.countryOfResidence?.message || errors.nationality?.message}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Extra applicants expand on SAME screen */}
+          {extraApplicants.map((applicant, index) => (
+            <div key={applicant.id} className="rounded-lg border border-[#D7E4F4] bg-[#F8FBFF] p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[13px] font-semibold text-[#0F1F3D]">Applicant {index + 2}</p>
+                <button
+                  type="button"
+                  onClick={() => removeExtraApplicant(applicant.id)}
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-[#E11D48]"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Remove
+                </button>
               </div>
-
-              {!detailsMode && (
-                <>
-                  <div>
-                    <label className="block font-body font-semibold text-[#0f1f3d] text-[12px] mb-3">Purpose of visit *</label>
-                    <Controller
-                      name="purposeOfVisit"
-                      control={control}
-                      render={({ field }) => (
-                        <div className="flex flex-wrap gap-1.5">
-                          {["Tourism", "Business", "Medical", "Conference", "Other"].map((item) => {
-                            const active = field.value === item;
-                            return (
-                              <motion.button
-                                key={item}
-                                type="button"
-                                disabled={isReadOnlyApplication}
-                                onClick={() => field.onChange(item)}
-                                className={`px-2.5 py-1.5 rounded-full border text-[10px] sm:text-[11px] font-body transition-all ${
-                                  active
-                                    ? "bg-[#e8f0fe] border-[#1a56db] text-[#1a56db]"
-                                    : "bg-white border-[#d7e3f2] text-[#6b7d92]"
-                                }`}
-                              >
-                                {item}
-                              </motion.button>
-                            );
-                          })}
-                        </div>
-                      )}
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                <div>
+                  <label className={checkoutLabelClass}>Name</label>
+                  <input
+                    type="text"
+                    value={applicant.fullName}
+                    disabled={isSubmitting || isReadOnlyApplication}
+                    onChange={(e) => updateExtraApplicant(applicant.id, { fullName: e.target.value })}
+                    placeholder="As on passport"
+                    className={fieldClass}
+                  />
+                </div>
+                <div>
+                  <label className={checkoutLabelClass}>Mobile</label>
+                  <div className="flex gap-2">
+                    <SearchableDialCode
+                      value={applicant.countryCode}
+                      options={countryOptions}
+                      loading={isCountryOptionsLoading}
+                      disabled={isSubmitting || isReadOnlyApplication}
+                      className={`w-[92px] shrink-0 ${fieldClass}`}
+                      onChange={(value) => updateExtraApplicant(applicant.id, { countryCode: value })}
+                    />
+                    <input
+                      type="tel"
+                      value={applicant.phone}
+                      disabled={isSubmitting || isReadOnlyApplication}
+                      onChange={(e) => updateExtraApplicant(applicant.id, { phone: e.target.value })}
+                      placeholder="Phone"
+                      className={`min-w-0 flex-1 ${fieldClass}`}
                     />
                   </div>
+                </div>
+                <div>
+                  <label className={checkoutLabelClass}>Email</label>
+                  <input
+                    type="email"
+                    value={applicant.email}
+                    disabled={isSubmitting || isReadOnlyApplication}
+                    onChange={(e) => updateExtraApplicant(applicant.id, { email: e.target.value })}
+                    placeholder="email@example.com"
+                    className={fieldClass}
+                  />
+                </div>
+                <div>
+                  <label className={checkoutLabelClass}>Relationship (optional)</label>
+                  <select
+                    value={applicant.relationship}
+                    disabled={isSubmitting || isReadOnlyApplication}
+                    onChange={(e) => updateExtraApplicant(applicant.id, { relationship: e.target.value })}
+                    className={fieldClass}
+                  >
+                    <option value="">Select</option>
+                    {RELATIONSHIP_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          ))}
 
-                  <div>
-                    <motion.label
-                      whileHover={{ y: -1 }}
-                      className="flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors bg-[#f8fafd] border-[#d7e3f2]">
-                      <input
-                        type="checkbox"
-                        {...register("consent")}
-                        disabled={isSubmitting || isReadOnlyApplication}
-                        className="mt-0.5 w-4 h-4 rounded border-[#c8d7ea] text-[#1a56db] focus:ring-[#1a56db]"
-                      />
-                      <span className="font-body text-[11px] text-[#6b7d92] leading-relaxed select-none">
-                        I agree to the <span className="text-[#1a56db] font-semibold">Terms & Privacy Policy</span> and consent to be contacted.
-                      </span>
-                    </motion.label>
-                  </div>
+          {!isReadOnlyApplication ? (
+            <button
+              type="button"
+              onClick={addExtraApplicant}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#1A56DB]/40 bg-[#EFF6FF] px-3 py-2 text-[13px] font-semibold text-[#1A56DB] transition hover:bg-[#DBEAFE]"
+            >
+              <Plus className="h-4 w-4" />
+              Add Applicant
+            </button>
+          ) : null}
+
+          <Controller
+            name="visaDuration"
+            control={control}
+            render={({ field }) => (
+              <ServiceOptionList
+                options={[
+                  {
+                    id: "1-Year",
+                    title: "1-Year Indian Tourist e-Visa",
+                    description: "Multiple entry · Tourism",
+                    priceLabel: "£88",
+                  },
+                  {
+                    id: "5-Year",
+                    title: "5-Year Indian Tourist e-Visa",
+                    description: "Longer validity · Tourism",
+                    priceLabel: "£150",
+                  },
+                ]}
+                value={field.value || "1-Year"}
+                disabled={isReadOnlyApplication}
+                onChange={field.onChange}
+              />
+            )}
+          />
+          {errors.visaDuration ? (
+            <p className="-mt-1 text-[11px] text-[#E11D48]">{errors.visaDuration.message}</p>
+          ) : null}
+
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              {...register("consent")}
+              disabled={isSubmitting || isReadOnlyApplication}
+              className="mt-0.5 h-4 w-4 rounded border-[#C8D7EA] text-[#1A56DB] focus:ring-[#1A56DB]"
+            />
+            <span className="text-[12px] leading-snug text-[#627D98]">
+              I agree to the Terms & Privacy Policy and consent to be contacted about this application.
+            </span>
+          </label>
+          {errors.consent ? <p className="-mt-1 text-[11px] text-[#E11D48]">{errors.consent.message}</p> : null}
+
+          <div className="flex flex-col gap-2 border-t border-[#E8EEF6] pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[13px] text-[#627D98] lg:hidden">
+              Total <span className="font-bold text-[#0F1F3D]">{orderTotalLabel}</span>
+            </p>
+            <motion.button
+              type="submit"
+              disabled={isSubmitting || isReadOnlyApplication}
+              animate={hasSubmitError ? { x: [-5, 5, -5, 5, 0] } : {}}
+              transition={{ duration: 0.4 }}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#1A56DB] px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-[#1648B5] sm:ml-auto sm:w-auto sm:min-w-[160px] ${
+                isSubmitting || isReadOnlyApplication
+                  ? "cursor-not-allowed bg-slate-300 text-slate-500 hover:bg-slate-300"
+                  : ""
+              }`}
+            >
+              {isReadOnlyApplication ? (
+                "View application"
+              ) : isExistingCase ? (
+                "Save details"
+              ) : isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                <>
+                  Continue
+                  <ArrowRight className="h-4 w-4" />
                 </>
               )}
-
-              {/* Legal Disclaimer Box */}
-              {!detailsMode && (
-                <motion.div
-                  whileHover={{ y: -1 }}
-                  className="bg-[#f8fafd] border border-[#d7e3f2] rounded-lg p-3 flex gap-3 text-primary mt-1"
-                >
-                  <Shield className="w-4 h-4 shrink-0 text-[#1a56db] mt-0.5" />
-                  <p className="font-body text-[11px] leading-relaxed text-[#6b7d92]">
-                    Independent service. Not affiliated with the Government of India.
-                  </p>
-                </motion.div>
-              )}
-
-              {/* Submit CTA */}
-              <motion.button
-                type="submit"
-                disabled={isSubmitting || isReadOnlyApplication}
-                animate={hasSubmitError ? { x: [-5, 5, -5, 5, 0] } : {}}
-                transition={{ duration: 0.4 }}
-                whileHover={!isSubmitting ? { scale: 1.02, y: -2 } : {}}
-                whileTap={!isSubmitting ? { scale: 0.97 } : {}}
-                className={`relative overflow-hidden w-full bg-[#1a56db] text-white font-semibold text-[12px] px-6 py-3 rounded-[9px] hover:bg-[#1648b5] flex justify-center items-center transition-all ${
-                  isSubmitting || isReadOnlyApplication ? "bg-slate-300 text-slate-500 shadow-none cursor-not-allowed transform-none" : ""
-                }`}
-              >
-                {!isSubmitting && (
-                  <motion.span
-                    aria-hidden
-                    className="absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-white/35 to-transparent"
-                    animate={{ x: ["-10%", "230%"] }}
-                    transition={{ duration: 2.4, repeat: Infinity, ease: "linear", repeatDelay: 1.2 }}
-                  />
-                )}
-                {isReadOnlyApplication ? (
-                  <>
-                    <span className="relative z-10">View Application</span>
-                  </>
-                ) : detailsMode ? (
-                  <span className="relative z-10">Update Personal Details</span>
-                ) : isExistingCase ? (
-                  <span className="relative z-10">Save Details</span>
-                ) : isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-3 h-5 w-5 animate-spin" />
-                    Creating your case...
-                  </>
-                ) : (
-                  <span className="relative z-10">Continue to payment →</span>
-                )}
-              </motion.button>
-
-            </form>
-
-            {/* Trust row */}
-            {!detailsMode && (
-              <motion.div
-                initial="hidden"
-                animate="show"
-                variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
-                className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-2 font-body text-[10px] text-[#7b8fa7] font-medium tracking-wide"
-              >
-                <motion.span variants={trustItemVariants} className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#2fa36b]" />Secure & encrypted</motion.span>
-                <motion.span variants={trustItemVariants} className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#2fa36b]" />WhatsApp updates</motion.span>
-                <motion.span variants={trustItemVariants} className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[#2fa36b]" />Expert review</motion.span>
-              </motion.div>
-            )}
-          </motion.div>
-        </div>
-      </section>
-    </div>
+            </motion.button>
+          </div>
+        </form>
+      }
+    />
   );
 }

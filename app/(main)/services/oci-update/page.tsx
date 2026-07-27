@@ -16,28 +16,15 @@ export default function OCIUpdatePage() {
         "End-to-end portal completion support",
       ]}
       pricing={{
-        lines: [
-          { label: "Service fee", value: "£50" },
-          { label: "Audit credit", value: "-£15" },
-          { label: "After audit", value: "£35", highlight: true },
-        ],
+        lines: [{ label: "Service fee", value: "£50", highlight: true }],
         ctaLabel: "Start application",
-        ctaHref: "/document-audit",
+        ctaHref: "/dashboard/document-audit?start=1&service=oci_update",
       }}
       stats={[
         { label: "Ideal For", value: "Mandatory OCI portal updates" },
         { label: "What We Prevent", value: "Photo/signature format rejection" },
         { label: "Turnaround", value: "Fast guided completion support" },
       ]}
-      whatWeDo={{
-        title: "What We Do",
-        items: [
-          "Check whether an update is required in your case",
-          "Prepare and upload documents on the government portal",
-          "Ensure photos and signatures meet exact specifications",
-          "Guide you through additional steps or acknowledgements",
-        ],
-      }}
     />
   );
 }

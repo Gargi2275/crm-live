@@ -16,8 +16,9 @@ const supportCards = [
   },
   {
     title: "WhatsApp support",
-    detail: "Available on request",
+    detail: "+44 20 7808 6162",
     hint: "Quick status checks once your file number is active.",
+    href: "https://wa.me/442078086162",
     icon: MessageCircle,
   },
   {
@@ -51,7 +52,15 @@ export default function ContactApostilleSupportPage() {
                   <Icon className="h-4 w-4 text-[#1d6fd1]" />
                   {card.title}
                 </div>
-                <p className="mt-2 text-sm font-semibold text-[#243b53]">{card.detail}</p>
+                <p className="mt-2 text-sm font-semibold text-[#243b53]">
+                  {"href" in card && card.href ? (
+                    <a href={card.href} target="_blank" rel="noopener noreferrer" className="hover:text-[#1d6fd1] hover:underline">
+                      {card.detail}
+                    </a>
+                  ) : (
+                    card.detail
+                  )}
+                </p>
                 <p className="mt-1 text-xs text-[#627d98]">{card.hint}</p>
               </FadeInUp>
             );

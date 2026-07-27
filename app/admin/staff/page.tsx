@@ -28,6 +28,7 @@ import {
   type AdminStaffUser,
   type AccessScope,
 } from "@/lib/admin-auth";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 const ACCESS_SCOPES: AccessScope[] = ["all", "easyfly_only", "exclude_easyfly"];
 
@@ -313,6 +314,33 @@ export default function AdminStaffPage() {
 
   const modalOpen = showCreate || editId != null;
 
+  useSetAdminPageChrome({
+    title: "Staff Management",
+    subtitle: "Accounts, roles & access",
+    icon: Briefcase,
+    syncKey: `${loading}|${staff.length}`,
+    actions: (
+      <>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+        <button
+          type="button"
+          onClick={openCreate}
+          className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-sm font-semibold text-white hover:bg-[#007B61]"
+        >
+          <Plus className="h-4 w-4" />
+          Add staff
+        </button>
+      </>
+    ),
+  });
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -320,31 +348,6 @@ export default function AdminStaffPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="space-y-4 font-body max-w-[1300px] mx-auto px-1 sm:px-0"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-[22px] sm:text-[26px] leading-tight font-heading font-semibold text-[#102A43] flex items-center gap-2">
-          <Briefcase className="h-6 w-6 text-[#009877] shrink-0" />
-          Staff Management
-        </h1>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="inline-flex items-center gap-2 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 rounded-[10px] bg-[#009877] px-3 py-2 text-sm font-semibold text-white hover:bg-[#007B61]"
-          >
-            <Plus className="h-4 w-4" />
-            Add staff
-          </button>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {kpiCards.map((card) => (
           <div key={card.label} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3 sm:p-4">

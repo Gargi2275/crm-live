@@ -20,23 +20,12 @@ type TeamPerformanceGridProps = {
   staffMembers: StaffMember[];
   periodLabel: string;
   teamPeriod: TeamPerformancePeriod;
-  onPeriodChange: (period: TeamPerformancePeriod) => void;
-  loading?: boolean;
 };
-
-const TEAM_PERIOD_OPTIONS: { key: TeamPerformancePeriod; label: string }[] = [
-  { key: "day", label: "Today" },
-  { key: "week", label: "Last 7 days" },
-  { key: "month", label: "Last 30 days" },
-  { key: "all", label: "All time" },
-];
 
 export function TeamPerformanceGrid({
   staffMembers,
   periodLabel,
   teamPeriod,
-  onPeriodChange,
-  loading = false,
 }: TeamPerformanceGridProps) {
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey>("all");
 
@@ -142,30 +131,11 @@ export function TeamPerformanceGrid({
 
   return (
     <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] overflow-hidden">
-      <div className="p-5 border-b border-[#E5EAF0] flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-heading font-semibold text-[#102A43]">Team performance</h2>
-          <p className="text-xs text-[#627D98] mt-0.5">
-            All team · accuracy & revenue · {periodLabel}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {TEAM_PERIOD_OPTIONS.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => onPeriodChange(option.key)}
-              disabled={loading}
-              className={`text-xs px-3 py-1.5 rounded-full font-heading transition-colors ${
-                teamPeriod === option.key
-                  ? "bg-[#009877] text-white"
-                  : "bg-[#F5F7FA] text-[#486581] hover:bg-[#E5EAF0]"
-              } disabled:opacity-60`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+      <div className="p-5 border-b border-[#E5EAF0]">
+        <h2 className="text-lg font-heading font-semibold text-[#102A43]">Team performance</h2>
+        <p className="text-xs text-[#627D98] mt-0.5">
+          All team · accuracy & revenue · {periodLabel}
+        </p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 px-5 py-3 border-b border-[#E5EAF0] bg-[#F8FAFC]">

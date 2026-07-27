@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { ChevronDown, ChevronUp, FolderArchive, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderArchive, Trash2 } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
+import { ConfirmDialog } from "@/components/console/ConfirmDialog";
 import {
   deleteAdminDocumentStorage,
   listAdminDocumentStorageApplications,
@@ -143,7 +145,8 @@ export default function AdminDocumentStoragePage() {
   const [applications, setApplications] = useState<AdminDocumentStorageApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AdminDocumentStorageApplication | null>(null);
+  const [expandedDocsId, setExpandedDocsId] = useState<string | null>(null);
   const [filters, setFilters] = useState(defaultFilters);
 
   const load = useCallback(async () => {
@@ -193,7 +196,6 @@ export default function AdminDocumentStoragePage() {
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (filters.search.trim()) count += 1;
     if (filters.service !== "all") count += 1;
     if (filters.dateFilter !== "all") count += 1;
     if (filters.folderFilter !== "all") count += 1;
@@ -240,21 +242,13 @@ export default function AdminDocumentStoragePage() {
     });
   }, [applications, filters]);
 
-  const handleDelete = async (row: AdminDocumentStorageApplication) => {
-    const fileList = row.documents.map((doc) => doc.display_name).join("\n• ");
-    const confirmed = window.confirm(
-      `Delete all encrypted documents for this application?\n\n` +
-        `Application: ${row.application_id}\n` +
-        `Customer: ${row.customer_name} (${row.customer_email})\n\n` +
-        `Files (${row.document_count}):\n• ${fileList || "—"}\n\n` +
-        `This removes the server folder and document records. The user account and application will remain.`,
-    );
-    if (!confirmed) return;
-
-    setDeletingId(row.application_id);
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeletingId(deleteTarget.application_id);
     try {
-      await deleteAdminDocumentStorage(row.application_id);
-      toast.success(`Documents deleted from server for ${row.application_id}.`);
+      await deleteAdminDocumentStorage(deleteTarget.application_id);
+      toast.success(`Documents deleted from server for ${deleteTarget.application_id}.`);
+      setDeleteTarget(null);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to delete documents.");
@@ -263,7 +257,149 @@ export default function AdminDocumentStoragePage() {
     }
   };
 
-  const clearFilters = () => setFilters(defaultFilters());
+  const clearFilters = () =>
+    setFilters((current) => ({
+      ...defaultFilters(),
+      search: current.search,
+    }));
+
+  useSetAdminPageChrome(
+    adminUser && role === "admin"
+      ? {
+          title: "Document Storage",
+          subtitle: "Encrypted uploads by application",
+          icon: FolderArchive,
+          search: {
+            value: filters.search,
+            onChange: (value) => setFilters((c) => ({ ...c, search: value })),
+            placeholder: "Application ID, reference, customer…",
+          },
+          activeFilterCount,
+          onClearFilters: clearFilters,
+          meta: loading
+            ? "Loading…"
+            : `${filteredApplications.length} of ${applications.length} application(s)`,
+          syncKey: `${filters.search}|${filters.service}|${filters.documentType}|${filters.applicationStatus}|${filters.folderFilter}|${filters.dateFilter}|${filters.dateFrom}|${filters.dateTo}|${loading}|${filteredApplications.length}`,
+          filtersContent: (
+            <>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Service</span>
+                <select
+                  value={filters.service}
+                  onChange={(e) => setFilters((c) => ({ ...c, service: e.target.value }))}
+                  className={inputClass}
+                >
+                  <option value="all">All services</option>
+                  {serviceOptions.map((service) => (
+                    <option key={service} value={service}>
+                      {service}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Document type</span>
+                <select
+                  value={filters.documentType}
+                  onChange={(e) => setFilters((c) => ({ ...c, documentType: e.target.value }))}
+                  className={inputClass}
+                >
+                  <option value="all">All document types</option>
+                  {documentTypeOptions.map((type) => (
+                    <option key={type} value={type}>
+                      {type.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Application status</span>
+                <select
+                  value={filters.applicationStatus}
+                  onChange={(e) => setFilters((c) => ({ ...c, applicationStatus: e.target.value }))}
+                  className={inputClass}
+                >
+                  <option value="all">All statuses</option>
+                  {applicationStatusOptions.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Folder on server</span>
+                <select
+                  value={filters.folderFilter}
+                  onChange={(e) => setFilters((c) => ({ ...c, folderFilter: e.target.value as FolderFilter }))}
+                  className={inputClass}
+                >
+                  <option value="all">All</option>
+                  <option value="on_server">On server</option>
+                  <option value="missing">Missing</option>
+                </select>
+              </label>
+
+              <div className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Upload date</span>
+                <div className="inline-flex flex-wrap gap-1 rounded-[10px] border border-[#D9E1EA] bg-[#FBFCFE] p-1">
+                  <FilterChip
+                    label="All time"
+                    active={filters.dateFilter === "all"}
+                    onClick={() => setFilters((c) => ({ ...c, dateFilter: "all", dateFrom: "", dateTo: "" }))}
+                  />
+                  <FilterChip
+                    label="This week"
+                    active={filters.dateFilter === "week"}
+                    onClick={() => setFilters((c) => ({ ...c, dateFilter: "week", dateFrom: "", dateTo: "" }))}
+                  />
+                  <FilterChip
+                    label="This month"
+                    active={filters.dateFilter === "month"}
+                    onClick={() => setFilters((c) => ({ ...c, dateFilter: "month", dateFrom: "", dateTo: "" }))}
+                  />
+                  <FilterChip
+                    label="This year"
+                    active={filters.dateFilter === "year"}
+                    onClick={() => setFilters((c) => ({ ...c, dateFilter: "year", dateFrom: "", dateTo: "" }))}
+                  />
+                  <FilterChip
+                    label="Custom"
+                    active={filters.dateFilter === "custom"}
+                    onClick={() => setFilters((c) => ({ ...c, dateFilter: "custom" }))}
+                  />
+                </div>
+                {filters.dateFilter === "custom" ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="block space-y-1">
+                      <span className="text-xs text-[#627D98]">From</span>
+                      <input
+                        type="date"
+                        value={filters.dateFrom}
+                        onChange={(e) => setFilters((c) => ({ ...c, dateFrom: e.target.value }))}
+                        className={inputClass}
+                      />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-xs text-[#627D98]">To</span>
+                      <input
+                        type="date"
+                        value={filters.dateTo}
+                        onChange={(e) => setFilters((c) => ({ ...c, dateTo: e.target.value }))}
+                        className={inputClass}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ),
+        }
+      : { title: "Documents", icon: FolderArchive },
+  );
 
   if (!adminUser || role !== "admin") {
     return null;
@@ -271,182 +407,6 @@ export default function AdminDocumentStoragePage() {
 
   return (
     <div className="space-y-4 font-body max-w-[1500px] mx-auto">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43] inline-flex items-center gap-2">
-            <FolderArchive className="w-6 h-6 text-[#009877]" />
-            Document Storage
-          </h1>
-          <p className="mt-1 text-sm text-[#627D98]">
-            All applications with uploaded documents under{" "}
-            <code className="text-xs">uploads/encrypted/&lt;applicationId&gt;/</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((open) => !open)}
-          className={`inline-flex items-center gap-2 rounded-[10px] border px-4 py-2.5 text-sm font-semibold transition-colors ${
-            filtersOpen
-              ? "border-[#009877] bg-[#009877]/10 text-[#006F57]"
-              : "border-[#D9E1EA] bg-white text-[#486581] hover:bg-[#F5F7FA]"
-          }`}
-        >
-          <SlidersHorizontal className="w-4 h-4" />
-          Filters
-          {activeFilterCount > 0 ? (
-            <span className="rounded-full bg-[#009877] px-1.5 py-0.5 text-[10px] font-bold text-white">
-              {activeFilterCount}
-            </span>
-          ) : null}
-          {filtersOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-      </div>
-
-      {filtersOpen ? (
-        <section className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 md:p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-heading font-semibold text-[#102A43]">Filter applications</h2>
-            {activeFilterCount > 0 ? (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#627D98] hover:text-[#B42318]"
-              >
-                <X className="w-3.5 h-3.5" />
-                Clear all
-              </button>
-            ) : null}
-          </div>
-
-          <label className="block space-y-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Search</span>
-            <input
-              type="search"
-              value={filters.search}
-              onChange={(e) => setFilters((c) => ({ ...c, search: e.target.value }))}
-              placeholder="Application ID, reference, customer, email…"
-              className={inputClass}
-            />
-          </label>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Service</span>
-              <select
-                value={filters.service}
-                onChange={(e) => setFilters((c) => ({ ...c, service: e.target.value }))}
-                className={inputClass}
-              >
-                <option value="all">All services</option>
-                {serviceOptions.map((service) => (
-                  <option key={service} value={service}>
-                    {service}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Document type</span>
-              <select
-                value={filters.documentType}
-                onChange={(e) => setFilters((c) => ({ ...c, documentType: e.target.value }))}
-                className={inputClass}
-              >
-                <option value="all">All document types</option>
-                {documentTypeOptions.map((type) => (
-                  <option key={type} value={type}>
-                    {type.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Application status</span>
-              <select
-                value={filters.applicationStatus}
-                onChange={(e) => setFilters((c) => ({ ...c, applicationStatus: e.target.value }))}
-                className={inputClass}
-              >
-                <option value="all">All statuses</option>
-                {applicationStatusOptions.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Folder on server</span>
-              <select
-                value={filters.folderFilter}
-                onChange={(e) => setFilters((c) => ({ ...c, folderFilter: e.target.value as FolderFilter }))}
-                className={inputClass}
-              >
-                <option value="all">All</option>
-                <option value="on_server">On server</option>
-                <option value="missing">Missing</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-[#627D98]">Upload date</span>
-            <div className="inline-flex flex-wrap gap-1 rounded-[10px] border border-[#D9E1EA] bg-[#FBFCFE] p-1">
-              <FilterChip
-                label="All time"
-                active={filters.dateFilter === "all"}
-                onClick={() => setFilters((c) => ({ ...c, dateFilter: "all", dateFrom: "", dateTo: "" }))}
-              />
-              <FilterChip
-                label="This week"
-                active={filters.dateFilter === "week"}
-                onClick={() => setFilters((c) => ({ ...c, dateFilter: "week", dateFrom: "", dateTo: "" }))}
-              />
-              <FilterChip
-                label="This month"
-                active={filters.dateFilter === "month"}
-                onClick={() => setFilters((c) => ({ ...c, dateFilter: "month", dateFrom: "", dateTo: "" }))}
-              />
-              <FilterChip
-                label="This year"
-                active={filters.dateFilter === "year"}
-                onClick={() => setFilters((c) => ({ ...c, dateFilter: "year", dateFrom: "", dateTo: "" }))}
-              />
-              <FilterChip
-                label="Custom range"
-                active={filters.dateFilter === "custom"}
-                onClick={() => setFilters((c) => ({ ...c, dateFilter: "custom" }))}
-              />
-            </div>
-            {filters.dateFilter === "custom" ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
-                <label className="block space-y-1">
-                  <span className="text-xs text-[#627D98]">From</span>
-                  <input
-                    type="date"
-                    value={filters.dateFrom}
-                    onChange={(e) => setFilters((c) => ({ ...c, dateFrom: e.target.value }))}
-                    className={inputClass}
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-xs text-[#627D98]">To</span>
-                  <input
-                    type="date"
-                    value={filters.dateTo}
-                    onChange={(e) => setFilters((c) => ({ ...c, dateTo: e.target.value }))}
-                    className={inputClass}
-                  />
-                </label>
-              </div>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
       {loading ? (
         <div className="rounded-[12px] border border-dashed border-[#B8C7D9] bg-white px-4 py-8 text-sm text-[#627D98]">
           Loading applications with documents...
@@ -486,8 +446,14 @@ export default function AdminDocumentStoragePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-                {filteredApplications.map((row) => (
-                  <tr key={row.application_id} className="hover:bg-[#F8FCFF] align-top">
+                {filteredApplications.map((row) => {
+                  const docsExpanded = expandedDocsId === row.application_id;
+                  const docCount = row.documents.length;
+                  return (
+                  <tr
+                    key={row.application_id}
+                    className={`hover:bg-[#F8FCFF] ${docsExpanded ? "align-top" : "align-middle"}`}
+                  >
                     <td className="px-3 py-2.5">
                       <p className="font-medium text-[#102A43]">{row.application_id}</p>
                       {row.reference_number && row.reference_number !== row.application_id ? (
@@ -518,19 +484,43 @@ export default function AdminDocumentStoragePage() {
                         : "—"}
                     </td>
                     <td className="px-3 py-2.5">
-                      {row.documents.length === 0 ? (
+                      {docCount === 0 ? (
                         <span className="text-[#627D98]">—</span>
                       ) : (
-                        <ul className="space-y-1">
-                          {row.documents.map((doc) => (
-                            <li key={doc.id} className="text-xs leading-snug">
-                              <span className="font-medium text-[#102A43]" title={doc.display_name}>
-                                {doc.display_name}
-                              </span>
-                              <span className="text-[#627D98]"> · {doc.document_type.replace(/_/g, " ")}</span>
-                            </li>
-                          ))}
-                        </ul>
+                        <div className="min-w-[180px]">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedDocsId((current) =>
+                                current === row.application_id ? null : row.application_id,
+                              )
+                            }
+                            className="inline-flex items-center gap-1 rounded-[8px] border border-[#D9E1EA] bg-[#FBFCFE] px-2 py-1 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+                            aria-expanded={docsExpanded}
+                          >
+                            {docsExpanded ? (
+                              <ChevronDown className="h-3.5 w-3.5 text-[#627D98]" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5 text-[#627D98]" />
+                            )}
+                            {docCount} file{docCount === 1 ? "" : "s"}
+                          </button>
+                          {docsExpanded ? (
+                            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-[8px] border border-[#E5EAF0] bg-white p-2">
+                              {row.documents.map((doc) => (
+                                <li key={doc.id} className="text-xs leading-snug">
+                                  <span className="font-medium text-[#102A43]" title={doc.display_name}>
+                                    {doc.display_name}
+                                  </span>
+                                  <span className="text-[#627D98]">
+                                    {" "}
+                                    · {doc.document_type.replace(/_/g, " ")}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-2.5">
@@ -547,7 +537,7 @@ export default function AdminDocumentStoragePage() {
                     <td className="px-3 py-2.5">
                       <button
                         type="button"
-                        onClick={() => void handleDelete(row)}
+                        onClick={() => setDeleteTarget(row)}
                         disabled={deletingId === row.application_id || row.documents_deleted}
                         title={
                           row.documents_deleted
@@ -560,12 +550,29 @@ export default function AdminDocumentStoragePage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </section>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete documents?"
+        description={
+          deleteTarget
+            ? `Delete all encrypted documents for ${deleteTarget.application_id} (${deleteTarget.customer_name})? This removes ${deleteTarget.document_count} file${deleteTarget.document_count === 1 ? "" : "s"} from the server folder and document records. The user account and application stay.`
+            : ""
+        }
+        confirmLabel="Delete documents"
+        loading={Boolean(deletingId)}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => {
+          if (!deletingId) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }

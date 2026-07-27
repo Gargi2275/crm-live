@@ -17,6 +17,8 @@ export type EVisaRegisterPayload = {
   purpose_of_visit: "Tourism" | "Business" | "Medical" | "Conference" | "Other";
   visa_duration: "1-Year" | "5-Year";
   consent: boolean;
+  origin_option_id?: number | null;
+  option?: number | null;
 };
 
 export type EVisaUpdateRegistrationPayload = EVisaRegisterPayload & {
@@ -354,9 +356,14 @@ export const eVisaApi = {
     return json as EVisaResumeResponse;
   },
 
-  createPaymentOrder(caseNumber: string): Promise<EVisaCreatePaymentOrderResponse> {
+  createPaymentOrder(
+    caseNumber: string,
+    extras?: { plan_code?: string; origin_option_id?: number },
+  ): Promise<EVisaCreatePaymentOrderResponse> {
     return postJson<EVisaCreatePaymentOrderResponse>("/indian-e-visa/payment/create-order/", {
       case_number: caseNumber,
+      ...(extras?.plan_code ? { plan_code: extras.plan_code } : {}),
+      ...(extras?.origin_option_id ? { origin_option_id: extras.origin_option_id } : {}),
     });
   },
 

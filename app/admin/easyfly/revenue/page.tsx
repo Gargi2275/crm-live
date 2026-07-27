@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/lib/easyfly";
 import { TrendingUp, Download, AlertCircle, Plus, X } from "lucide-react";
 import toast from "react-hot-toast";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 type RefundStatus = "none" | "pending" | "credit_note";
 type ScheduleChange = "none" | "minor" | "major";
@@ -204,6 +205,13 @@ function EasyFlyStaffRevenueEntryForm() {
     year: "numeric",
   });
 
+  useSetAdminPageChrome({
+    title: "Daily Revenue Entry",
+    subtitle: `Submitting for ${today}`,
+    icon: TrendingUp,
+    syncKey: `${submitting ? 1 : 0}|${submitted ? 1 : 0}`,
+  });
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
@@ -231,16 +239,6 @@ function EasyFlyStaffRevenueEntryForm() {
 
   return (
     <div className="space-y-4 font-body max-w-[720px] mx-auto">
-      <div>
-        <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43] inline-flex items-center gap-2">
-          <TrendingUp className="w-6 h-6 text-[#009877]" />
-          Daily Revenue Entry
-        </h1>
-        <p className="mt-1 text-sm text-[#627D98]">
-          Submitting for: <span className="font-semibold text-[#102A43]">{today}</span>
-        </p>
-      </div>
-
       <div className="bg-[#F9DBAF]/35 text-[#8D5E12] border border-[#D4A84F]/40 rounded-[12px] px-4 py-3 text-sm space-y-1">
         <p className="font-semibold">Staff Revenue Entry Rules:</p>
         <ul className="list-disc list-inside space-y-0.5 text-xs">
@@ -284,6 +282,7 @@ type UnifiedRevenueRow = {
   supplier: string;
   paid: string;
   received: string;
+  extra: string;
   dueOrEarnings: string;
   dueOrEarningsClass: string;
   paymentMode: string;
@@ -403,9 +402,28 @@ function EasyFlyAdminRevenueView() {
   };
 
   const rangeBookings = useMemo(
-    () => bookings.filter((b) => isInDateRange(b.depDate, dateRange)),
+    () => bookings.filter((b) => isInDateRange((b.createdAt || "").slice(0, 10) || b.depDate, dateRange)),
     [bookings, dateRange],
   );
+
+  const rangeStaffEntries = useMemo(
+    () =>
+      staffEntries
+        .filter((entry) => isInDateRange(entry.entryDate, dateRange))
+        .filter((entry) => staffStatusFilter === "all" || entry.status === staffStatusFilter),
+    [staffEntries, dateRange, staffStatusFilter],
+  );
+
+  const kpiBookings = useMemo(() => {
+    if (recordFilter === "staff") return [];
+    if (recordFilter === "pending") return rangeBookings.filter((b) => (b.amountDue || 0) > 0);
+    return rangeBookings;
+  }, [rangeBookings, recordFilter]);
+
+  const kpiStaffEntries = useMemo(() => {
+    if (recordFilter === "bookings" || recordFilter === "pending") return [];
+    return rangeStaffEntries;
+  }, [rangeStaffEntries, recordFilter]);
 
   const bookingRows = useMemo((): UnifiedRevenueRow[] => {
     const source =
@@ -417,6 +435,7 @@ function EasyFlyAdminRevenueView() {
       const tier = getPendingTier(booking);
       const earnings = booking.amountReceived - booking.amountPaid;
       const isPending = booking.amountDue > 0;
+      const bookedOn = (booking.createdAt || "").slice(0, 10) || booking.depDate;
       return {
         key: `booking-${booking.id}`,
         type: "booking",
@@ -426,6 +445,7 @@ function EasyFlyAdminRevenueView() {
         supplier: booking.supplier,
         paid: formatInr(booking.amountPaid),
         received: formatInr(booking.amountReceived),
+        extra: formatInr(booking.extraAmount || 0),
         dueOrEarnings: isPending ? formatInr(booking.amountDue) : formatInr(earnings),
         dueOrEarningsClass: isPending
           ? "text-[#B42318] font-semibold"
@@ -433,7 +453,7 @@ function EasyFlyAdminRevenueView() {
             ? "text-[#006F57] font-semibold"
             : "text-[#B42318] font-semibold",
         paymentMode: formatPaymentMode(booking.paymentMode),
-        primaryDate: booking.depDate,
+        primaryDate: bookedOn,
         dueDate: booking.paymentDueDate,
         statusLabel: isPending ? TIER_LABELS[tier].label : "Settled",
         statusClass: isPending
@@ -443,16 +463,13 @@ function EasyFlyAdminRevenueView() {
         receiptUrl: "",
         receiptName: "",
         notes: "",
-        sortDate: booking.depDate,
+        sortDate: bookedOn,
       };
     });
   }, [rangeBookings, recordFilter]);
 
   const staffRows = useMemo((): UnifiedRevenueRow[] => {
-    return staffEntries
-      .filter((entry) => isInDateRange(entry.entryDate, dateRange))
-      .filter((entry) => staffStatusFilter === "all" || entry.status === staffStatusFilter)
-      .map((entry) => {
+    return rangeStaffEntries.map((entry) => {
         const earnings = Number(entry.amountReceived) - Number(entry.amountPaid);
         return {
           key: `staff-${entry.id}`,
@@ -463,6 +480,7 @@ function EasyFlyAdminRevenueView() {
           supplier: entry.supplier,
           paid: formatGbp(entry.amountPaid),
           received: formatGbp(entry.amountReceived),
+          extra: "—",
           dueOrEarnings: formatGbp(earnings),
           dueOrEarningsClass: earnings >= 0 ? "text-[#006F57] font-semibold" : "text-[#B42318] font-semibold",
           paymentMode: formatPaymentMode(entry.paymentMode),
@@ -477,7 +495,7 @@ function EasyFlyAdminRevenueView() {
           sortDate: entry.entryDate,
         };
       });
-  }, [staffEntries, dateRange, staffStatusFilter]);
+  }, [rangeStaffEntries]);
 
   const displayRows = useMemo(() => {
     let rows: UnifiedRevenueRow[] = [];
@@ -489,15 +507,27 @@ function EasyFlyAdminRevenueView() {
   }, [bookingRows, staffRows, recordFilter]);
 
   const stats = useMemo(() => {
-    const totalBookings = rangeBookings.length;
-    const totalPaid = rangeBookings.reduce((sum, b) => sum + b.amountPaid, 0);
-    const totalReceived = rangeBookings.reduce((sum, b) => sum + b.amountReceived, 0);
-    const totalPending = rangeBookings.reduce((sum, b) => sum + Math.max(0, b.amountDue), 0);
+    const totalBookings = kpiBookings.length;
+    const totalPaid = kpiBookings.reduce((sum, b) => sum + b.amountPaid, 0);
+    const totalReceived = kpiBookings.reduce((sum, b) => sum + b.amountReceived, 0);
+    const totalPending = kpiBookings.reduce((sum, b) => sum + Math.max(0, b.amountDue), 0);
+    const totalExtra = kpiBookings.reduce((sum, b) => sum + (b.extraAmount || 0), 0);
     const totalEarnings = totalReceived - totalPaid;
-    const pendingCount = rangeBookings.filter((b) => b.amountDue > 0).length;
-    const staffPending = staffEntries.filter((e) => e.status === "pending_review").length;
-    return { totalBookings, totalPaid, totalReceived, totalPending, totalEarnings, pendingCount, staffPending };
-  }, [rangeBookings, staffEntries]);
+    const pendingCount = kpiBookings.filter((b) => b.amountDue > 0).length;
+    const staffPending = kpiStaffEntries.filter((e) => e.status === "pending_review").length;
+    const staffCount = kpiStaffEntries.length;
+    return {
+      totalBookings,
+      totalPaid,
+      totalReceived,
+      totalPending,
+      totalExtra,
+      totalEarnings,
+      pendingCount,
+      staffPending,
+      staffCount,
+    };
+  }, [kpiBookings, kpiStaffEntries]);
 
   const handleExportCsv = () => {
     const headers = [
@@ -508,9 +538,10 @@ function EasyFlyAdminRevenueView() {
       "supplier",
       "paid",
       "received",
+      "extra",
       "dueOrEarnings",
       "paymentMode",
-      "date",
+      "bookingDate",
       "dueDate",
       "status",
       "submittedBy",
@@ -524,6 +555,7 @@ function EasyFlyAdminRevenueView() {
       row.supplier,
       row.paid,
       row.received,
+      row.extra,
       row.dueOrEarnings,
       row.paymentMode,
       row.primaryDate,
@@ -545,28 +577,93 @@ function EasyFlyAdminRevenueView() {
   };
 
   const selectClass =
-    "rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]";
+    "mt-1 w-full rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm text-[#102A43]";
 
-  return (
-    <div className="space-y-4 font-body max-w-[1500px] mx-auto">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43] inline-flex items-center gap-2">
-            <TrendingUp className="w-6 h-6 text-[#009877]" />
-            EasyFly Revenue
-          </h1>
-          <p className="mt-1 text-sm text-[#627D98]">Bookings, pending payments, and staff submissions in one view</p>
-        </div>
+  const clearFilters = useCallback(() => {
+    setRecordFilter("all");
+    setDateRange("month");
+    setStaffStatusFilter("all");
+  }, []);
+
+  const activeFilterCount =
+    (recordFilter !== "all" ? 1 : 0) +
+    (dateRange !== "month" ? 1 : 0) +
+    ((recordFilter === "all" || recordFilter === "staff") && staffStatusFilter !== "all" ? 1 : 0);
+
+  useSetAdminPageChrome({
+    title: "EasyFly Revenue",
+    icon: TrendingUp,
+    activeFilterCount,
+    onClearFilters: clearFilters,
+    syncKey: `${recordFilter}|${dateRange}|${staffStatusFilter}|${loading}|${addOpen ? 1 : 0}|${displayRows.length}`,
+    actions: (
+      <>
         <button
           type="button"
           onClick={() => setAddOpen(true)}
-          className="inline-flex items-center justify-center gap-2 rounded-[10px] bg-[#009877] px-4 py-2.5 text-sm font-heading font-semibold text-white hover:bg-[#007B61]"
+          className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="h-3.5 w-3.5" />
           Add Revenue
         </button>
-      </div>
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export CSV
+        </button>
+      </>
+    ),
+    filtersContent: (
+      <>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Show</span>
+          <select
+            value={recordFilter}
+            onChange={(e) => setRecordFilter(e.target.value as RevenueRecordFilter)}
+            className={selectClass}
+          >
+            <option value="all">All Records</option>
+            <option value="bookings">Bookings Only</option>
+            <option value="pending">Pending Payments</option>
+            <option value="staff">Staff Submissions</option>
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Period (booking date)</span>
+          <select
+            value={dateRange}
+            onChange={(e) => setDateRange(e.target.value as DateRange)}
+            className={selectClass}
+          >
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+            <option value="year">This Year</option>
+          </select>
+        </label>
+        {(recordFilter === "all" || recordFilter === "staff") && (
+          <label className="block text-sm">
+            <span className="text-xs font-semibold text-[#486581]">Staff Status</span>
+            <select
+              value={staffStatusFilter}
+              onChange={(e) => setStaffStatusFilter(e.target.value as StaffStatusFilter)}
+              className={selectClass}
+            >
+              <option value="all">All Statuses</option>
+              <option value="pending_review">Pending Review</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </label>
+        )}
+      </>
+    ),
+  });
 
+  return (
+    <div className="space-y-4 font-body max-w-[1500px] mx-auto">
       {addOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#102A43]/40">
           <div
@@ -633,63 +730,13 @@ function EasyFlyAdminRevenueView() {
 
       {!loading && (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="inline-flex flex-col gap-1">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[#627D98]">Show</span>
-              <select
-                value={recordFilter}
-                onChange={(e) => setRecordFilter(e.target.value as RevenueRecordFilter)}
-                className={selectClass}
-              >
-                <option value="all">All Records</option>
-                <option value="bookings">Bookings Only</option>
-                <option value="pending">Pending Payments</option>
-                <option value="staff">Staff Submissions</option>
-              </select>
-            </label>
-            <label className="inline-flex flex-col gap-1">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-[#627D98]">Period</span>
-              <select
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value as DateRange)}
-                className={selectClass}
-              >
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="year">This Year</option>
-              </select>
-            </label>
-            {(recordFilter === "all" || recordFilter === "staff") && (
-              <label className="inline-flex flex-col gap-1">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-[#627D98]">Staff Status</span>
-                <select
-                  value={staffStatusFilter}
-                  onChange={(e) => setStaffStatusFilter(e.target.value as StaffStatusFilter)}
-                  className={selectClass}
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="pending_review">Pending Review</option>
-                  <option value="approved">Approved</option>
-                  <option value="rejected">Rejected</option>
-                </select>
-              </label>
-            )}
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="mt-4 inline-flex items-center gap-2 rounded-[10px] bg-[#009877] px-3.5 py-2 text-sm font-heading font-semibold text-white hover:bg-[#007B61]"
-            >
-              <Download className="h-4 w-4" />
-              Export CSV
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
             {[
               { label: "Bookings", value: String(stats.totalBookings), color: "text-[#102A43]" },
-              { label: "Paid to Suppliers", value: formatInr(stats.totalPaid), color: "text-[#B42318]" },
-              { label: "Received", value: formatInr(stats.totalReceived), color: "text-[#006F57]" },
-              { label: "Pending Due", value: formatInr(stats.totalPending), color: "text-[#8D5E12]" },
+              { label: "Supplier Paid", value: formatInr(stats.totalPaid), color: "text-[#B42318]" },
+              { label: "Client Received", value: formatInr(stats.totalReceived), color: "text-[#006F57]" },
+              { label: "Client Pending", value: formatInr(stats.totalPending), color: "text-[#8D5E12]" },
+              { label: "Extra Paid", value: formatInr(stats.totalExtra), color: "text-[#1E40AF]" },
               { label: "Earnings", value: formatInr(stats.totalEarnings), color: stats.totalEarnings >= 0 ? "text-[#006F57]" : "text-[#B42318]" },
               { label: "Staff Pending", value: String(stats.staffPending), color: "text-[#8D5E12]" },
             ].map((s) => (
@@ -717,11 +764,12 @@ function EasyFlyAdminRevenueView() {
                       <th className="px-3 py-2.5 text-left font-semibold">Name</th>
                       <th className="px-3 py-2.5 text-left font-semibold">PNR</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Supplier</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Paid</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Received</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Due / Earnings</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Supplier Paid</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Client Received</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Extra</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Pending / Earnings</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Payment</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Date</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Booking Date</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Due Date</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Status</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Submitted By</th>
@@ -749,6 +797,7 @@ function EasyFlyAdminRevenueView() {
                         <td className="px-3 py-2.5">{row.supplier}</td>
                         <td className="px-3 py-2.5">{row.paid}</td>
                         <td className="px-3 py-2.5">{row.received}</td>
+                        <td className="px-3 py-2.5">{row.extra}</td>
                         <td className={`px-3 py-2.5 ${row.dueOrEarningsClass}`}>{row.dueOrEarnings}</td>
                         <td className="px-3 py-2.5">{row.paymentMode}</td>
                         <td className="px-3 py-2.5">{formatDate(row.primaryDate)}</td>

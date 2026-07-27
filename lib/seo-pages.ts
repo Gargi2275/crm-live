@@ -86,7 +86,7 @@ export const PAGE_SEO = {
     path: "/document-audit",
     title: "Document Audit for OCI, e-Visa & Passport",
     description:
-      "Avoid OCI and visa rejections with FlyOCI's expert document audit. We review your documents, flag issues early and guide fixes. £15 audit credit on OCI services.",
+      "Avoid OCI and visa rejections with FlyOCI's expert early assessment. We review your documents, flag issues early and guide fixes.",
     keywords: ["OCI document audit", "visa document check", "OCI rejection help", "document review OCI"],
   },
   howItWorks: {
@@ -109,6 +109,18 @@ export const PAGE_SEO = {
     description:
       "Answers to frequently asked questions about OCI cards, Indian e-Visas, apostille documents, passport renewal and FlyOCI's independent application support services.",
     keywords: ["OCI FAQ", "Indian e visa questions", "apostille FAQ UK"],
+  },
+  blog: {
+    path: "/blog",
+    title: "OCI & NRI Guides — Blog",
+    description:
+      "Practical FlyOCI guides for OCI, Indian e-Visa, apostille and NRI documentation. Tips on documents, timelines and common pitfalls for UK and US families.",
+    keywords: [
+      "OCI guides",
+      "NRI documentation blog",
+      "Indian e visa tips",
+      "OCI application advice UK",
+    ],
   },
   about: {
     path: "/about",
@@ -166,6 +178,13 @@ export const PAGE_SEO = {
     description: "How FlyOCI uses cookies on flyoci.com to improve your experience when browsing OCI, e-Visa and apostille services.",
     keywords: ["FlyOCI cookies"],
   },
+  gdprCompliance: {
+    path: "/gdpr-compliance",
+    title: "GDPR Compliance",
+    description:
+      "How FlyOCI complies with UK GDPR and the Data Protection Act 2018 — your rights, lawful bases, security and how to contact us or the ICO.",
+    keywords: ["FlyOCI GDPR", "GDPR compliance", "UK GDPR", "data protection"],
+  },
   disclaimer: {
     path: "/disclaimer",
     title: "Disclaimer",
@@ -190,11 +209,13 @@ export const PUBLIC_SITEMAP_PATHS: Array<{ path: string; changeFrequency?: "week
   { path: "/how-it-works", priority: 0.75, changeFrequency: "monthly" },
   { path: "/pricing", priority: 0.8, changeFrequency: "monthly" },
   { path: "/faqs", priority: 0.75, changeFrequency: "monthly" },
+  { path: "/blog", priority: 0.75, changeFrequency: "weekly" },
   { path: "/about", priority: 0.7, changeFrequency: "monthly" },
   { path: "/contact", priority: 0.75, changeFrequency: "monthly" },
   { path: "/contact-apostille-support", priority: 0.65, changeFrequency: "monthly" },
   { path: "/privacy-policy", priority: 0.3, changeFrequency: "yearly" },
   { path: "/terms-and-conditions", priority: 0.3, changeFrequency: "yearly" },
+  { path: "/gdpr-compliance", priority: 0.3, changeFrequency: "yearly" },
   { path: "/refund-policy", priority: 0.3, changeFrequency: "yearly" },
   { path: "/cookies", priority: 0.2, changeFrequency: "yearly" },
   { path: "/disclaimer", priority: 0.3, changeFrequency: "yearly" },

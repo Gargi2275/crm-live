@@ -2,15 +2,26 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, ArrowLeft, RefreshCw } from "lucide-react";
+import { Activity, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { TeamPerformanceGrid } from "@/components/console/TeamPerformanceGrid";
 import {
   getAdminDashboardOverview,
   type AdminDashboardOverview,
   type TeamPerformancePeriod,
 } from "@/lib/admin-auth";
+
+const filterFieldClass =
+  "mt-1 w-full rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm text-[#102A43]";
+
+const TEAM_PERIOD_OPTIONS: { key: TeamPerformancePeriod; label: string }[] = [
+  { key: "day", label: "Today" },
+  { key: "week", label: "Last 7 days" },
+  { key: "month", label: "Last 30 days" },
+  { key: "all", label: "All time" },
+];
 
 export default function AdminTeamPerformancePage() {
   const { adminUser } = useAdminAuth();
@@ -38,6 +49,59 @@ export default function AdminTeamPerformancePage() {
     if (adminUser && canView) void loadData();
   }, [adminUser, canView, loadData]);
 
+  const periodLabel =
+    dashboardData?.team_performance?.label ||
+    TEAM_PERIOD_OPTIONS.find((option) => option.key === teamPeriod)?.label ||
+    "Last 30 days";
+
+  const clearFilters = useCallback(() => {
+    setTeamPeriod("month");
+  }, []);
+
+  const activeFilterCount = teamPeriod !== "month" ? 1 : 0;
+
+  useSetAdminPageChrome(
+    canView
+      ? {
+          title: "Performance",
+          subtitle: `All team · accuracy & revenue · ${periodLabel}`,
+          icon: Activity,
+          activeFilterCount,
+          onClearFilters: clearFilters,
+          syncKey: `${loading}|${teamPeriod}|${periodLabel}|${dashboardData ? "loaded" : "empty"}`,
+          meta: loading ? "Loading…" : `${dashboardData?.staff_members?.length ?? 0} staff`,
+          actions: (
+            <button
+              type="button"
+              onClick={() => void loadData()}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          ),
+          filtersContent: (
+            <label className="block text-sm">
+              <span className="text-xs font-semibold text-[#486581]">Period</span>
+              <select
+                value={teamPeriod}
+                onChange={(e) => setTeamPeriod(e.target.value as TeamPerformancePeriod)}
+                className={filterFieldClass}
+                disabled={loading}
+              >
+                {TEAM_PERIOD_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ),
+        }
+      : null,
+  );
+
   if (!adminUser) {
     return null;
   }
@@ -55,43 +119,10 @@ export default function AdminTeamPerformancePage() {
   }
 
   const staffMembers = dashboardData?.staff_members ?? [];
-  const periodLabel = dashboardData?.team_performance?.label ?? "Last 30 days";
   const revenueNote = dashboardData?.staff_revenue_summary?.attribution_note;
 
   return (
-    <div className="space-y-5 font-body">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="rounded-[10px] bg-[#009877]/10 p-2.5">
-            <Activity className="w-5 h-5 text-[#009877]" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-heading font-semibold text-[#102A43]">Team Performance</h1>
-            <p className="text-sm text-[#627D98] mt-0.5">
-              Accuracy, revenue, cases generated, assigned, completed, and pending — by staff and period.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/admin"
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm font-semibold text-[#486581] hover:bg-[#F8FAFC]"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Dashboard
-          </Link>
-          <button
-            type="button"
-            onClick={() => void loadData()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#009877] px-3 py-2 text-sm font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
-      </div>
-
+    <div className="mx-auto max-w-[1500px] space-y-4 font-body">
       {loading && !dashboardData ? (
         <div className="flex items-center justify-center py-20">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#D9E1EA] border-t-[#009877]" />
@@ -102,12 +133,8 @@ export default function AdminTeamPerformancePage() {
             staffMembers={staffMembers}
             periodLabel={periodLabel}
             teamPeriod={teamPeriod}
-            onPeriodChange={setTeamPeriod}
-            loading={loading}
           />
-          {revenueNote ? (
-            <p className="text-xs text-[#627D98] px-1">{revenueNote}</p>
-          ) : null}
+          {revenueNote ? <p className="text-xs text-[#627D98] px-1">{revenueNote}</p> : null}
         </>
       )}
     </div>

@@ -5,12 +5,16 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, ChevronDown, Eye, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
+import { InlineSmartQuestions } from "@/components/checkout/InlineSmartQuestions";
+import { StartOrderPanel, type StartOrderApplicant, type StartOrderCartEntry } from "@/components/dashboard/StartOrderPanel";
 import toast from "react-hot-toast";
+import { useAuth } from "@/context/AuthContext";
 import {
   authenticatedFetch,
   createApplication,
   createAuditPaymentOrder,
   createFullPaymentOrder,
+  selectFullPaymentPlan,
   createPassportRenewalQuoteOrder,
   getApplicationByReference,
   getApplicationDocuments,
@@ -29,11 +33,25 @@ import {
   verifyFullPayment,
 } from "@/lib/api";
 import { mergeHydratedDocuments, buildChecklistUploadIdMap, documentsFromAuditChecklistItems, inferBackendDocumentTypeFromChecklistId, looksLikeUploadedFileName, resolveChecklistDisplayTitle, type StoredDocumentState } from "@/lib/document-upload-ui";
+import {
+  fetchDocumentRequirements,
+  mapRequirementToChecklistItem,
+  toBackendServiceType,
+} from "@/lib/document-requirements";
+import { priceDisplay } from "@/lib/public-pricing";
+import { usePublicPricing } from "@/hooks/usePublicPricing";
+import {
+  fetchServiceQuestions,
+  mapQuestionToJourneyItem,
+  requirementMatchesAnswers,
+  resolveServiceChecklist,
+  type JourneyQuestion,
+} from "@/lib/questionnaire";
 import { clearStripeReturnParams, getStripeCheckoutUrl, readStripeReturnParams, redirectToStripeCheckout } from "@/lib/stripe-checkout";
 import { useRouter } from "next/navigation";
 type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "apostille" | "undecided";
 type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "passport-quote-pending" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
-type QuestionId = "journeyType" | "nationality" | "ageGroup" | "maritalStatus" | "nameChanged" | "birthOutsideCore";
+type QuestionId = string;
 type DocumentStatus = "not_uploaded" | "uploaded" | "pending_reupload";
 type AuditOutcome = "green" | "amber" | "red";
 
@@ -60,8 +78,6 @@ type PaymentSummary = {
   total_due: number;
   currency: "GBP";
 };
-
-type Answers = Record<QuestionId, string>;
 
 type DocumentItem = {
   id: string;
@@ -198,7 +214,7 @@ type AuditChecklistItem = {
   special_requirement?: "apostille" | "bilingual" | "affidavit" | null;
 };
 
-const QUESTION_LIST: Array<{ id: QuestionId; label: string; options: string[] }> = [
+const QUESTION_LIST: JourneyQuestion[] = [
   {
     id: "journeyType",
     label: "Is this first time OCI or conversion?",
@@ -231,6 +247,16 @@ const QUESTION_LIST: Array<{ id: QuestionId; label: string; options: string[] }>
   },
 ];
 
+type Answers = Record<string, string>;
+
+const emptyAnswersFromQuestions = (questions: JourneyQuestion[]): Answers => {
+  const next: Answers = {};
+  for (const question of questions) {
+    next[question.id] = "";
+  }
+  return next;
+};
+
 const SERVICES: Array<{
   id: ServiceId;
   name: string;
@@ -258,14 +284,7 @@ const PROCESS_ITEMS = [
   { title: "Decision / Dispatched / Collected", description: "Final outcome, dispatch, or collection status." },
 ];
 
-const emptyAnswers: Answers = {
-  journeyType: "",
-  nationality: "",
-  ageGroup: "",
-  maritalStatus: "",
-  nameChanged: "",
-  birthOutsideCore: "",
-};
+const emptyAnswers: Answers = emptyAnswersFromQuestions(QUESTION_LIST);
 
 const defaultDocuments = (service: ServiceId | null, answers: Answers): DocumentItem[] => {
   const base: DocumentItem[] = [];
@@ -297,18 +316,6 @@ const defaultDocuments = (service: ServiceId | null, answers: Answers): Document
       );
       break;
     case "passport-renewal":
-      {
-      const applicantType = answers.ageGroup === "Child (under 18)" ? "MINOR" : String(dynamicAnswers.applicant_type || "ADULT").toUpperCase();
-      const nameChanged = answers.nameChanged === "Yes" || String(dynamicAnswers.name_change || "").toUpperCase() === "YES";
-      const category = String(dynamicAnswers.category || "").toUpperCase();
-      const country =
-        answers.nationality === "British"
-          ? "UK"
-          : answers.nationality === "American"
-            ? "US"
-            : String(dynamicAnswers.country || "OTHER").toUpperCase();
-      const firstRenewal = String(dynamicAnswers.first_renewal || "").toUpperCase();
-
       base.push(
         { id: "current-passport-all-pages", title: "Current Indian passport (all pages scan)", description: "Why needed: verifies existing identity and stamping history. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Missing pages or blurred scans.", sample: "Upload one clear merged PDF or ordered image set.", sampleUrl: "/document-audit#sample-passport-renewal" },
         { id: "old-expired-passport", title: "Old or expired passport (if any)", description: "Why needed: previous passport linkage for renewal continuity. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Skipping this when an old passport exists.", sample: "Include old booklet bio/signature pages.", sampleUrl: "/document-audit#sample-passport-renewal" },
@@ -316,50 +323,6 @@ const defaultDocuments = (service: ServiceId | null, answers: Answers): Document
         { id: "recent-photo-35x45", title: "Recent passport photograph (white background, 35mm x 45mm)", description: "Why needed: submission photo compliance. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Wrong dimensions or dark background.", sample: "Front-facing image with proper lighting.", sampleUrl: "/document-audit#sample-passport-renewal" },
         { id: "completed-renewal-form", title: "Completed application form", description: "Why needed: official data capture for renewal request. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unsigned fields and incomplete sections.", sample: "Ensure all mandatory sections are completed.", sampleUrl: "/document-audit#sample-passport-renewal" },
       );
-
-      if (applicantType === "MINOR") {
-        base.push(
-          { id: "minor-birth-certificate", title: "Birth certificate", description: "Why needed: age and parent linkage for minor renewal. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unreadable names or dates.", sample: "Certified copy with full details.", sampleUrl: "/document-audit#sample-passport-renewal" },
-          { id: "minor-parents-passports", title: "Both parents' passports", description: "Why needed: parental identity verification. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Only one parent passport uploaded.", sample: "Include bio pages for both parents.", sampleUrl: "/document-audit#sample-passport-renewal" },
-          { id: "minor-parents-address-proof", title: "Parents' proof of address", description: "Why needed: residency validation for minor application. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Address mismatch with form.", sample: "Recent utility bill or statement.", sampleUrl: "/document-audit#sample-passport-renewal" },
-          { id: "minor-consent-single-parent", title: "Consent letter (if single parent)", description: "Why needed: legal consent where one guardian applies. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Unsigned consent declaration.", sample: "Signed letter with supporting proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        );
-      }
-
-      if (nameChanged) {
-        base.push(
-          { id: "name-change-proof", title: "Name change proof (marriage certificate or deed poll or court order)", description: "Why needed: links old and new names across records. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Document does not match passport name history.", sample: "Upload official name-change proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        );
-      }
-
-      if (category === "TATKAL") {
-        base.push(
-          { id: "tatkal-fee-proof", title: "Tatkaal fee proof", description: "Why needed: validates Tatkaal processing category. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Missing transaction details.", sample: "Include fee receipt or payment proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
-          { id: "tatkal-urgency-proof", title: "Proof of urgency (travel booking, medical etc.)", description: "Why needed: supports Tatkaal urgency claim. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "No date-aligned urgency document.", sample: "Upload travel/medical urgency evidence.", sampleUrl: "/document-audit#sample-passport-renewal" },
-          { id: "tatkal-self-declaration", title: "Self declaration for Tatkal", description: "Why needed: applicant declaration for priority process. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unsigned declaration.", sample: "Signed Tatkaal declaration format.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        );
-      }
-
-      if (country === "UK") {
-        base.push(
-          { id: "uk-brp-card", title: "BRP card (if applicable)", description: "Why needed: UK residence evidence when applicable. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Expired BRP without explanation.", sample: "Front and back clear copy.", sampleUrl: "/document-audit#sample-passport-renewal" },
-          { id: "uk-visa-settlement", title: "UK visa or settlement proof", description: "Why needed: immigration status verification. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "No visible visa validity details.", sample: "Upload visa vignette/settlement record.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        );
-      }
-
-      if (country === "US") {
-        base.push(
-          { id: "us-visa-green-card", title: "US visa or green card copy", description: "Why needed: lawful residence verification in US. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Document edges cropped.", sample: "Upload both sides where applicable.", sampleUrl: "/document-audit#sample-passport-renewal" },
-          { id: "us-i94-record", title: "I-94 record (if applicable)", description: "Why needed: entry/status support for US residency. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "I-94 mismatch with passport details.", sample: "Download latest I-94 and upload PDF.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        );
-      }
-
-      if (firstRenewal === "NO") {
-        base.push(
-          { id: "previous-renewal-receipt", title: "Previous passport renewal receipt", description: "Why needed: evidence of earlier renewal history. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Receipt missing identifying details.", sample: "Upload complete receipt image/PDF.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        );
-      }
-      }
       break;
     case "apostille":
       base.push(
@@ -377,19 +340,117 @@ const defaultDocuments = (service: ServiceId | null, answers: Answers): Document
       );
   }
 
-  if (answers.nameChanged === "Yes") {
-    base.push({ id: "name-affidavit", title: "Affidavit for Name Discrepancy", description: "Required if names differ across your documents.", required: true, mistakes: "Missing sworn declaration or outdated details.", sample: "Include all old and new names." });
+  return appendAnswerDrivenDocuments(service, answers, base, dynamicAnswers);
+};
+
+/** Answer-driven add-ons — used only when catalog has no conditional rows yet. */
+const appendAnswerDrivenDocuments = (
+  service: ServiceId | null,
+  answers: Answers,
+  base: DocumentItem[],
+  dynamicAnswers?: Record<string, string>,
+): DocumentItem[] => {
+  const next = [...base];
+  const dynamic = dynamicAnswers || (answers as Record<string, string>);
+
+  if (service === "passport-renewal") {
+    const applicantType = answers.ageGroup === "Child (under 18)" ? "MINOR" : String(dynamic.applicant_type || "ADULT").toUpperCase();
+    const nameChanged = answers.nameChanged === "Yes" || String(dynamic.name_change || "").toUpperCase() === "YES";
+    const category = String(dynamic.category || "").toUpperCase();
+    const country =
+      answers.nationality === "British"
+        ? "UK"
+        : answers.nationality === "American"
+          ? "US"
+          : String(dynamic.country || "OTHER").toUpperCase();
+    const firstRenewal = String(dynamic.first_renewal || "").toUpperCase();
+
+    if (applicantType === "MINOR") {
+      next.push(
+        { id: "minor-birth-certificate", title: "Birth certificate", description: "Why needed: age and parent linkage for minor renewal. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unreadable names or dates.", sample: "Certified copy with full details.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "minor-parents-passports", title: "Both parents' passports", description: "Why needed: parental identity verification. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Only one parent passport uploaded.", sample: "Include bio pages for both parents.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "minor-parents-address-proof", title: "Parents' proof of address", description: "Why needed: residency validation for minor application. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Address mismatch with form.", sample: "Recent utility bill or statement.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "minor-consent-single-parent", title: "Consent letter (if single parent)", description: "Why needed: legal consent where one guardian applies. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Unsigned consent declaration.", sample: "Signed letter with supporting proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
+      );
+    }
+
+    if (nameChanged) {
+      next.push(
+        { id: "name-change-proof", title: "Name change proof (marriage certificate or deed poll or court order)", description: "Why needed: links old and new names across records. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Document does not match passport name history.", sample: "Upload official name-change proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
+      );
+    }
+
+    if (category === "TATKAL") {
+      next.push(
+        { id: "tatkal-fee-proof", title: "Tatkaal fee proof", description: "Why needed: validates Tatkaal processing category. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Missing transaction details.", sample: "Include fee receipt or payment proof.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "tatkal-urgency-proof", title: "Proof of urgency (travel booking, medical etc.)", description: "Why needed: supports Tatkaal urgency claim. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "No date-aligned urgency document.", sample: "Upload travel/medical urgency evidence.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "tatkal-self-declaration", title: "Self declaration for Tatkal", description: "Why needed: applicant declaration for priority process. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unsigned declaration.", sample: "Signed Tatkaal declaration format.", sampleUrl: "/document-audit#sample-passport-renewal" },
+      );
+    }
+
+    if (country === "UK") {
+      next.push(
+        { id: "uk-brp-card", title: "BRP card (if applicable)", description: "Why needed: UK residence evidence when applicable. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Expired BRP without explanation.", sample: "Front and back clear copy.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "uk-visa-settlement", title: "UK visa or settlement proof", description: "Why needed: immigration status verification. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "No visible visa validity details.", sample: "Upload visa vignette/settlement record.", sampleUrl: "/document-audit#sample-passport-renewal" },
+      );
+    }
+
+    if (country === "US") {
+      next.push(
+        { id: "us-visa-green-card", title: "US visa or green card copy", description: "Why needed: lawful residence verification in US. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Document edges cropped.", sample: "Upload both sides where applicable.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "us-i94-record", title: "I-94 record (if applicable)", description: "Why needed: entry/status support for US residency. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "I-94 mismatch with passport details.", sample: "Download latest I-94 and upload PDF.", sampleUrl: "/document-audit#sample-passport-renewal" },
+      );
+    }
+
+    if (firstRenewal === "NO") {
+      next.push(
+        { id: "previous-renewal-receipt", title: "Previous passport renewal receipt", description: "Why needed: evidence of earlier renewal history. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Receipt missing identifying details.", sample: "Upload complete receipt image/PDF.", sampleUrl: "/document-audit#sample-passport-renewal" },
+      );
+    }
   }
 
-  if (answers.birthOutsideCore === "Yes") {
-    base.push({ id: "birth-proof", title: "Birth / Parent Proof", description: "Birth proof or parent record, depending on the case.", required: true, mistakes: "Mismatch in names, dates, or country details.", sample: "Use an official certified copy." });
+  if (answers.nameChanged === "Yes" && !next.some((item) => item.id === "name-affidavit" || item.id === "name-change-proof")) {
+    next.push({ id: "name-affidavit", title: "Affidavit for Name Discrepancy", description: "Required if names differ across your documents.", required: true, mistakes: "Missing sworn declaration or outdated details.", sample: "Include all old and new names." });
   }
 
-  if (service === "undecided") {
-    base.push({ id: "any-existing-id", title: "Any Existing OCI / Visa / Passport Record", description: "We will use this to confirm the best service route.", required: true, mistakes: "Uploading unrelated documents only.", sample: "Upload anything current and relevant." });
+  if (answers.birthOutsideCore === "Yes" && !next.some((item) => item.id === "birth-proof")) {
+    next.push({ id: "birth-proof", title: "Birth / Parent Proof", description: "Birth proof or parent record, depending on the case.", required: true, mistakes: "Mismatch in names, dates, or country details.", sample: "Use an official certified copy." });
   }
 
-  return base;
+  if (service === "undecided" && !next.some((item) => item.id === "any-existing-id")) {
+    next.push({ id: "any-existing-id", title: "Any Existing OCI / Visa / Passport Record", description: "We will use this to confirm the best service route.", required: true, mistakes: "Uploading unrelated documents only.", sample: "Upload anything current and relevant." });
+  }
+
+  return next;
+};
+
+const resolveDocuments = async (service: ServiceId | null, answers: Answers): Promise<DocumentItem[]> => {
+  if (!service) return [];
+  const backendType = toBackendServiceType(service);
+  if (!backendType) return defaultDocuments(service, answers);
+
+  const resolved = await resolveServiceChecklist(backendType, answers);
+  if (resolved.checklist.length) {
+    return resolved.checklist as DocumentItem[];
+  }
+
+  const rows = await fetchDocumentRequirements(backendType);
+  if (!rows.length) {
+    console.warn(
+      `[document-requirements] No DocumentRequirement rows for ${backendType} — falling back to hardcoded checklist.`,
+    );
+    return defaultDocuments(service, answers);
+  }
+
+  const hasCatalogConditions = rows.some((row) => Boolean(String(row.show_when_question_code || "").trim()));
+  const matched = hasCatalogConditions
+    ? rows.filter((row) => requirementMatchesAnswers(row, answers))
+    : rows;
+  const base = matched.map(mapRequirementToChecklistItem) as DocumentItem[];
+  if (hasCatalogConditions) {
+    return base;
+  }
+  return appendAnswerDrivenDocuments(service, answers, base);
 };
 
 const defaultSupportDocs = [
@@ -414,6 +475,18 @@ const serviceLabelMap: Record<ServiceId, string> = {
   "passport-renewal": "Indian Passport Renewal",
   apostille: "Apostille Services",
   undecided: "Undecided - we will recommend a service",
+};
+
+const mapCatalogServiceType = (value?: string | null): ServiceId | null => {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized.startsWith("evisa") || normalized === "document_audit") return null;
+  if (normalized.includes("passport") && normalized.includes("renewal")) return "passport-renewal";
+  if (normalized === "apostille" || normalized.includes("apostille")) return "apostille";
+  if (normalized === "new_oci" || normalized.includes("new_oci") || normalized.includes("first_time_oci")) return "new-oci";
+  if (normalized === "oci_renewal" || normalized.includes("oci_renewal") || normalized.includes("transfer")) return "oci-renewal";
+  if (normalized === "oci_update" || normalized.includes("oci_update") || normalized.includes("gratis")) return "oci-update";
+  return null;
 };
 
 const emptyDocStatus = (): Record<string, DocumentState> => ({});
@@ -595,18 +668,29 @@ function DocumentUploadControls({
 
 export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, startFresh = false, focusQuote = false, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker: _showPersistentTracker = false, onUnreadCountChange }: DocumentAuditJourneyProps) {
   const router = useRouter();
-  void userEmail;
+  const { assessmentFee, services: catalogServices, loading: pricingLoading } = usePublicPricing();
+  const { user } = useAuth();
   void applicationIdProp;
-  void serviceTypeProp;
   void onUnreadCountChange;
   const stageRef = useRef<FlowStage>("service");
   const quoteCardRef = useRef<HTMLDivElement | null>(null);
   const quoteFocusHandledRef = useRef(false);
   const refreshRedirectHandledRef = useRef(false);
+  const autoServiceStartAppliedRef = useRef(false);
   const [loaded, setLoaded] = useState(false);
   const [stage, setStage] = useState<FlowStage>("service");
   const [selectedService, setSelectedService] = useState<ServiceId | null>(null);
+  const [showServicePicker, setShowServicePicker] = useState(true);
+  const [primaryApplicant, setPrimaryApplicant] = useState<StartOrderApplicant>(() => ({
+    id: "applicant-1",
+    fullName: "",
+    email: userEmail || "",
+    mobile: "",
+    applyingFrom: "United Kingdom",
+  }));
+  const [extraApplicants, setExtraApplicants] = useState<StartOrderApplicant[]>([]);
   const [questionIndex, setQuestionIndex] = useState(0);
+  const [activeQuestions, setActiveQuestions] = useState<JourneyQuestion[]>(QUESTION_LIST);
   const [answers, setAnswers] = useState<Answers>(emptyAnswers);
   const [documents, setDocuments] = useState<Record<string, DocumentState>>(emptyDocStatus);
   const [supportUploads, setSupportUploads] = useState<Record<string, string>>({});
@@ -637,6 +721,8 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
   const [paymentSummaryLoading, setPaymentSummaryLoading] = useState(false);
   const [paymentSummaryError, setPaymentSummaryError] = useState<string | null>(null);
+  const [selectedFeePlanCode, setSelectedFeePlanCode] = useState<string>("");
+  const [feePlanUpdating, setFeePlanUpdating] = useState(false);
   const [passportMaskedEmail, setPassportMaskedEmail] = useState<string>("");
   const [passportCaseReference, setPassportCaseReference] = useState<string>("");
   const [passportQuoteAcknowledged, setPassportQuoteAcknowledged] = useState(false);
@@ -663,13 +749,36 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   }, [stage]);
 
   useEffect(() => {
+    const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim();
+    const email = (userEmail || user?.email || "").trim();
+    if (!fullName && !email) return;
+    setPrimaryApplicant((current) => ({
+      ...current,
+      fullName: current.fullName || fullName,
+      email: current.email || email,
+    }));
+  }, [user?.first_name, user?.last_name, user?.email, userEmail]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
-    const requestedService = new URLSearchParams(window.location.search).get("service");
+    // Coming from a service page (?start=1&service=...) — preselect that service on the
+    // order form only. Do NOT auto-create the application / jump to questionnaire.
+    // Continue is what starts the app and moves to questions.
+    if (!startFresh) return;
+    if (resumeReference) return;
+
+    const requestedService =
+      serviceTypeProp || new URLSearchParams(window.location.search).get("service");
     const resolved = mapBackendServiceType(requestedService);
-    if (resolved) {
-      setSelectedService((current) => current || resolved);
-    }
-  }, []);
+    if (!resolved) return;
+    if (autoServiceStartAppliedRef.current) return;
+    autoServiceStartAppliedRef.current = true;
+
+    setSelectedService(resolved);
+    setShowServicePicker(false);
+    setStage("service");
+    void loadQuestionsForService(resolved);
+  }, [serviceTypeProp, startFresh, resumeReference]);
 
   useEffect(() => {
     if (stage !== "passport-quote-pending") {
@@ -769,7 +878,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     };
   }, [applicationRecord?.reference_number, referenceNumber, stage]);
 
-  const currentQuestion = QUESTION_LIST[questionIndex];
+  const currentQuestion = activeQuestions[questionIndex];
   const checklist = generatedChecklist;
   const flaggedReuploadDocs = useMemo<DocumentItem[]>(() => {
     if (!reuploadOnlyFlagged || !auditResultData?.flagged_documents?.length) {
@@ -1022,8 +1131,14 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   }, [applicationRecord?.admin_messages, applicationRecord?.audit_logs]);
   const selectedServiceRecord = SERVICES.find((item) => item.id === selectedService) || null;
   const complexityScore = [answers.journeyType, answers.nameChanged, answers.birthOutsideCore].filter((item) => item === "Yes" || item === "I Already Have One / Conversion").length;
-  const auditFeePenceResolved = applicationRecord?.audit_fee_pence ?? auditFeePenceProp ?? 1500;
+  const catalogAssessmentPence =
+    assessmentFee != null && assessmentFee > 0 ? Math.round(assessmentFee * 100) : 0;
+  const auditFeePenceResolved =
+    applicationRecord?.audit_fee_pence ??
+    auditFeePenceProp ??
+    catalogAssessmentPence;
   const auditFee = auditFeePenceResolved / 100;
+  const assessmentOffered = auditFeePenceResolved > 0;
   const serviceFee = selectedService ? serviceFeeMap[selectedService] : 88;
   const serviceFeeForMath = typeof serviceFee === "number" ? serviceFee : 0;
   const addOnTotal = addOns.reduce((sum, id) => sum + (ADD_ONS.find((item) => item.id === id)?.fee || 0), 0);
@@ -1215,16 +1330,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   };
 
   const mapBackendServiceType = (value?: string | null): ServiceId | null => {
-    if (!value) return null;
-    const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
-    if (normalized.startsWith("evisa")) return null;
-    if (normalized.includes("passport") && normalized.includes("renewal")) return "passport-renewal";
-    if (normalized === "apostille" || normalized.includes("apostille")) return "apostille";
-    if (normalized === "new_oci" || normalized.includes("new_oci")) return "new-oci";
-    if (normalized === "oci_renewal" || normalized.includes("oci_renewal") || normalized.includes("transfer")) return "oci-renewal";
-    if (normalized === "oci_update" || normalized.includes("oci_update") || normalized.includes("gratis")) return "oci-update";
-    if (normalized.includes("first_time_oci")) return "new-oci";
-    return null;
+    return mapCatalogServiceType(value);
   };
 
   const clearDraftStorage = (reference?: string | null) => {
@@ -1342,6 +1448,9 @@ const saveState = (_next: Partial<JourneyStorage>) => {
 useEffect(() => {
   if (typeof window === "undefined") return;
 
+  let cancelled = false;
+
+  const restoreDraft = async () => {
   try {
     const resumeKey = getAuditDraftKey(resumeReference || null);
     const activeKey = getAuditDraftKey(null);
@@ -1388,13 +1497,19 @@ useEffect(() => {
     if (isValidService) {
       setSelectedService(parsedService as ServiceId);
       setBannerMessage(`Resuming your ${serviceLabelMap[parsedService as ServiceId]} audit journey.`);
+      void loadQuestionsForService(parsedService as ServiceId).then((questions) => {
+        if (typeof parsed.questionIndex === "number" && Number.isFinite(parsed.questionIndex)) {
+          const boundedIndex = Math.max(0, Math.min(parsed.questionIndex, Math.max(questions.length - 1, 0)));
+          setQuestionIndex(boundedIndex);
+        }
+      });
     }
 
     if (parsed.stage && OCI_DRAFT_ALLOWED_STAGES.includes(parsed.stage)) {
       setStage(parsed.stage);
     }
 
-    if (typeof parsed.questionIndex === "number" && Number.isFinite(parsed.questionIndex)) {
+    if (!isValidService && typeof parsed.questionIndex === "number" && Number.isFinite(parsed.questionIndex)) {
       const boundedIndex = Math.max(0, Math.min(parsed.questionIndex, QUESTION_LIST.length - 1));
       setQuestionIndex(boundedIndex);
     }
@@ -1422,7 +1537,8 @@ useEffect(() => {
     }
 
     if (isValidService) {
-      const rebuiltChecklist = defaultDocuments(parsedService as ServiceId, draftAnswers);
+      const rebuiltChecklist = await resolveDocuments(parsedService as ServiceId, draftAnswers);
+      if (cancelled) return;
       if (rebuiltChecklist.length > 0) {
         setGeneratedChecklist(rebuiltChecklist);
       } else if (Array.isArray(parsed.generatedChecklist)) {
@@ -1449,8 +1565,14 @@ useEffect(() => {
     sessionStorage.removeItem(OCI_AUDIT_DRAFT_KEY_LEGACY);
     setHasDraftProgress(false);
   } finally {
-    setDraftRestored(true);
+    if (!cancelled) setDraftRestored(true);
   }
+  };
+
+  void restoreDraft();
+  return () => {
+    cancelled = true;
+  };
 }, [resumeReference, startFresh, router]);
 
 useEffect(() => {
@@ -1507,8 +1629,16 @@ useEffect(() => {
   if (!draftRestored || !loaded || refreshRedirectHandledRef.current) {
     return;
   }
-  if (resumeReference || startFresh) {
+  // Keep users on the journey when they arrived via Start application (service/start),
+  // resume link, or an in-progress draft — do not bounce them to the dashboard.
+  if (resumeReference || startFresh || serviceTypeProp) {
     return;
+  }
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("service") || params.get("start")) {
+      return;
+    }
   }
   if (hasDraftProgress && stage !== "service") {
     return;
@@ -1516,7 +1646,7 @@ useEffect(() => {
 
   refreshRedirectHandledRef.current = true;
   router.replace("/dashboard");
-}, [draftRestored, loaded, resumeReference, startFresh, hasDraftProgress, stage, router]);
+}, [draftRestored, loaded, resumeReference, startFresh, serviceTypeProp, hasDraftProgress, stage, router]);
 
 useEffect(() => {
   if (typeof window === "undefined") return;
@@ -1603,7 +1733,7 @@ useEffect(() => {
         const resolvedAuditId = app.latest_audit_id ?? null;
         let restoredChecklistCount = 0;
         const resumeAnswers = { ...emptyAnswers, ...(lastChecklistAnswers || answers) };
-        const questionnaireChecklist = resolvedService ? defaultDocuments(resolvedService, resumeAnswers) : [];
+        const questionnaireChecklist = resolvedService ? await resolveDocuments(resolvedService, resumeAnswers) : [];
 
         if (questionnaireChecklist.length > 0) {
           setGeneratedChecklist(questionnaireChecklist);
@@ -1616,7 +1746,7 @@ useEffect(() => {
             const result = normalizePayload<{ checklist_items?: AuditChecklistItem[] }>(raw);
             if (Array.isArray(result.checklist_items) && result.checklist_items.length > 0) {
               restoredChecklistCount = result.checklist_items.length;
-              applyChecklistFromAudit(result.checklist_items, {
+              await applyChecklistFromAudit(result.checklist_items, {
                 preferredChecklist: questionnaireChecklist,
                 questionnaireAnswers: resumeAnswers,
                 service: resolvedService,
@@ -1673,7 +1803,7 @@ const isApostille = resolvedService === "apostille";
 if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   setStage("questions");
 } else if (isApostille && !hasUploadedDocs && !hasChecklistArtifacts) {
-  const apostilleChecklist = defaultDocuments("apostille", emptyAnswers);
+  const apostilleChecklist = await resolveDocuments("apostille", emptyAnswers);
   if (apostilleChecklist.length > 0) {
     setGeneratedChecklist(apostilleChecklist);
     const idMap: Record<string, string | number> = {};
@@ -1706,7 +1836,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   setStage(draftStage);
 } else if (isApostille) {
   // Apostille flow skips questionnaire and starts at checklist/upload.
-  const apostilleChecklist = defaultDocuments("apostille", emptyAnswers);
+  const apostilleChecklist = await resolveDocuments("apostille", emptyAnswers);
   if (apostilleChecklist.length > 0) {
     setGeneratedChecklist(apostilleChecklist);
     const idMap: Record<string, string | number> = {};
@@ -1981,8 +2111,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
         if (!active) return;
 
+        const planCode = String(app.fee_plan_code || "").trim();
+        if (planCode) setSelectedFeePlanCode(planCode);
+
         setPaymentSummary({
-          service_label: selectedServiceRecord?.name || "Selected service",
+          service_label: selectedServiceRecord?.name || app.service_name || "Selected service",
           service_fee: Number((app.service_total_pence || 0) / 100),
           audit_credit: Number((app.audit_credit_pence || 0) / 100),
           addons: [],
@@ -2195,6 +2328,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     setMessageRequestedDocIds([]);
     setSelectedService(service);
     setQuestionIndex(0);
+    setActiveQuestions(QUESTION_LIST);
     setAnswers(emptyAnswers);
     setDocuments(emptyDocStatus());
     setSupportUploads({});
@@ -2219,6 +2353,82 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     setBannerMessage(service === "undecided" ? "We will help you decide the best route." : `Great. You selected ${serviceLabelMap[service]}.`);
   };
 
+  const loadQuestionsForService = async (service: ServiceId): Promise<JourneyQuestion[]> => {
+    const backendType = toBackendServiceType(service);
+    if (!backendType) {
+      // Undecided / unknown — keep built-in helper questionnaire
+      setActiveQuestions(QUESTION_LIST);
+      return QUESTION_LIST;
+    }
+    const rows = await fetchServiceQuestions(backendType);
+    const mapped = rows.map(mapQuestionToJourneyItem).filter((item) => item.id && item.label);
+    // Only use smart questionnaire when admin configured questions for this service
+    setActiveQuestions(mapped);
+    if (mapped.length) {
+      setAnswers((current) => {
+        const base = emptyAnswersFromQuestions(mapped);
+        for (const key of Object.keys(base)) {
+          if (current[key]) base[key] = current[key];
+        }
+        return base;
+      });
+      setQuestionIndex((current) => Math.max(0, Math.min(current, Math.max(mapped.length - 1, 0))));
+    }
+    return mapped;
+  };
+
+ const continueStartedApplication = async (
+  service: ServiceId,
+  startedApplication: { id: number; referenceNumber: string },
+) => {
+  setApplicationId(startedApplication.id);
+  setReferenceNumber(startedApplication.referenceNumber || null);
+
+  if (service === "apostille") {
+    const apostilleChecklist = await resolveDocuments("apostille", emptyAnswers);
+    setGeneratedChecklist(apostilleChecklist);
+    const idMap: Record<string, string | number> = {};
+    apostilleChecklist.forEach((item) => {
+      idMap[item.id] = item.id;
+    });
+    setChecklistItemIdByDocId(idMap);
+    setStage("checklist");
+    setBannerMessage("Upload your Apostille documents for review.");
+    const refreshed = await syncApplicationFromBackend(startedApplication.referenceNumber || null, {
+      skipStageSync: true,
+    });
+    await ensureAuditStarted(refreshed);
+    return;
+  }
+
+  const questions = await loadQuestionsForService(service);
+  if (questions.length > 0) {
+    // Same pipeline as before — questionnaire for THIS application only
+    setStage("questions");
+    setBannerMessage(
+      service === "undecided"
+        ? "Answer a few questions so we can recommend the best route."
+        : "Answer a few questions so we can build your document checklist.",
+    );
+    return;
+  }
+
+  const checklist = await resolveDocuments(service, emptyAnswers);
+  setGeneratedChecklist(checklist);
+  const idMap: Record<string, string | number> = {};
+  checklist.forEach((item) => {
+    idMap[item.id] = item.id;
+  });
+  setChecklistItemIdByDocId(idMap);
+  setLastChecklistAnswers({ ...emptyAnswers });
+  setStage("checklist");
+  setBannerMessage(`Checklist ready for ${serviceLabelMap[service]}. Upload your documents to continue.`);
+  const refreshed = await syncApplicationFromBackend(startedApplication.referenceNumber || null, {
+    skipStageSync: true,
+  });
+  await ensureAuditStarted(refreshed);
+};
+
  const handleServiceSelection = async (service: ServiceId) => {
   setApplicationStartError(null);
 
@@ -2231,24 +2441,111 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     setApiLoading(true);
     // forceCreate=true so we never accidentally resume a stale application
     const startedApplication = await startApplicationIfNeeded(service, true);
-    setApplicationId(startedApplication.id);
-    if (service === "apostille") {
-      const apostilleChecklist = defaultDocuments("apostille", emptyAnswers);
-      setGeneratedChecklist(apostilleChecklist);
-      const idMap: Record<string, string | number> = {};
-      apostilleChecklist.forEach((item) => {
-        idMap[item.id] = item.id;
-      });
-      setChecklistItemIdByDocId(idMap);
-      setStage("checklist");
-      setBannerMessage("Upload your Apostille documents for review.");
-      const refreshed = await syncApplicationFromBackend(startedApplication.referenceNumber || null, { skipStageSync: true });
-      await ensureAuditStarted(refreshed);
-    } else {
-      setStage("questions");
-    }
+    await continueStartedApplication(service, startedApplication);
   } catch {
     setApplicationStartError("Could not start your application. Please try again.");
+  } finally {
+    setApiLoading(false);
+  }
+};
+
+ /** One application per (applicant × service). Same pipeline per app — no flow change. */
+ const handleOrderCartContinue = async (cart: StartOrderCartEntry[]) => {
+  setApplicationStartError(null);
+
+  const resolveJourneyId = (serviceOptionId: string): ServiceId | null => {
+    return (
+      mapCatalogServiceType(serviceOptionId) ||
+      mapBackendServiceType(serviceOptionId) ||
+      null
+    );
+  };
+
+  type OrderLine = {
+    applicant: StartOrderApplicant;
+    service: ServiceId;
+    serviceOptionId: string;
+  };
+
+  const lines: OrderLine[] = [];
+  for (const entry of cart) {
+    for (const serviceOptionId of entry.serviceIds) {
+      if (serviceOptionId === "undecided") continue;
+      const service = resolveJourneyId(serviceOptionId);
+      if (!service) continue;
+      lines.push({ applicant: entry.applicant, service, serviceOptionId });
+    }
+  }
+
+  if (!lines.length) {
+    toast.error("Please select at least one service.");
+    return;
+  }
+
+  const firstLine = lines[0];
+  clearDraftStorage(resumeReference || referenceNumber || null);
+  resetFromService(firstLine.service);
+  setPrimaryApplicant({
+    ...firstLine.applicant,
+    id: firstLine.applicant.id || "primary",
+  });
+  setShowServicePicker(false);
+
+  try {
+    setApiLoading(true);
+
+    const createdApps: Array<{
+      applicantName: string;
+      applicantEmail: string;
+      service: ServiceId;
+      applicationId: number;
+      referenceNumber: string;
+    }> = [];
+
+    for (const line of lines) {
+      const payload = await createApplication(mapApplicationServiceType(line.service));
+      const applicationId = Number(payload.application_id || 0);
+      const referenceNumberCreated = String(payload.reference_number || "").trim();
+      if (!Number.isFinite(applicationId) || applicationId <= 0 || !referenceNumberCreated) {
+        throw new Error("Could not start your application. Please try again.");
+      }
+      createdApps.push({
+        applicantName: line.applicant.fullName.trim(),
+        applicantEmail: line.applicant.email.trim(),
+        service: line.service,
+        applicationId,
+        referenceNumber: referenceNumberCreated,
+      });
+    }
+
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(
+        "flyoci:order-cart-apps",
+        JSON.stringify({
+          createdAt: Date.now(),
+          apps: createdApps,
+        }),
+      );
+    }
+
+    const first = createdApps[0];
+
+    if (createdApps.length > 1) {
+      toast.success(
+        `Created ${createdApps.length} applications (one per applicant × service). Continuing with ${first.applicantName || "Applicant 1"} — ${serviceLabelMap[first.service]}. Other apps are on your Dashboard.`,
+        { duration: 6000 },
+      );
+    }
+
+    await syncApplicationFromBackend(first.referenceNumber, { skipStageSync: true });
+    await continueStartedApplication(first.service, {
+      id: first.applicationId,
+      referenceNumber: first.referenceNumber,
+    });
+  } catch (error) {
+    setApplicationStartError(
+      error instanceof Error ? error.message : "Could not start your application. Please try again.",
+    );
   } finally {
     setApiLoading(false);
   }
@@ -2276,7 +2573,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     return "single";
   };
 
-  const applyChecklistFromAudit = (
+  const applyChecklistFromAudit = async (
     items: AuditChecklistItem[],
     options?: {
       preferredChecklist?: DocumentItem[];
@@ -2285,9 +2582,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     }
   ) => {
     const questionnaireChecklist =
-      options?.service && options?.questionnaireAnswers
-        ? defaultDocuments(options.service, options.questionnaireAnswers)
-        : [];
+      options?.preferredChecklist && options.preferredChecklist.length > 0
+        ? options.preferredChecklist
+        : options?.service && options?.questionnaireAnswers
+          ? await resolveDocuments(options.service, options.questionnaireAnswers)
+          : [];
 
     const sanitizedPreferred = (options?.preferredChecklist || generatedChecklist).filter(
       (item) => !looksLikeUploadedFileName(item.title)
@@ -2362,7 +2661,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     const app = await syncApplicationFromBackend(referenceNumber);
     const appId = app.id;
     const refNum = app.reference_number;
-    const questionnaireChecklist = selectedService ? defaultDocuments(selectedService, answerSet) : [];
+    const questionnaireChecklist = selectedService ? await resolveDocuments(selectedService, answerSet) : [];
 
     let nextAuditId = auditId;
     if (!nextAuditId) {
@@ -2374,7 +2673,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       }
       nextAuditId = createdAuditId;
       setAuditId(createdAuditId);
-      applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : [], {
+      await applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : [], {
         preferredChecklist: questionnaireChecklist,
         questionnaireAnswers: answerSet,
         service: selectedService,
@@ -2382,7 +2681,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     } else {
       const raw = await getAuditStatus(nextAuditId);
       const result = normalizePayload<{ checklist_items?: AuditChecklistItem[] }>(raw);
-      applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : [], {
+      await applyChecklistFromAudit(Array.isArray(result.checklist_items) ? result.checklist_items : [], {
         preferredChecklist: questionnaireChecklist,
         questionnaireAnswers: answerSet,
         service: selectedService,
@@ -2412,12 +2711,12 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   const answerQuestion = async (value: string) => {
     const currentId = currentQuestion.id;
     const nextAnswers = { ...answers, [currentId]: value };
-    for (let index = questionIndex + 1; index < QUESTION_LIST.length; index += 1) {
-      nextAnswers[QUESTION_LIST[index].id] = "";
+    for (let index = questionIndex + 1; index < activeQuestions.length; index += 1) {
+      nextAnswers[activeQuestions[index].id] = "";
     }
     setAnswers(nextAnswers);
 
-    if (questionIndex === QUESTION_LIST.length - 1) {
+    if (questionIndex === activeQuestions.length - 1) {
       setLastChecklistAnswers(nextAnswers);
       setChecklistGenerationError(null);
       try {
@@ -2865,6 +3164,30 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     }
   };
 
+  const applyFeePlanSelection = async (planCode: string) => {
+    const refNum = String(referenceNumber || applicationRecord?.reference_number || "").trim();
+    if (!refNum || !planCode || planCode === selectedFeePlanCode) return;
+
+    try {
+      setFeePlanUpdating(true);
+      const updated = await selectFullPaymentPlan(refNum, planCode);
+      setSelectedFeePlanCode(updated.fee_plan_code || planCode);
+      setPaymentSummary((current) => ({
+        service_label: current?.service_label || selectedServiceRecord?.name || "Selected service",
+        service_fee: Number((updated.service_total_pence || 0) / 100),
+        audit_credit: Number((updated.audit_credit_pence || 0) / 100),
+        addons: current?.addons || [],
+        total_due: Number((updated.amount_due_pence || 0) / 100),
+        currency: current?.currency || "GBP",
+      }));
+      await syncApplicationFromBackend(refNum, { skipStageSync: true }).catch(() => null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update payment plan.");
+    } finally {
+      setFeePlanUpdating(false);
+    }
+  };
+
   const confirmFullPayment = async () => {
     if (!paymentSummary || paymentSummaryLoading || paymentSummaryError) {
       toast.error("Unable to load payment details. Please refresh or contact support.");
@@ -2885,7 +3208,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
     try {
       setApiLoading(true);
-      const raw = await createFullPaymentOrder(refNum);
+      const raw = await createFullPaymentOrder(refNum, selectedFeePlanCode || undefined);
       const order = normalizePayload<{
         order?: { id: string; amount: number; currency: string; url?: string };
         checkout_url?: string;
@@ -2916,7 +3239,10 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
     setStage("service");
     setSelectedService(null);
+    setShowServicePicker(true);
+    setExtraApplicants([]);
     setQuestionIndex(0);
+    setActiveQuestions(QUESTION_LIST);
     setAnswers(emptyAnswers);
     setDocuments(emptyDocStatus());
     setSupportUploads({});
@@ -2940,9 +3266,147 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     return <div className="rounded-3xl border border-border bg-white p-6 text-textMuted shadow-sm">Loading audit journey...</div>;
   }
 
+  // Always show full journey catalog (all categories). Live API may only return OCI —
+  // merge missing passport / apostille / OCI variants from fallback so Start Order never
+  // collapses to the service the user clicked on the dashboard.
+  const BASELINE_ORDER_SERVICES: Array<{
+    id: string;
+    journeyId: string;
+    name: string;
+    description: string;
+    price: string;
+    feeNumber: number | null;
+    category: string;
+    categoryName: string;
+  }> = [
+    {
+      id: "new_oci",
+      journeyId: "new-oci",
+      name: "New OCI Card",
+      description: "First-time OCI application support",
+      price: "£88",
+      feeNumber: serviceFeeMap["new-oci"],
+      category: "oci",
+      categoryName: "OCI",
+    },
+    {
+      id: "oci_renewal",
+      journeyId: "oci-renewal",
+      name: "OCI Renewal / Transfer",
+      description: "Passport change and renewal checks",
+      price: "£78",
+      feeNumber: serviceFeeMap["oci-renewal"],
+      category: "oci",
+      categoryName: "OCI",
+    },
+    {
+      id: "oci_update",
+      journeyId: "oci-update",
+      name: "OCI Update (Gratis)",
+      description: "Mandatory update and portal handling",
+      price: "£50",
+      feeNumber: serviceFeeMap["oci-update"],
+      category: "oci",
+      categoryName: "OCI",
+    },
+    {
+      id: "passport_renewal",
+      journeyId: "passport-renewal",
+      name: "Indian Passport Renewal",
+      description: "Renewal support for UK or US residents",
+      price: "Price on request",
+      feeNumber: null,
+      category: "passport",
+      categoryName: "Passport",
+    },
+    {
+      id: "apostille",
+      journeyId: "apostille",
+      name: "Apostille Services",
+      description: "Document apostille / legalization support",
+      price: "Price on request",
+      feeNumber: null,
+      category: "apostille",
+      categoryName: "Apostille",
+    },
+  ];
+
+  const journeyCatalogServices = catalogServices.filter(
+    (row) =>
+      row.serviceType !== "document_audit" &&
+      !String(row.serviceType).startsWith("evisa") &&
+      !String(row.serviceType).toLowerCase().includes("express") &&
+      String(row.category || "").toLowerCase() !== "express" &&
+      !String(row.name || "").toLowerCase().includes("express service"),
+  );
+
+  const dynamicOrderServices = journeyCatalogServices
+    .map((row) => {
+      const journeyId = mapCatalogServiceType(row.serviceType);
+      const optionId = String(row.serviceType || row.id || "").trim();
+      if (!optionId) return null;
+      return {
+        id: optionId,
+        journeyId: journeyId || optionId.replace(/_/g, "-"),
+        name: row.name,
+        description: row.description || row.categoryName || "",
+        price: priceDisplay(row),
+        feeNumber: row.isQuoteBased ? null : row.totalFee,
+        category: row.category || "other",
+        categoryName:
+          row.categoryName ||
+          ({ oci: "OCI", passport: "Passport", apostille: "Apostille", other: "Other" } as Record<string, string>)[
+            String(row.category || "other").toLowerCase()
+          ] ||
+          "Other",
+      };
+    })
+    .filter(
+      (
+        row,
+      ): row is {
+        id: string;
+        journeyId: string;
+        name: string;
+        description: string;
+        price: string;
+        feeNumber: number | null;
+        category: string;
+        categoryName: string;
+      } => Boolean(row),
+    );
+
+  const byId = new Map<string, (typeof BASELINE_ORDER_SERVICES)[number]>();
+  for (const row of BASELINE_ORDER_SERVICES) byId.set(row.id, row);
+  for (const row of dynamicOrderServices) {
+    // Live pricing wins when present; keep baseline for any missing category/service
+    byId.set(row.id, {
+      ...row,
+      categoryName:
+        row.categoryName && row.categoryName !== "Other"
+          ? row.categoryName
+          : byId.get(row.id)?.categoryName || row.categoryName,
+    });
+  }
+
+  // Stable category order: OCI → Passport → Apostille → anything else
+  const categoryRank = (key: string) => {
+    const k = key.toLowerCase();
+    if (k.includes("oci")) return 0;
+    if (k.includes("passport")) return 1;
+    if (k.includes("apostille")) return 2;
+    return 9;
+  };
+
+  const orderServices = Array.from(byId.values()).sort((a, b) => {
+    const cr = categoryRank(a.category) - categoryRank(b.category);
+    if (cr !== 0) return cr;
+    return a.name.localeCompare(b.name);
+  });
+
   return (
     <div className="space-y-6">
-      {bannerMessage && stage === "service" ? (
+      {stage === "service" ? null : bannerMessage ? (
         <p className="text-sm text-slate-600">{bannerMessage}</p>
       ) : null}
 
@@ -2972,127 +3436,129 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
 
 {stage === "service" && (
-  <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-      <h3 className="text-2xl font-heading font-bold text-primary">Which service do you need?</h3>
-      <button
-        type="button"
-        onClick={resetJourneyForNewApplication}
-        className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-      >
-        <RefreshCcw className="mr-1.5 h-3.5 w-3.5" /> Start new application
-      </button>
-    </div>
-    <p className="mt-2 text-textMuted">
-      Select one to generate your personalised document checklist.
-    </p>
-    <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {SERVICES.map((service) => {
-        const selected = selectedService === service.id;
-        return (
-          <button
-            key={service.id}
-            type="button"
-            onClick={() => {
-              void handleServiceSelection(service.id);
-            }}
-            className={`relative rounded-2xl border p-4 text-left transition-all ${
-              selected
-                ? "border-2 border-primary bg-bg-blue"
-                : "border-border bg-white hover:border-primary/40"
-            }`}
-          >
-            {selected && (
-              <CheckCircle2 className="absolute right-3 top-3 h-5 w-5 text-primary" />
-            )}
-            <p className="text-sm font-semibold text-primary">{service.name}</p>
-            <p className="mt-1 text-xs text-textMuted">{service.description}</p>
-            <p className="mt-3 text-xs font-semibold text-slate-500">{service.price}</p>
-          </button>
-        );
-      })}
-      <button
-        type="button"
-        onClick={() => {
-          void handleServiceSelection("undecided");
-        }}
-        className={`rounded-2xl border p-4 text-left transition-all ${
-          selectedService === "undecided"
-            ? "border-2 border-primary bg-bg-blue"
-            : "border-border bg-white hover:border-primary/40"
-        }`}
-      >
-        <HelpCircle className="h-5 w-5 text-primary" />
-        <p className="mt-2 text-sm font-semibold text-primary">Not Sure — Help Me Decide</p>
-        <p className="mt-1 text-xs text-textMuted">We still run the questionnaire and recommend a route.</p>
-      </button>
-    </div>
-  
-   <div className="mt-6">
-  <Button isLoading={apiLoading} disabled>
-    Select a service to continue
-  </Button>
-    {applicationStartError ? (
-      <p className="mt-3 text-sm text-rose-700">{applicationStartError}</p>
-    ) : null}
-</div>
-    
-  </div>
+  <StartOrderPanel
+    services={[
+      ...orderServices,
+      ...(selectedService === "undecided"
+        ? [
+            {
+              id: "undecided",
+              name: "Not sure — help me decide",
+              description: "Short questionnaire to recommend a route",
+              price: "—",
+              feeNumber: null,
+            },
+          ]
+        : []),
+    ]}
+    selectedServiceId={selectedService}
+    showAllServicesInitially={showServicePicker && !selectedService}
+    primaryApplicant={primaryApplicant}
+    extraApplicants={extraApplicants}
+    apiLoading={apiLoading || pricingLoading}
+    error={applicationStartError}
+    onPrimaryChange={(patch) => setPrimaryApplicant((current) => ({ ...current, ...patch }))}
+    onAddApplicant={() => {
+      setExtraApplicants((prev) => [
+        ...prev,
+        {
+          id: `applicant-${Date.now()}-${prev.length + 2}`,
+          fullName: "",
+          email: "",
+          mobile: "",
+          applyingFrom: primaryApplicant.applyingFrom || "United Kingdom",
+        },
+      ]);
+    }}
+    onUpdateApplicant={(id, patch) => {
+      setExtraApplicants((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+    }}
+    onRemoveApplicant={(id) => {
+      setExtraApplicants((prev) => prev.filter((row) => row.id !== id));
+    }}
+    onSelectService={(serviceId) => {
+      const fromCatalog = orderServices.find((row) => row.id === serviceId);
+      const mapped =
+        mapCatalogServiceType(serviceId) ||
+        mapCatalogServiceType(fromCatalog?.journeyId) ||
+        (fromCatalog?.journeyId as ServiceId | undefined) ||
+        mapBackendServiceType(serviceId);
+      const normalized = (mapped || serviceId) as ServiceId;
+      setSelectedService(normalized);
+      setShowServicePicker(false);
+      void loadQuestionsForService(normalized);
+    }}
+    onContinue={(cart) => {
+      if (!primaryApplicant.fullName.trim() || !primaryApplicant.email.trim()) {
+        toast.error("Please enter applicant name and email.");
+        return;
+      }
+      const incompleteExtra = extraApplicants.find(
+        (row) => !row.fullName.trim() || !row.email.trim(),
+      );
+      if (incompleteExtra) {
+        toast.error("Please complete name and email for each added applicant — or remove them.");
+        return;
+      }
+      const emptyServices = cart.find((entry) => !entry.serviceIds.length);
+      if (emptyServices) {
+        toast.error("Each applicant needs at least one service selected.");
+        return;
+      }
+      // One application per applicant × service — existing questionnaire/docs pipeline unchanged per app
+      void handleOrderCartContinue(cart);
+    }}
+  />
 )}
-      {stage === "questions" && currentQuestion && (
-        <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
+      {stage === "questions" && activeQuestions.length > 0 && (
+        <div className="px-4 pb-8 sm:px-6 lg:px-10 xl:px-14">
+          <div className="mx-auto w-full max-w-[820px] rounded-xl border border-[#E1E7EF] bg-white p-4 shadow-sm sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-primary">{serviceLabelMap[selectedService ?? "undecided"]}</span>
-              <button
-                type="button"
-                onClick={() => setStage("service")}
-                className="text-xs text-slate-500 underline hover:text-primary"
-              >
-                Change service
-              </button>
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#1A56DB]">Selected service</p>
+              <p className="mt-0.5 text-[15px] font-semibold text-[#0F1F3D]">{serviceLabelMap[selectedService ?? "undecided"]}</p>
             </div>
-            <span className="text-xs font-medium text-slate-500">
-              Question {questionIndex + 1} of {QUESTION_LIST.length}
-            </span>
+            <button
+              type="button"
+              onClick={() => setStage("service")}
+              className="rounded-lg border border-[#D0D7E2] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#486581] hover:bg-[#F7F9FC]"
+            >
+              Change service
+            </button>
           </div>
-
-          <div className="rounded-2xl border border-border bg-bg-page p-5 sm:p-6">
-            <h4 className="text-lg sm:text-xl font-heading font-semibold text-primary mb-5">{currentQuestion.label}</h4>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {currentQuestion.options.map((option) => {
-                const active = answers[currentQuestion.id] === option;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => answerQuestion(option)}
-                    disabled={apiLoading}
-                    className={`rounded-xl border px-4 py-3 text-left font-medium transition-all ${apiLoading ? "opacity-50 cursor-not-allowed" : ""} ${active ? "border-primary bg-bg-blue text-primary" : "border-border bg-white text-slate-700 hover:border-primary/40"}`}
-                  >
-                    {option}
-                  </button>
-                );
-              })}
-            </div>
+          <InlineSmartQuestions
+            questions={activeQuestions.map((q) => ({
+              id: q.id,
+              label: q.label,
+              options: q.options || [],
+              question_type: q.question_type,
+              help_text: q.help_text,
+              is_required: true,
+            }))}
+            answers={answers}
+            disabled={apiLoading}
+            onChange={(code, value) => {
+              setAnswers((prev) => ({ ...prev, [code]: value }));
+            }}
+          />
+          <div className="mt-4 flex justify-end border-t border-[#E8EEF6] pt-4">
+            <Button
+              isLoading={apiLoading}
+              className="w-full sm:w-auto"
+              onClick={() => {
+                const missing = activeQuestions.find((q) => !(answers[q.id] || "").trim());
+                if (missing) {
+                  toast.error("Please answer all quick questions.");
+                  return;
+                }
+                void completeQuestionnaire(answers);
+              }}
+            >
+              Continue to checklist
+              <ArrowRight className="ml-1.5 h-4 w-4" />
+            </Button>
           </div>
-
-          <div className="mt-5 flex items-center gap-3">
-            <Button variant="outline" onClick={goBackQuestion} disabled={apiLoading}>Back</Button>
-            {apiLoading && (
-              <span className="text-sm text-slate-500 animate-pulse">
-                Building your checklist...
-              </span>
-            )}
           </div>
-          {checklistGenerationError ? (
-            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
-              <p className="text-sm text-rose-800">{checklistGenerationError}</p>
-              <div className="mt-3">
-                <Button onClick={() => void retryChecklistGeneration()} disabled={apiLoading}>Retry Checklist Generation</Button>
-              </div>
-            </div>
-          ) : null}
         </div>
       )}
 
@@ -3321,11 +3787,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
       {stage === "summary" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">{selectedService === "passport-renewal" ? "Upload Summary and Request Submission" : "Upload Summary and Audit Fee Payment"}</h3>
+          <h3 className="text-2xl font-heading font-bold text-primary">{selectedService === "passport-renewal" ? "Upload Summary and Request Submission" : assessmentOffered ? "Upload Summary and Assessment Fee Payment" : "Upload Summary"}</h3>
           <p className="mt-2 text-textMuted">
             {selectedService === "passport-renewal"
               ? "Submit your passport renewal request now. Our team will review your documents and share a Price on request quote in your dashboard within 24-48 working hours."
-              : `We will review your documents and confirm if they are acceptable for submission. The audit fee is fully adjusted against your final service fee when you proceed within ${AUDIT_CREDIT_VALIDITY_DAYS} days.`}
+              : assessmentOffered
+                ? `We will review your documents and confirm if they are acceptable for submission. The assessment fee is fully adjusted against your final service fee when you proceed within ${AUDIT_CREDIT_VALIDITY_DAYS} days.`
+                : "We will review your documents and confirm if they are acceptable for submission."}
           </p>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -3379,6 +3847,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               </div>
             ) : (
               <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
+                {assessmentOffered ? (
                 <div className="flex gap-2 border-b border-[#dce7f8] pb-3">
                   <button
                     type="button"
@@ -3390,7 +3859,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     }`}
                     aria-expanded={auditPaymentTab === "take-audit"}
                   >
-                    Take Audit
+                    Take Assessment
                   </button>
                   <button
                     type="button"
@@ -3402,19 +3871,20 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                     }`}
                     aria-expanded={auditPaymentTab === "skip-audit"}
                   >
-                    Skip Audit
+                    Skip Assessment
                   </button>
                 </div>
+                ) : null}
 
-                {auditPaymentTab === "take-audit" ? (
+                {assessmentOffered && auditPaymentTab === "take-audit" ? (
                   <div className="mt-4 space-y-4 text-slate-700">
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
-                      <h4 className="font-semibold">Audit fee breakdown</h4>
+                      <h4 className="font-semibold">Assessment fee breakdown</h4>
                       <p className="mt-2 text-sm">
-                        One-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within {AUDIT_CREDIT_VALIDITY_DAYS} days, this amount is deducted from your final fee (e.g., New OCI £88 - £{auditFee} = £{Math.max(serviceFeeForMath - auditFee, 0)} to pay later). Audit credit does not apply to e-Visa or Passport Renewal.
+                        One-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within {AUDIT_CREDIT_VALIDITY_DAYS} days, this amount is deducted from your final fee (e.g., New OCI £88 - £{auditFee} = £{Math.max(serviceFeeForMath - auditFee, 0)} to pay later). Assessment credit does not apply to e-Visa or Passport Renewal.
                       </p>
                       <div className="mt-4 space-y-2 text-sm">
-                        <p className="flex justify-between"><span>Audit fee</span><strong>£{auditFee}</strong></p>
+                        <p className="flex justify-between"><span>Assessment fee</span><strong>£{auditFee}</strong></p>
                         <p className="flex justify-between"><span>Credit if you proceed</span><strong>-£{auditFee}</strong></p>
                         <p className="flex justify-between"><span>Credit validity</span><strong>{AUDIT_CREDIT_VALIDITY_DAYS} days from payment</strong></p>
                         <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>{serviceFee === null ? "Price on request" : `£${serviceFee}`}</strong></p>
@@ -3432,15 +3902,15 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                       onClick={() => void submitAuditPayment()}
                       disabled={!paymentConsentsAccepted}
                     >
-                      Pay £{auditFee} & Submit for Audit
+                      Pay £{auditFee} & Submit for Assessment
                     </Button>
                   </div>
-                ) : auditPaymentTab === "skip-audit" ? (
+                ) : assessmentOffered && auditPaymentTab === "skip-audit" ? (
                   <div className="mt-4 space-y-4 text-slate-700">
                     <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-                      <p className="font-semibold">Skip audit? You can, but it is not recommended.</p>
+                      <p className="font-semibold">Skip assessment? You can, but it is not recommended.</p>
                       <p className="mt-2">
-                        More than 50% of applications have document issues we catch at audit stage. The £{auditFee} audit fee is fully deducted from your OCI service fee (New OCI, OCI Renewal, or OCI Update) if you proceed with us within {AUDIT_CREDIT_VALIDITY_DAYS} days. Audit credit does not apply to e-Visa or Passport Renewal.
+                        More than 50% of applications have document issues we catch early. The £{auditFee} assessment fee is fully deducted from your OCI service fee (New OCI, OCI Renewal, or OCI Update) if you proceed with us within {AUDIT_CREDIT_VALIDITY_DAYS} days. Assessment credit does not apply to e-Visa or Passport Renewal.
                       </p>
                     </div>
 
@@ -3451,7 +3921,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                         checked={skipAuditDisclaimerAccepted}
                         onChange={(event) => setSkipAuditDisclaimerAccepted(event.target.checked)}
                       />
-                      <span>I understand that skipping audit can cause delays and extra correction rounds after payment.</span>
+                      <span>I understand that skipping assessment can cause delays and extra correction rounds after payment.</span>
                     </label>
 
                     <ConsentCheckboxes
@@ -3469,10 +3939,26 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                       Skip & Pay Full Fee
                     </Button>
                   </div>
+                ) : !assessmentOffered ? (
+                  <div className="mt-1 space-y-4 text-slate-700">
+                    <p className="text-sm text-slate-600">
+                      Continue with your application. You can pay the full service fee after document review.
+                    </p>
+                    <ConsentCheckboxes
+                      mode="payment"
+                      onAcceptanceChange={setPaymentConsentsAccepted}
+                    />
+                    <Button
+                      isLoading={apiLoading}
+                      disabled={apiLoading || !paymentConsentsAccepted}
+                      onClick={() => void skipAuditAndProceedToPayment()}
+                    >
+                      Continue to payment
+                    </Button>
+                  </div>
                 ) : null}
               </div>
-            )}
-          </div>
+            )}          </div>
 
           <div className="mt-6">
             <Button variant="outline" onClick={() => {
@@ -3863,6 +4349,32 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
           <h3 className="text-2xl font-heading font-bold text-primary">Full Service Payment</h3>
           <p className="mt-2 text-textMuted">Once documents are audit approved, pay the remaining service amount.</p>
 
+          {(() => {
+            const appServiceType = String(applicationRecord?.service_type || selectedService || "")
+              .trim()
+              .toLowerCase()
+              .replace(/[\s-]+/g, "_");
+            const catalogMatch =
+              catalogServices.find((row) => String(row.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === appServiceType) ||
+              null;
+            const checkoutPlans = (catalogMatch?.plans || [])
+              .filter((plan) => plan.fee > 0)
+              .slice()
+              .sort((a, b) => {
+                // Standard first; Express last at checkout.
+                if (a.planCode === "express") return 1;
+                if (b.planCode === "express") return -1;
+                if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+                return String(a.label || "").localeCompare(String(b.label || ""));
+              });
+            const hasExpress = checkoutPlans.some((plan) => plan.planCode === "express");
+            const activePlanCode =
+              selectedFeePlanCode ||
+              checkoutPlans.find((plan) => plan.isDefault)?.planCode ||
+              checkoutPlans[0]?.planCode ||
+              "standard";
+
+            return (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 bg-[#fcfdff] p-5">
               <h4 className="font-semibold text-primary">Payment summary</h4>
@@ -3901,12 +4413,52 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               <div className="mt-5">
                 <ConsentCheckboxes mode="payment" onAcceptanceChange={setPaymentConsentsAccepted} />
               </div>
+
+              {hasExpress || checkoutPlans.length > 1 ? (
+                <div className="mt-5 border-t border-slate-200 pt-4">
+                  <p className="text-sm font-semibold text-primary">Processing speed</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Optional — choose Express only if you want faster handling. Charged only when selected.
+                  </p>
+                  <div className="mt-3 grid gap-2">
+                    {checkoutPlans.map((plan) => {
+                      const selected = activePlanCode === plan.planCode;
+                      const isExpress = plan.planCode === "express";
+                      return (
+                        <button
+                          key={plan.planCode}
+                          type="button"
+                          disabled={apiLoading || feePlanUpdating || paymentSummaryLoading}
+                          onClick={() => void applyFeePlanSelection(plan.planCode)}
+                          className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-3 text-left transition ${
+                            selected
+                              ? "border-[#1A56DB] bg-[#EFF6FF] shadow-[0_0_0_1px_#1A56DB]"
+                              : "border-[#E1E7EF] bg-white hover:border-[#B8C9DE]"
+                          } disabled:opacity-60`}
+                        >
+                          <span className="min-w-0">
+                            <span className="block text-[13px] font-semibold text-[#0F1F3D]">
+                              {plan.label || (isExpress ? "Express Service" : "Standard")}
+                            </span>
+                            <span className="mt-0.5 block text-[11px] text-[#829AB1]">
+                              {isExpress ? "Faster handling — premium fee plan" : "Standard processing fee"}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-[14px] font-bold text-[#1A56DB]">£{plan.fee.toFixed(2)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
+            );
+          })()}
 
           <div className="mt-6 flex flex-wrap gap-3">
             <Button variant="outline" onClick={() => setStage("audit-result")}>Back to audit result</Button>
-            <Button isLoading={apiLoading} onClick={() => void confirmFullPayment()} disabled={paymentSummaryLoading || !!paymentSummaryError || !paymentSummary || !paymentConsentsAccepted}>Pay & Confirm My Application</Button>
+            <Button isLoading={apiLoading || feePlanUpdating} onClick={() => void confirmFullPayment()} disabled={paymentSummaryLoading || !!paymentSummaryError || !paymentSummary || !paymentConsentsAccepted || feePlanUpdating}>Pay & Confirm My Application</Button>
           </div>
         </div>
       )}

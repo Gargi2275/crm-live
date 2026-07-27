@@ -214,10 +214,18 @@ import { getAlertTypeLabel } from "@/lib/alert-formatters";
 import toast from "react-hot-toast";
 import { motion } from "framer-motion";
 import { AlertTriangle, CircleCheck, TimerReset } from "lucide-react";
+import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 export default function AlertsPage() {
   const [alertsData, setAlertsData] = useState<AdminAlertsResponse | null>(null);
   const [updatingAlertId, setUpdatingAlertId] = useState<number | null>(null);
+
+  useSetAdminPageChrome({
+    title: "Alerts",
+    subtitle: "NDR / SLA",
+    icon: AlertTriangle,
+    syncKey: `${alertsData?.summary?.open ?? 0}|${updatingAlertId ?? ""}`,
+  });
 
   useEffect(() => {
     const loadAlerts = async () => {
@@ -265,13 +273,6 @@ export default function AlertsPage() {
       transition={{ duration: 0.35, ease: "easeOut" }}
       className="space-y-5 font-body max-w-[1300px] mx-auto"
     >
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[26px] leading-tight font-heading font-semibold text-[#102A43]">NDR / SLA Alerts</h1>
-          <p className="text-sm text-[#627D98] mt-1">Track critical cases quickly with clear actions and status cues.</p>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
           <p className="text-xs text-[#627D98]">Open alerts</p>

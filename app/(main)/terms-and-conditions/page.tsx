@@ -425,7 +425,7 @@ export default function TermsPage() {
           <SectionCard id="complaints" title="34. Complaints">
             <p>If you are unhappy with our service, contact us first so we can investigate.</p>
             <p>Email: [insert complaints email]</p>
-            <p>Phone: [insert phone number]</p>
+            <p>Phone: +44 20 7808 6162</p>
             <p>Address: [insert address]</p>
             <p>Please include full name, applicant name, file number, service purchased, date of purchase, details of complaint and what outcome you are seeking.</p>
             <p>We aim to acknowledge complaints within 3 working days and respond within 14 working days, although complex complaints may take longer.</p>

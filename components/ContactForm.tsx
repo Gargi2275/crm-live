@@ -56,7 +56,7 @@ export function ContactForm() {
   // Using standard form submission
 
   const Label = ({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) => (
-    <label htmlFor={htmlFor} className="block text-sm font-medium text-primary mb-2">
+    <label htmlFor={htmlFor} className="block text-base font-medium text-primary mb-2">
       {children}
     </label>
   );
@@ -69,7 +69,7 @@ export function ContactForm() {
           animate={{ opacity: 1, height: "auto", x: [0, -8, 8, -8, 0] }}
           exit={{ opacity: 0, height: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex items-center gap-1.5 text-red-600 text-sm mt-1.5"
+          className="flex items-center gap-1.5 text-red-600 text-base mt-1.5"
         >
           <AlertCircle className="w-4 h-4" />
           <span>{message}</span>
@@ -190,7 +190,7 @@ export function ContactForm() {
             )}
           </motion.button>
 
-          <p className="text-xs text-center text-gray-500 mt-4">
+          <p className="text-sm text-center text-gray-500 mt-4">
             * Please do not share card details or bank information via this form. We only use secure payment links for any fees.
           </p>
         </form>

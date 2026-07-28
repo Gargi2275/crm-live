@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, ChevronDown, Eye, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { PageLoader } from "@/components/ui/PageLoader";
 import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 import { InlineSmartQuestions } from "@/components/checkout/InlineSmartQuestions";
 import { StartOrderPanel, type StartOrderApplicant, type StartOrderCartEntry } from "@/components/dashboard/StartOrderPanel";
@@ -13,24 +14,27 @@ import {
   authenticatedFetch,
   createApplication,
   createAuditPaymentOrder,
+  createCartFullPaymentOrder,
   createFullPaymentOrder,
   selectFullPaymentPlan,
-  createPassportRenewalQuoteOrder,
+  createDocumentDeletionRequest,
+  executeDocumentDeletionRequest,
   getApplicationByReference,
   getApplicationDocuments,
   getAuditStatus,
-  getPassportRenewalQuoteDetail,
+  getDocumentDeletionRequests,
   getPublicTestimonials,
   openApplicationDocument,
   resubmitApplicationForReview,
   skipAuditWithDisclaimer,
   startAudit,
-  submitPassportRenewalRequest,
   submitTestimonial,
   uploadDocument,
   verifyAuditPayment,
+  verifyCartFullPayment,
   verifyPassportRenewalQuotePayment,
   verifyFullPayment,
+  type DocumentDeletionRequestsPayload,
 } from "@/lib/api";
 import { mergeHydratedDocuments, buildChecklistUploadIdMap, documentsFromAuditChecklistItems, inferBackendDocumentTypeFromChecklistId, looksLikeUploadedFileName, resolveChecklistDisplayTitle, type StoredDocumentState } from "@/lib/document-upload-ui";
 import {
@@ -38,19 +42,33 @@ import {
   mapRequirementToChecklistItem,
   toBackendServiceType,
 } from "@/lib/document-requirements";
-import { priceDisplay } from "@/lib/public-pricing";
+import { formatGbp, getAssessmentFeeGbp, priceDisplay } from "@/lib/public-pricing";
 import { usePublicPricing } from "@/hooks/usePublicPricing";
 import {
+  clearDependentAnswers,
   fetchServiceQuestions,
+  isQuestionVisible,
   mapQuestionToJourneyItem,
   requirementMatchesAnswers,
   resolveServiceChecklist,
   type JourneyQuestion,
 } from "@/lib/questionnaire";
+import { countryStateAnswerKey, fetchStatesForCountry } from "@/lib/country-states";
 import { clearStripeReturnParams, getStripeCheckoutUrl, readStripeReturnParams, redirectToStripeCheckout } from "@/lib/stripe-checkout";
 import { useRouter } from "next/navigation";
 type ServiceId = "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" | "apostille" | "undecided";
-type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "passport-quote-pending" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
+type FlowStage = "service" | "questions" | "checklist" | "upload" | "summary" | "audit-pending" | "audit-result" | "full-payment" | "processing" | "completed";
+
+type OrderCartApp = {
+  applicantName: string;
+  applicantEmail: string;
+  applicantMobile?: string;
+  applyingFrom?: string;
+  service: ServiceId;
+  applicationId: number;
+  referenceNumber: string;
+  docsComplete: boolean;
+};
 type QuestionId = string;
 type DocumentStatus = "not_uploaded" | "uploaded" | "pending_reupload";
 type AuditOutcome = "green" | "amber" | "red";
@@ -156,6 +174,7 @@ type ApplicationRecord = {
   audit_credit_pence?: number;
   amount_due_pence?: number;
   service_total_pence?: number;
+  fee_plan_code?: string;
   full_payment_status?: string;
   payment_confirmed?: boolean;
   current_stage?: string;
@@ -267,7 +286,14 @@ const SERVICES: Array<{
   { id: "new-oci", name: "New OCI Card", description: "First-time OCI application support", price: "£88", backendId: 4 },
   { id: "oci-renewal", name: "OCI Renewal / Transfer", description: "Passport change and renewal checks", price: "£78", backendId: 5 },
   { id: "oci-update", name: "OCI Update (Gratis)", description: "Mandatory update and portal handling", price: "£50", backendId: 6 },
-  { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal support for UK or US residents", price: "Price on request", backendId: 7 },
+  {
+    id: "passport-renewal",
+    name: "Indian Passport Renewal",
+    description: "Renewal support for UK or US residents",
+    // Overridden at runtime from usePublicPricing when catalog fee is available.
+    price: "See fee at checkout",
+    backendId: 7,
+  },
 ];
 
 const ADD_ONS = [
@@ -277,7 +303,7 @@ const ADD_ONS = [
 ];
 
 const PROCESS_ITEMS = [
-  { title: "Documents Audited", description: "Your audit is complete and the case is moving forward." },
+  { title: "Documents Checked", description: "Your document check is complete and the case is moving forward." },
   { title: "Form Filling in Progress", description: "FlyOCI is preparing the submission pack." },
   { title: "Submitted to Embassy / VFS", description: "Your application has been sent to the relevant authority." },
   { title: "Under Process", description: "Awaiting official review and further updates." },
@@ -317,11 +343,11 @@ const defaultDocuments = (service: ServiceId | null, answers: Answers): Document
       break;
     case "passport-renewal":
       base.push(
-        { id: "current-passport-all-pages", title: "Current Indian passport (all pages scan)", description: "Why needed: verifies existing identity and stamping history. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Missing pages or blurred scans.", sample: "Upload one clear merged PDF or ordered image set.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        { id: "old-expired-passport", title: "Old or expired passport (if any)", description: "Why needed: previous passport linkage for renewal continuity. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Skipping this when an old passport exists.", sample: "Include old booklet bio/signature pages.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        { id: "address-proof", title: "Proof of address (UK/US utility bill or bank statement)", description: "Why needed: confirms current residence for jurisdiction checks. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Outdated document or cropped address.", sample: "Use a recent statement with full name and address.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        { id: "recent-photo-35x45", title: "Recent passport photograph (white background, 35mm x 45mm)", description: "Why needed: submission photo compliance. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Wrong dimensions or dark background.", sample: "Front-facing image with proper lighting.", sampleUrl: "/document-audit#sample-passport-renewal" },
-        { id: "completed-renewal-form", title: "Completed application form", description: "Why needed: official data capture for renewal request. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unsigned fields and incomplete sections.", sample: "Ensure all mandatory sections are completed.", sampleUrl: "/document-audit#sample-passport-renewal" },
+        { id: "current-passport-all-pages", title: "Current Indian passport (all pages scan)", description: "Why needed: verifies existing identity and stamping history. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Missing pages or blurred scans.", sample: "Upload one clear merged PDF or ordered image set." },
+        { id: "old-expired-passport", title: "Old or expired passport (if any)", description: "Why needed: previous passport linkage for renewal continuity. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: false, mistakes: "Skipping this when an old passport exists.", sample: "Include old booklet bio/signature pages." },
+        { id: "address-proof", title: "Proof of address (UK/US utility bill or bank statement)", description: "Why needed: confirms current residence for jurisdiction checks. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Outdated document or cropped address.", sample: "Use a recent statement with full name and address." },
+        { id: "recent-photo-35x45", title: "Recent passport photograph (white background, 35mm x 45mm)", description: "Why needed: submission photo compliance. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Wrong dimensions or dark background.", sample: "Front-facing image with proper lighting." },
+        { id: "completed-renewal-form", title: "Completed application form", description: "Why needed: official data capture for renewal request. Accepted formats: PDF/JPG/PNG. Max size: 5MB.", required: true, mistakes: "Unsigned fields and incomplete sections.", sample: "Ensure all mandatory sections are completed." },
       );
       break;
     case "apostille":
@@ -453,17 +479,11 @@ const resolveDocuments = async (service: ServiceId | null, answers: Answers): Pr
   return appendAnswerDrivenDocuments(service, answers, base);
 };
 
-const defaultSupportDocs = [
-  { id: "flight", title: "Travel itinerary", description: "Helpful for date-sensitive OCI or passport submissions", status: "optional" },
-  { id: "extra-address", title: "Extra address proof", description: "Useful if the main address document is weak", status: "optional" },
-  { id: "old-copies", title: "Older copies / previous references", description: "Useful for complex OCI renewals", status: "optional" },
-];
-
 const serviceFeeMap: Record<ServiceId, number | null> = {
   "new-oci": 88,
   "oci-renewal": 78,
   "oci-update": 50,
-  "passport-renewal": null,
+  "passport-renewal": 85,
   apostille: 65,
   undecided: 88,
 };
@@ -483,7 +503,14 @@ const mapCatalogServiceType = (value?: string | null): ServiceId | null => {
   if (normalized.startsWith("evisa") || normalized === "document_audit") return null;
   if (normalized.includes("passport") && normalized.includes("renewal")) return "passport-renewal";
   if (normalized === "apostille" || normalized.includes("apostille")) return "apostille";
-  if (normalized === "new_oci" || normalized.includes("new_oci") || normalized.includes("first_time_oci")) return "new-oci";
+  if (
+    normalized === "new_oci" ||
+    normalized.includes("new_oci") ||
+    normalized.includes("first_time_oci") ||
+    normalized.includes("spouse")
+  ) {
+    return "new-oci";
+  }
   if (normalized === "oci_renewal" || normalized.includes("oci_renewal") || normalized.includes("transfer")) return "oci-renewal";
   if (normalized === "oci_update" || normalized.includes("oci_update") || normalized.includes("gratis")) return "oci-update";
   return null;
@@ -520,7 +547,6 @@ type DocumentAuditJourneyProps = {
   serviceType?: string;
   resumeReference?: string;
   startFresh?: boolean;
-  focusQuote?: boolean;
   auditResult?: string;
   amountDuePence?: number;
   auditFeePence?: number;
@@ -536,12 +562,11 @@ const DRAFT_STAGE_RANK: Record<FlowStage, number> = {
   checklist: 2,
   upload: 3,
   summary: 4,
-  "passport-quote-pending": 5,
-  "audit-pending": 6,
-  "audit-result": 7,
-  "full-payment": 8,
-  processing: 9,
-  completed: 10,
+  "audit-pending": 5,
+  "audit-result": 6,
+  "full-payment": 7,
+  processing: 8,
+  completed: 9,
 };
 
 const listReferenceDraftCandidates = (): Array<{ suffix: string; raw: string; stage: FlowStage | null }> => {
@@ -666,18 +691,32 @@ function DocumentUploadControls({
   );
 }
 
-export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, startFresh = false, focusQuote = false, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker: _showPersistentTracker = false, onUnreadCountChange }: DocumentAuditJourneyProps) {
+export function DocumentAuditJourney({ userEmail, applicationId: applicationIdProp, serviceType: serviceTypeProp, resumeReference, startFresh = false, auditResult: auditResultProp, amountDuePence: amountDuePenceProp, auditFeePence: auditFeePenceProp, showPersistentTracker: _showPersistentTracker = false, onUnreadCountChange }: DocumentAuditJourneyProps) {
   const router = useRouter();
   const { assessmentFee, services: catalogServices, loading: pricingLoading } = usePublicPricing();
   const { user } = useAuth();
   void applicationIdProp;
   void onUnreadCountChange;
+
+  const journeyServices = useMemo(() => {
+    return SERVICES.map((svc) => {
+      if (svc.id !== "passport-renewal") return svc;
+      const row = catalogServices.find(
+        (item) => String(item.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === "passport_renewal",
+      );
+      if (row && typeof row.totalFee === "number" && row.totalFee > 0) {
+        return { ...svc, price: formatGbp(row.totalFee) };
+      }
+      return svc;
+    });
+  }, [catalogServices]);
+
   const stageRef = useRef<FlowStage>("service");
-  const quoteCardRef = useRef<HTMLDivElement | null>(null);
-  const quoteFocusHandledRef = useRef(false);
   const refreshRedirectHandledRef = useRef(false);
   const autoServiceStartAppliedRef = useRef(false);
+  const preferredFeePlanRef = useRef("");
   const [loaded, setLoaded] = useState(false);
+  const [resumeHydrated, setResumeHydrated] = useState(() => !resumeReference);
   const [stage, setStage] = useState<FlowStage>("service");
   const [selectedService, setSelectedService] = useState<ServiceId | null>(null);
   const [showServicePicker, setShowServicePicker] = useState(true);
@@ -689,6 +728,32 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     applyingFrom: "United Kingdom",
   }));
   const [extraApplicants, setExtraApplicants] = useState<StartOrderApplicant[]>([]);
+  const [orderCartApps, setOrderCartApps] = useState<OrderCartApp[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = sessionStorage.getItem("flyoci:order-cart-apps");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!Array.isArray(parsed?.apps)) return [];
+      return parsed.apps
+        .map((row: Partial<OrderCartApp>) => ({
+          applicantName: String(row.applicantName || ""),
+          applicantEmail: String(row.applicantEmail || ""),
+          applicantMobile: String(row.applicantMobile || ""),
+          applyingFrom: String(row.applyingFrom || ""),
+          service: row.service as ServiceId,
+          applicationId: Number(row.applicationId || 0),
+          referenceNumber: String(row.referenceNumber || ""),
+          docsComplete: Boolean(row.docsComplete),
+        }))
+        .filter((row: OrderCartApp) => row.referenceNumber && row.applicationId > 0 && row.service);
+    } catch {
+      return [];
+    }
+  });
+  const [orderCartIndex, setOrderCartIndex] = useState(0);
+  const [cartSkipAssessmentAccepted, setCartSkipAssessmentAccepted] = useState(false);
+  /** Per-application fee plan for multi-app checkout (e.g. standard / express). */
+  const [cartFeePlanByRef, setCartFeePlanByRef] = useState<Record<string, string>>({});
   const [questionIndex, setQuestionIndex] = useState(0);
   const [activeQuestions, setActiveQuestions] = useState<JourneyQuestion[]>(QUESTION_LIST);
   const [answers, setAnswers] = useState<Answers>(emptyAnswers);
@@ -702,11 +767,27 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [auditSubmitted, setAuditSubmitted] = useState(false);
   const [reviewRound, setReviewRound] = useState(0);
   const [processingStep, setProcessingStep] = useState(0);
-  const [bannerMessage, setBannerMessage] = useState("Start a new document audit and follow the full checklist flow.");
+  const [bannerMessage, setBannerMessage] = useState("Start a new application and follow the full checklist flow.");
   const [auditId, setAuditId] = useState<number | null>(null);
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [applicationRecord, setApplicationRecord] = useState<ApplicationRecord | null>(null);
   const [apiLoading, setApiLoading] = useState(false);
+  /** After Stripe return: verify + redirect to dashboard without flashing the confirmation screen. */
+  const [postPaymentRedirecting, setPostPaymentRedirecting] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const { sessionId, paymentKind } = readStripeReturnParams();
+    if (
+      sessionId &&
+      (paymentKind === "full" || paymentKind === "cart_full" || paymentKind === "passport-quote")
+    ) {
+      return true;
+    }
+    try {
+      return new URLSearchParams(window.location.search).get("payment") === "success";
+    } catch {
+      return false;
+    }
+  });
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const [checklistItemIdByDocId, setChecklistItemIdByDocId] = useState<Record<string, string | number>>({});
   const [referenceNumber, setReferenceNumber] = useState<string | null>(null);
@@ -723,13 +804,9 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [paymentSummaryError, setPaymentSummaryError] = useState<string | null>(null);
   const [selectedFeePlanCode, setSelectedFeePlanCode] = useState<string>("");
   const [feePlanUpdating, setFeePlanUpdating] = useState(false);
-  const [passportMaskedEmail, setPassportMaskedEmail] = useState<string>("");
-  const [passportCaseReference, setPassportCaseReference] = useState<string>("");
-  const [passportQuoteAcknowledged, setPassportQuoteAcknowledged] = useState(false);
   const [skipAuditDisclaimerAccepted, setSkipAuditDisclaimerAccepted] = useState(false);
-  const [auditPaymentTab, setAuditPaymentTab] = useState<"take-audit" | "skip-audit" | null>(null);
+  const [auditPaymentTab, setAuditPaymentTab] = useState<"take-audit" | "skip-audit">("take-audit");
   const [uploadedDocsSummaryOpen, setUploadedDocsSummaryOpen] = useState(false);
-  const [passportFlowSummaryOpen, setPassportFlowSummaryOpen] = useState(false);
   const [messageRequestedDocIds, setMessageRequestedDocIds] = useState<string[]>([]);
   const [applicationStartError, setApplicationStartError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -740,6 +817,11 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [docDeletion, setDocDeletion] = useState<DocumentDeletionRequestsPayload | null>(null);
+  const [docDeletionLoading, setDocDeletionLoading] = useState(false);
+  const [docDeletionBusy, setDocDeletionBusy] = useState(false);
+  const [docDeleteConfirmOpen, setDocDeleteConfirmOpen] = useState(false);
+  const [docDeletionReason, setDocDeletionReason] = useState("");
   const [caseSummaryOpen, setCaseSummaryOpen] = useState(false);
   const [paymentConsentsAccepted, setPaymentConsentsAccepted] = useState(false);
   const [uploadConsentsAccepted, setUploadConsentsAccepted] = useState(false);
@@ -747,6 +829,20 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   useEffect(() => {
     stageRef.current = stage;
   }, [stage]);
+
+  useEffect(() => {
+    preferredFeePlanRef.current = selectedFeePlanCode;
+  }, [selectedFeePlanCode]);
+
+  // Opening / refreshing an existing application — never flash the start-order picker.
+  useEffect(() => {
+    if (resumeReference) {
+      setResumeHydrated(false);
+      setLoaded(false);
+      return;
+    }
+    setResumeHydrated(true);
+  }, [resumeReference]);
 
   useEffect(() => {
     const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim();
@@ -781,67 +877,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   }, [serviceTypeProp, startFresh, resumeReference]);
 
   useEffect(() => {
-    if (stage !== "passport-quote-pending") {
-      return;
-    }
-
-    const refNum = String(applicationRecord?.reference_number || referenceNumber || "").trim();
-    if (!refNum) {
-      return;
-    }
-
-    let cancelled = false;
-    const syncQuoteDetail = async () => {
-      try {
-        const quote = await getPassportRenewalQuoteDetail(refNum);
-        if (cancelled) {
-          return;
-        }
-        setApplicationRecord((current) => {
-          if (!current) {
-            return current;
-          }
-          return {
-            ...current,
-            quote_status: quote.quote_status,
-            quote_amount_pence: quote.quote_amount_pence,
-            quoted_fee: quote.quoted_fee,
-            quote_notes: quote.quote_notes || "",
-            quote_set_at: quote.quote_set_at || null,
-            quote_expires_at: quote.quote_expires_at || null,
-          };
-        });
-        setPassportCaseReference(String(quote.case_reference || ""));
-        setPassportMaskedEmail(String(quote.masked_email || ""));
-      } catch {
-        // Keep existing record data if quote sync fails transiently.
-      }
-    };
-
-    void syncQuoteDetail();
-    return () => {
-      cancelled = true;
-    };
-  }, [applicationRecord?.reference_number, referenceNumber, stage]);
-
-  useEffect(() => {
-    if (!focusQuote || quoteFocusHandledRef.current || stage !== "passport-quote-pending") {
-      return;
-    }
-    const status = String(applicationRecord?.quote_status || "").toUpperCase();
-    if (status !== "QUOTED") {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      quoteCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      quoteFocusHandledRef.current = true;
-    }, 120);
-
-    return () => window.clearTimeout(timer);
-  }, [applicationRecord?.quote_status, focusQuote, stage]);
-
-  useEffect(() => {
     if (stage !== "completed") {
       return;
     }
@@ -871,7 +906,26 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       }
     };
 
+    const loadDocDeletion = async () => {
+      setDocDeletionLoading(true);
+      try {
+        const payload = await getDocumentDeletionRequests(resolvedReference);
+        if (!cancelled) {
+          setDocDeletion(payload);
+        }
+      } catch {
+        if (!cancelled) {
+          setDocDeletion(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setDocDeletionLoading(false);
+        }
+      }
+    };
+
     void loadSubmittedReview();
+    void loadDocDeletion();
 
     return () => {
       cancelled = true;
@@ -1011,8 +1065,22 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   }, [auditResultData?.flagged_documents, applicationRecord?.flagged_documents]);
 
   const requiredDocs = uploadChecklist.filter((item) => item.required);
-  const requiredComplete = requiredDocs.every((doc) => documents[doc.id]?.status === "uploaded");
-  const uploadedDocs = uploadChecklist.filter((doc) => documents[doc.id]?.status === "uploaded");
+  const optionalDocs = uploadChecklist.filter((item) => !item.required);
+  const isDocUploaded = (docId: string): boolean => {
+    const row = documents[docId];
+    if (!row) return false;
+    if (row.status === "uploaded") return true;
+    if (row.status === "pending_reupload") return false;
+    return Boolean(row.fileName || row.fileUrl || row.documentId);
+  };
+  const requiredComplete = requiredDocs.every((doc) => isDocUploaded(doc.id));
+  const uploadedDocs = uploadChecklist.filter((doc) => isDocUploaded(doc.id));
+  const uploadedRequiredDocs = requiredDocs.filter((doc) => isDocUploaded(doc.id));
+  const missingRequiredDocs = requiredDocs.filter((doc) => !isDocUploaded(doc.id));
+  const uploadChecklistKey = useMemo(
+    () => uploadChecklist.map((doc) => doc.id).join("|"),
+    [uploadChecklist],
+  );
 
   useEffect(() => {
     const ref = String(applicationRecord?.reference_number || referenceNumber || "").trim();
@@ -1024,7 +1092,25 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       try {
         const docsRaw = await getApplicationDocuments(ref);
         if (cancelled) return;
-        setDocuments((current) => mergeHydratedDocuments(current, docsRaw, uploadChecklist));
+        const payload = normalizePayload<any>(docsRaw);
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.documents)
+            ? payload.documents
+            : [];
+        setDocuments((current) => {
+          // Backend docs for THIS application are the source of truth.
+          // Do not keep uploads from a previous cart app / service (merge-only left stale "Uploaded" UI).
+          const fromBackend = mergeHydratedDocuments({}, list, uploadChecklist);
+          const next: typeof current = { ...fromBackend };
+          for (const id of Object.keys(fromBackend)) {
+            const prev = current[id];
+            if (prev?.previewUrl) {
+              next[id] = { ...next[id], previewUrl: prev.previewUrl };
+            }
+          }
+          return next;
+        });
       } catch {
         // Non-fatal if documents cannot be refreshed yet.
       }
@@ -1033,7 +1119,9 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     return () => {
       cancelled = true;
     };
-  }, [applicationRecord?.reference_number, referenceNumber, stage, uploadChecklist]);
+    // Intentionally key by uploadChecklistKey so a new array identity does not wipe uploads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applicationRecord?.reference_number, referenceNumber, stage, uploadChecklistKey]);
 
   const auditStatus = (auditResultData?.status || auditOutcome || null) as AuditOutcome | null;
   const flaggedSource = useMemo(
@@ -1129,17 +1217,45 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       return bTs - aTs;
     });
   }, [applicationRecord?.admin_messages, applicationRecord?.audit_logs]);
-  const selectedServiceRecord = SERVICES.find((item) => item.id === selectedService) || null;
+  const selectedServiceRecord = journeyServices.find((item) => item.id === selectedService) || null;
   const complexityScore = [answers.journeyType, answers.nameChanged, answers.birthOutsideCore].filter((item) => item === "Yes" || item === "I Already Have One / Conversion").length;
-  const catalogAssessmentPence =
-    assessmentFee != null && assessmentFee > 0 ? Math.round(assessmentFee * 100) : 0;
-  const auditFeePenceResolved =
-    applicationRecord?.audit_fee_pence ??
-    auditFeePenceProp ??
-    catalogAssessmentPence;
+  const catalogAssessmentPence = (() => {
+    // Backend truth: service.audit_fee (or global document_audit) via catalog / application snapshot.
+    const serviceTypeKey = String(
+      selectedService || applicationRecord?.service_type || "",
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+    const fromServiceOrGlobal = Math.round(
+      (getAssessmentFeeGbp(catalogServices, serviceTypeKey || null) || 0) * 100,
+    );
+    const fromHook =
+      assessmentFee != null && assessmentFee > 0 ? Math.round(assessmentFee * 100) : 0;
+    return Math.max(fromServiceOrGlobal, fromHook);
+  })();
+  // Simple rule: assessment fee defined (>0) → assessment flow; else → full payment.
+  // Prefer backend snapshot when present; never hide a live catalog fee while unpaid.
+  const auditFeePenceResolved = applicationRecord?.audit_fee_paid
+    ? Number(applicationRecord.audit_fee_pence || 0)
+    : Math.max(
+        Number(applicationRecord?.audit_fee_pence || 0),
+        catalogAssessmentPence,
+        Number(auditFeePenceProp || 0),
+      );
   const auditFee = auditFeePenceResolved / 100;
   const assessmentOffered = auditFeePenceResolved > 0;
-  const serviceFee = selectedService ? serviceFeeMap[selectedService] : 88;
+  const assessmentEligibilityPending = pricingLoading && !assessmentOffered && !applicationRecord;
+  const catalogMatchedFee = (() => {
+    if (!selectedService) return null;
+    const st = selectedService.replace(/-/g, "_");
+    const row = catalogServices.find(
+      (item) => String(item.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === st,
+    );
+    if (row && typeof row.totalFee === "number" && row.totalFee > 0) return row.totalFee;
+    return null;
+  })();
+  const serviceFee = catalogMatchedFee ?? (selectedService ? serviceFeeMap[selectedService] : 88);
   const serviceFeeForMath = typeof serviceFee === "number" ? serviceFee : 0;
   const addOnTotal = addOns.reduce((sum, id) => sum + (ADD_ONS.find((item) => item.id === id)?.fee || 0), 0);
   const finalAmount = Math.max(serviceFeeForMath - auditFee + addOnTotal, 0);
@@ -1187,21 +1303,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       return "completed";
     }
 
-    const passportQuoteFlowStarted =
-      currentStage === "initial_review" ||
-      ["pending_quote", "quoted"].includes(applicationStatus) ||
-      // Important: quote_status defaults to PENDING_QUOTE for new records, so
-      // do not use that default alone to skip questionnaire/upload stages.
-      ["QUOTED", "EXPIRED", "QUOTE_ACCEPTED"].includes(quoteStatus);
-
-    if (isPassportService && passportQuoteFlowStarted) {
-      return "passport-quote-pending";
-    }
-
-    if (isPassportService && ["QUOTE_ACCEPTED", "PAID"].includes(quoteStatus)) {
-      return "processing";
-    }
-
     if (["registered", "draft"].includes(currentStage) || ["draft", "registered"].includes(applicationStatus)) {
       return isResumingExistingCase ? null : "service";
     }
@@ -1210,19 +1311,55 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       return "processing";
     }
 
-    if (fullPaymentStatus === "paid" || record.payment_confirmed || applicationStatus === "paid") {
+    // Paid quote (legacy) or full payment → processing. In-flight quote cases fall through to full-payment.
+    if (
+      fullPaymentStatus === "paid" ||
+      record.payment_confirmed ||
+      applicationStatus === "paid" ||
+      quoteStatus === "PAID" ||
+      quoteStatus === "QUOTE_ACCEPTED"
+    ) {
       return "processing";
+    }
+
+    // Legacy passport quote-pending states now use the same full-payment path as OCI.
+    // Do not use PENDING_QUOTE alone — that is the default on new records.
+    const passportLegacyQuoteInFlight =
+      isPassportService &&
+      (currentStage === "initial_review" ||
+        ["pending_quote", "quoted"].includes(applicationStatus) ||
+        ["QUOTED", "EXPIRED"].includes(quoteStatus));
+
+    if (passportLegacyQuoteInFlight) {
+      return "full-payment";
     }
 
     if (record.audit_skipped && record.audit_skip_disclaimer_accepted) {
       return "full-payment";
     }
 
-    if (["payment_pending"].includes(applicationStatus)) {
+    // Assessment approved → payment pending (full service payment).
+    if (
+      auditResult === "green" &&
+      fullPaymentStatus !== "paid" &&
+      !record.payment_confirmed &&
+      applicationStatus !== "paid"
+    ) {
       return "full-payment";
     }
 
-    if (["green", "amber", "red"].includes(auditResult)) {
+    if (["payment_pending"].includes(applicationStatus) || currentStage === "payment_pending") {
+      const needsAssessment = Number(record.audit_fee_pence || 0) > 0;
+      const assessmentDone =
+        auditResult === "green" ||
+        Boolean(record.audit_skipped && record.audit_skip_disclaimer_accepted);
+      if (!needsAssessment || assessmentDone) {
+        return "full-payment";
+      }
+    }
+
+    // Amber / red stay on the result screen for corrections or rejection.
+    if (auditResult === "amber" || auditResult === "red") {
       return "audit-result";
     }
 
@@ -1232,6 +1369,11 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
 
     if (["under_review", "submitted", "audit_pending", "approved"].includes(applicationStatus)) {
       return "audit-pending";
+    }
+
+    // Assessment configured but unpaid → stay on summary/upload path (caller may still be mid-flow).
+    if (Number(record.audit_fee_pence || 0) > 0 && !record.audit_fee_paid) {
+      return null;
     }
 
     return null;
@@ -1281,6 +1423,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       quote_set_at: (response as any).quote_set_at,
       quote_expires_at: (response as any).quote_expires_at,
       service_total_pence: response.service_total_pence,
+      fee_plan_code: String((response as { fee_plan_code?: string }).fee_plan_code || ""),
       full_payment_status: response.full_payment_status,
       payment_confirmed: response.payment_confirmed,
       current_stage: response.current_stage,
@@ -1496,7 +1639,7 @@ useEffect(() => {
 
     if (isValidService) {
       setSelectedService(parsedService as ServiceId);
-      setBannerMessage(`Resuming your ${serviceLabelMap[parsedService as ServiceId]} audit journey.`);
+      setBannerMessage("");
       void loadQuestionsForService(parsedService as ServiceId).then((questions) => {
         if (typeof parsed.questionIndex === "number" && Number.isFinite(parsed.questionIndex)) {
           const boundedIndex = Math.max(0, Math.min(parsed.questionIndex, Math.max(questions.length - 1, 0)));
@@ -1578,11 +1721,39 @@ useEffect(() => {
 useEffect(() => {
   if (typeof window === "undefined") return;
 
+  // Legacy return from /dashboard/payment after verify — go straight to dashboard.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment") === "success" && !readStripeReturnParams().sessionId) {
+      setPostPaymentRedirecting(true);
+      toast.success("Payment successful.");
+      router.replace("/dashboard");
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
   const { sessionId, paymentKind, reference } = readStripeReturnParams();
   if (!sessionId || !paymentKind) return;
 
   const refNum = String(reference || resumeReference || referenceNumber || applicationRecord?.reference_number || "").trim();
   if (!refNum) return;
+
+  const redirectAfterServicePayment = (message: string) => {
+    setPostPaymentRedirecting(true);
+    setBannerMessage(message);
+    toast.success(message);
+    clearStripeReturnParams();
+    try {
+      sessionStorage.removeItem("flyoci:order-cart-apps");
+    } catch {
+      // ignore
+    }
+    setOrderCartApps([]);
+    setOrderCartIndex(0);
+    router.replace("/dashboard");
+  };
 
   let active = true;
   void (async () => {
@@ -1597,21 +1768,44 @@ useEffect(() => {
         setStage("audit-pending");
         setBannerMessage("Audit submitted. Awaiting review.");
         toast.success("Audit payment successful.");
+        clearStripeReturnParams();
       } else if (paymentKind === "full") {
+        setPostPaymentRedirecting(true);
         await verifyFullPayment(refNum, sessionId);
         if (!active) return;
-        setStage("processing");
-        setBannerMessage("Payment confirmed. Your application is now in process.");
-        toast.success("Full payment successful.");
+        redirectAfterServicePayment("Payment confirmed. Redirecting to your dashboard…");
+      } else if (paymentKind === "cart_full") {
+        setPostPaymentRedirecting(true);
+        let refs: string[] = [];
+        try {
+          const raw = sessionStorage.getItem("flyoci:order-cart-apps");
+          const parsed = raw ? JSON.parse(raw) : null;
+          if (Array.isArray(parsed?.apps)) {
+            refs = parsed.apps
+              .map((row: { referenceNumber?: string }) => String(row.referenceNumber || "").trim())
+              .filter(Boolean);
+          }
+        } catch {
+          refs = [];
+        }
+        if (!refs.length) refs = [refNum];
+        await verifyCartFullPayment(refs, sessionId);
+        if (!active) return;
+        redirectAfterServicePayment("Order payment confirmed. Redirecting to your dashboard…");
       } else if (paymentKind === "passport-quote") {
+        setPostPaymentRedirecting(true);
+        // Legacy Stripe return — finish old quote sessions, then continue journey.
         await verifyPassportRenewalQuotePayment(refNum, sessionId);
         if (!active) return;
         await syncApplicationFromBackend(refNum);
-        toast.success("Payment successful. Your case is now in progress.");
+        if (!active) return;
+        redirectAfterServicePayment("Payment confirmed. Redirecting to your dashboard…");
+      } else {
+        clearStripeReturnParams();
       }
-      clearStripeReturnParams();
     } catch (error) {
       if (!active) return;
+      setPostPaymentRedirecting(false);
       toast.error(error instanceof Error ? error.message : "Payment verification failed.");
     } finally {
       if (active) {
@@ -1623,10 +1817,13 @@ useEffect(() => {
   return () => {
     active = false;
   };
-}, [referenceNumber, applicationRecord?.reference_number, resumeReference]);
+}, [referenceNumber, applicationRecord?.reference_number, resumeReference, router]);
 
 useEffect(() => {
   if (!draftRestored || !loaded || refreshRedirectHandledRef.current) {
+    return;
+  }
+  if (postPaymentRedirecting) {
     return;
   }
   // Keep users on the journey when they arrived via Start application (service/start),
@@ -1646,7 +1843,7 @@ useEffect(() => {
 
   refreshRedirectHandledRef.current = true;
   router.replace("/dashboard");
-}, [draftRestored, loaded, resumeReference, startFresh, serviceTypeProp, hasDraftProgress, stage, router]);
+}, [draftRestored, loaded, resumeReference, startFresh, serviceTypeProp, hasDraftProgress, stage, router, postPaymentRedirecting]);
 
 useEffect(() => {
   if (typeof window === "undefined") return;
@@ -1686,6 +1883,7 @@ useEffect(() => {
       try {
         setApiLoading(true);
         setApplicationStartError(null);
+        setResumeHydrated(false);
 
         const app = await syncApplicationFromBackend(resumeReference, { skipStageSync: true });
         if (!active) return;
@@ -1722,7 +1920,7 @@ useEffect(() => {
 
         if (resolvedService) {
           setSelectedService(resolvedService);
-          setBannerMessage(`Resuming your ${serviceLabelMap[resolvedService]} application.`);
+          setBannerMessage("");
         }
 
         if (hasUploadedDocs) {
@@ -1793,34 +1991,17 @@ useEffect(() => {
 // 2. If draft restored a meaningful stage AND checklist exists → keep it
 // 3. If draft is mid-questionnaire → restore questions stage
 // 4. Otherwise fall back to questions (not checklist) as safe minimum
-const progressiveStages: FlowStage[] = ["passport-quote-pending", "audit-pending", "audit-result", "full-payment", "processing", "completed"];
-const draftStage = stageRef.current;
+const draftStage =
+  (stageRef.current as string) === "passport-quote-pending" ? "full-payment" : stageRef.current;
 const hasGeneratedChecklist = generatedChecklist.length > 0;
 const hasChecklistArtifacts = hasGeneratedChecklist || restoredChecklistCount > 0 || Boolean(resolvedAuditId);
 const isPassport = resolvedService === "passport-renewal";
-const isApostille = resolvedService === "apostille";
 
 if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   setStage("questions");
-} else if (isApostille && !hasUploadedDocs && !hasChecklistArtifacts) {
-  const apostilleChecklist = await resolveDocuments("apostille", emptyAnswers);
-  if (apostilleChecklist.length > 0) {
-    setGeneratedChecklist(apostilleChecklist);
-    const idMap: Record<string, string | number> = {};
-    apostilleChecklist.forEach((item) => {
-      idMap[item.id] = item.id;
-    });
-    setChecklistItemIdByDocId(idMap);
-  }
-  setStage("checklist");
 } else if (backendStage && backendStage !== "service" && backendStage !== "questions") {
-  // Passport guard: keep New Lead/questionnaire flow until at least one document exists.
-  if (backendStage === "passport-quote-pending" && !hasUploadedDocs) {
-    setStage("questions");
-  } else {
-    // Backend stage is authoritative for all post-questionnaire states.
-    setStage(backendStage);
-  }
+  // Backend stage is authoritative for all post-questionnaire states.
+  setStage(backendStage);
 } else if (draftStage === "checklist" || draftStage === "upload" || draftStage === "summary") {
   // Only restore checklist-family stages when checklist or uploads exist
   if (hasChecklistArtifacts || hasUploadedDocs) {
@@ -1834,18 +2015,6 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 } else if (draftStage && draftStage !== "service") {
   // Mid-questionnaire draft — restore it
   setStage(draftStage);
-} else if (isApostille) {
-  // Apostille flow skips questionnaire and starts at checklist/upload.
-  const apostilleChecklist = await resolveDocuments("apostille", emptyAnswers);
-  if (apostilleChecklist.length > 0) {
-    setGeneratedChecklist(apostilleChecklist);
-    const idMap: Record<string, string | number> = {};
-    apostilleChecklist.forEach((item) => {
-      idMap[item.id] = item.id;
-    });
-    setChecklistItemIdByDocId(idMap);
-  }
-  setStage("checklist");
 } else {
   // No useful draft — send to questions, not checklist
   setStage("questions");
@@ -1857,6 +2026,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         if (active) {
           setApiLoading(false);
           setLoaded(true);
+          setResumeHydrated(true);
         }
       }
     };
@@ -1893,7 +2063,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         }
 
         if (!active) return;
-        if (["green", "amber", "red"].includes(statusValue)) {
+        if (statusValue === "green") {
+          setAuditOutcome("green");
+          setStage("full-payment");
+          setBannerMessage(notesValue || "Assessment approved. Continue to service payment.");
+        } else if (statusValue === "amber" || statusValue === "red") {
           setAuditOutcome(statusValue as AuditOutcome);
           setStage("audit-result");
           setBannerMessage(notesValue || "Your audit result is ready.");
@@ -1936,6 +2110,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
         if (!(["green", "amber", "red"] as const).includes(statusValue as AuditOutcome)) {
           throw new Error("Audit result is not ready yet.");
+        }
+
+        // Green = payment pending — move off the result screen into full payment.
+        if (statusValue === "green") {
+          setAuditOutcome("green");
+          proceedToFullPayment();
+          return;
         }
 
         const flaggedFromFlaggedDocuments = Array.isArray(app.flagged_documents)
@@ -2101,6 +2282,48 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   useEffect(() => {
     if (stage !== "full-payment") return;
 
+    if (!assessmentOffered) {
+      setBannerMessage((current) => {
+        const text = String(current || "").toLowerCase();
+        if (text.includes("audit skipped") || text.includes("risk acknowledgement")) {
+          return "Documents uploaded. Proceed to service payment.";
+        }
+        return current;
+      });
+    }
+
+    // Assessment is configured but case is not yet approved/skipped — send user back.
+    // Multi-app cart checkout handles skip + combined pay on this screen instead.
+    if (!pricingLoading && assessmentOffered && orderCartApps.length <= 1) {
+      const result = String(applicationRecord?.audit_result || "").toLowerCase();
+      const skipped = Boolean(
+        applicationRecord?.audit_skipped && applicationRecord?.audit_skip_disclaimer_accepted,
+      );
+      if (result !== "green" && !skipped) {
+        if (applicationRecord?.audit_fee_paid) {
+          setStage(result === "amber" || result === "red" ? "audit-result" : "audit-pending");
+          setBannerMessage(
+            result === "amber" || result === "red"
+              ? "Review your document check result before continuing."
+              : "Document check in progress. Full service payment unlocks after approval.",
+          );
+        } else {
+          setAuditPaymentTab("take-audit");
+          setStage("summary");
+          setBannerMessage(
+            "Pay the assessment fee first. Full service payment is available after your document check is approved.",
+          );
+        }
+        return;
+      }
+    }
+
+    // Cart checkout already built the combined summary.
+    if (orderCartApps.length > 1) {
+      setPaymentSummaryLoading(false);
+      return;
+    }
+
     let active = true;
     const loadPaymentSummary = async () => {
       try {
@@ -2111,7 +2334,31 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
         if (!active) return;
 
+        const preferred = String(preferredFeePlanRef.current || "").trim().toLowerCase();
         const planCode = String(app.fee_plan_code || "").trim();
+        const refNum = String(app.reference_number || referenceNumber || "").trim();
+
+        // Keep Express choice from assessment summary when opening full payment.
+        if (preferred === "express" && planCode.toLowerCase() !== "express" && refNum) {
+          try {
+            const updated = await selectFullPaymentPlan(refNum, "express");
+            if (!active) return;
+            setSelectedFeePlanCode(updated.fee_plan_code || "express");
+            setPaymentSummary({
+              service_label: selectedServiceRecord?.name || app.service_name || "Selected service",
+              service_fee: Number((updated.service_total_pence || 0) / 100),
+              audit_credit: Number((updated.audit_credit_pence || 0) / 100),
+              addons: [],
+              total_due: Number((updated.amount_due_pence || 0) / 100),
+              currency: "GBP",
+            });
+            await syncApplicationFromBackend(refNum, { skipStageSync: true }).catch(() => null);
+            return;
+          } catch {
+            // Fall through to standard snapshot if plan apply fails.
+          }
+        }
+
         if (planCode) setSelectedFeePlanCode(planCode);
 
         setPaymentSummary({
@@ -2137,7 +2384,17 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     return () => {
       active = false;
     };
-  }, [referenceNumber, selectedServiceRecord?.name, stage]);
+  }, [
+    applicationRecord?.audit_fee_paid,
+    applicationRecord?.audit_result,
+    applicationRecord?.audit_skip_disclaimer_accepted,
+    applicationRecord?.audit_skipped,
+    assessmentOffered,
+    pricingLoading,
+    referenceNumber,
+    selectedServiceRecord?.name,
+    stage,
+  ]);
 
   useEffect(() => {
     if (stage !== "processing" && stage !== "completed") return;
@@ -2384,23 +2641,6 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   setApplicationId(startedApplication.id);
   setReferenceNumber(startedApplication.referenceNumber || null);
 
-  if (service === "apostille") {
-    const apostilleChecklist = await resolveDocuments("apostille", emptyAnswers);
-    setGeneratedChecklist(apostilleChecklist);
-    const idMap: Record<string, string | number> = {};
-    apostilleChecklist.forEach((item) => {
-      idMap[item.id] = item.id;
-    });
-    setChecklistItemIdByDocId(idMap);
-    setStage("checklist");
-    setBannerMessage("Upload your Apostille documents for review.");
-    const refreshed = await syncApplicationFromBackend(startedApplication.referenceNumber || null, {
-      skipStageSync: true,
-    });
-    await ensureAuditStarted(refreshed);
-    return;
-  }
-
   const questions = await loadQuestionsForService(service);
   if (questions.length > 0) {
     // Same pipeline as before — questionnaire for THIS application only
@@ -2453,8 +2693,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
  const handleOrderCartContinue = async (cart: StartOrderCartEntry[]) => {
   setApplicationStartError(null);
 
-  const resolveJourneyId = (serviceOptionId: string): ServiceId | null => {
+  const resolveJourneyId = (serviceOptionId: string, journeyHint?: string | null): ServiceId | null => {
     return (
+      mapCatalogServiceType(journeyHint) ||
       mapCatalogServiceType(serviceOptionId) ||
       mapBackendServiceType(serviceOptionId) ||
       null
@@ -2465,15 +2706,48 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     applicant: StartOrderApplicant;
     service: ServiceId;
     serviceOptionId: string;
+    catalogId?: number | string | null;
   };
+
+  const optionById = new Map(
+    [
+      ...catalogServices.map((row) => {
+        const optionId = `svc-${row.id}`;
+        return [
+          optionId,
+          {
+            id: optionId,
+            journeyId: mapCatalogServiceType(row.serviceType) || String(row.serviceType || "").replace(/_/g, "-"),
+            catalogId: row.id,
+          },
+        ] as const;
+      }),
+      ["new_oci", { id: "new_oci", journeyId: "new-oci", catalogId: null }] as const,
+      ["oci_renewal", { id: "oci_renewal", journeyId: "oci-renewal", catalogId: null }] as const,
+      ["oci_update", { id: "oci_update", journeyId: "oci-update", catalogId: null }] as const,
+      ["passport_renewal", { id: "passport_renewal", journeyId: "passport-renewal", catalogId: null }] as const,
+      ["apostille", { id: "apostille", journeyId: "apostille", catalogId: null }] as const,
+    ],
+  );
 
   const lines: OrderLine[] = [];
   for (const entry of cart) {
     for (const serviceOptionId of entry.serviceIds) {
       if (serviceOptionId === "undecided") continue;
-      const service = resolveJourneyId(serviceOptionId);
+      const option = optionById.get(serviceOptionId);
+      const service = resolveJourneyId(serviceOptionId, option?.journeyId);
       if (!service) continue;
-      lines.push({ applicant: entry.applicant, service, serviceOptionId });
+      let catalogId = option?.catalogId ?? null;
+      if (catalogId == null) {
+        const match = catalogServices.find(
+          (row) =>
+            mapCatalogServiceType(row.serviceType) === service ||
+            String(row.serviceType || "").toLowerCase().replace(/[\s-]+/g, "_") ===
+              service.replace(/-/g, "_"),
+        );
+        catalogId = match?.id ?? null;
+      }
+      lines.push({ applicant: entry.applicant, service, serviceOptionId, catalogId });
     }
   }
 
@@ -2494,16 +2768,16 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   try {
     setApiLoading(true);
 
-    const createdApps: Array<{
-      applicantName: string;
-      applicantEmail: string;
-      service: ServiceId;
-      applicationId: number;
-      referenceNumber: string;
-    }> = [];
+    const createdApps: OrderCartApp[] = [];
 
     for (const line of lines) {
-      const payload = await createApplication(mapApplicationServiceType(line.service));
+      const payload = await createApplication(mapApplicationServiceType(line.service), {
+        serviceId: line.catalogId,
+        applicantName: line.applicant.fullName.trim(),
+        applicantEmail: line.applicant.email.trim(),
+        applicantMobile: line.applicant.mobile.trim(),
+        applyingFrom: line.applicant.applyingFrom,
+      });
       const applicationId = Number(payload.application_id || 0);
       const referenceNumberCreated = String(payload.reference_number || "").trim();
       if (!Number.isFinite(applicationId) || applicationId <= 0 || !referenceNumberCreated) {
@@ -2512,9 +2786,12 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       createdApps.push({
         applicantName: line.applicant.fullName.trim(),
         applicantEmail: line.applicant.email.trim(),
+        applicantMobile: line.applicant.mobile.trim(),
+        applyingFrom: line.applicant.applyingFrom,
         service: line.service,
         applicationId,
         referenceNumber: referenceNumberCreated,
+        docsComplete: false,
       });
     }
 
@@ -2528,20 +2805,19 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       );
     }
 
-    const first = createdApps[0];
+    setOrderCartApps(createdApps);
+    setOrderCartIndex(0);
+    setCartSkipAssessmentAccepted(false);
 
+    const first = createdApps[0];
     if (createdApps.length > 1) {
       toast.success(
-        `Created ${createdApps.length} applications (one per applicant × service). Continuing with ${first.applicantName || "Applicant 1"} — ${serviceLabelMap[first.service]}. Other apps are on your Dashboard.`,
+        `Order started with ${createdApps.length} applications. Complete questions & documents for each — then pay once.`,
         { duration: 6000 },
       );
     }
 
-    await syncApplicationFromBackend(first.referenceNumber, { skipStageSync: true });
-    await continueStartedApplication(first.service, {
-      id: first.applicationId,
-      referenceNumber: first.referenceNumber,
-    });
+    await activateOrderCartApp(createdApps, 0);
   } catch (error) {
     setApplicationStartError(
       error instanceof Error ? error.message : "Could not start your application. Please try again.",
@@ -2550,6 +2826,273 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     setApiLoading(false);
   }
 };
+
+  const activateOrderCartApp = async (apps: OrderCartApp[], index: number) => {
+    const target = apps[index];
+    if (!target) return;
+
+    setOrderCartIndex(index);
+    // Wipe prior app's local upload UI before switching reference — never reuse files across apps.
+    setDocuments(emptyDocStatus());
+    setFlaggedReuploads({});
+    setChecklistItemIdByDocId({});
+    setExpandedChecklistDocIds({});
+    setSupportUploads({});
+    setUploadConsentsAccepted(false);
+    setGeneratedChecklist([]);
+    setLastChecklistAnswers(null);
+    setAuditId(null);
+
+    resetFromService(target.service);
+    setPrimaryApplicant({
+      id: "primary",
+      fullName: target.applicantName,
+      email: target.applicantEmail,
+      mobile: target.applicantMobile || "",
+      applyingFrom: target.applyingFrom || "United Kingdom",
+    });
+    setShowServicePicker(false);
+
+    await syncApplicationFromBackend(target.referenceNumber, { skipStageSync: true });
+    setApplicationId(target.applicationId);
+    setReferenceNumber(target.referenceNumber);
+    // Ensure UI stays empty until this app's backend docs hydrate.
+    setDocuments(emptyDocStatus());
+
+    const questions = await loadQuestionsForService(target.service);
+    setQuestionIndex(0);
+    setAnswers(emptyAnswersFromQuestions(questions.length ? questions : QUESTION_LIST));
+    setDocuments(emptyDocStatus());
+    setGeneratedChecklist([]);
+    setLastChecklistAnswers(null);
+    setUploadConsentsAccepted(false);
+
+    if (questions.length > 0) {
+      setStage("questions");
+      setBannerMessage(
+        apps.length > 1
+          ? `Applicant ${index + 1} of ${apps.length}: ${target.applicantName || "Applicant"} — ${serviceLabelMap[target.service]}. Answer the smart questionnaire for this service.`
+          : `Answer a few questions so we can build your document checklist.`,
+      );
+    } else {
+      const checklist = await resolveDocuments(target.service, emptyAnswers);
+      setGeneratedChecklist(checklist);
+      const idMap: Record<string, string | number> = {};
+      checklist.forEach((item) => {
+        idMap[item.id] = item.id;
+      });
+      setChecklistItemIdByDocId(idMap);
+      setLastChecklistAnswers({ ...emptyAnswers });
+      setDocuments(emptyDocStatus());
+      setStage("checklist");
+      setBannerMessage(
+        apps.length > 1
+          ? `Applicant ${index + 1} of ${apps.length}: ${target.applicantName || "Applicant"} — upload documents for ${serviceLabelMap[target.service]} (each application needs its own uploads).`
+          : `Checklist ready for ${serviceLabelMap[target.service]}. Upload your documents to continue.`,
+      );
+      const refreshed = await syncApplicationFromBackend(target.referenceNumber, { skipStageSync: true });
+      await ensureAuditStarted(refreshed);
+    }
+  };
+
+  const getCatalogPlansForService = (service: ServiceId) => {
+    const backendType = toBackendServiceType(service) || service.replace(/-/g, "_");
+    const match =
+      catalogServices.find(
+        (row) => String(row.serviceType || "").toLowerCase().replace(/[\s-]+/g, "_") === backendType,
+      ) || null;
+    return (match?.plans || [])
+      .filter((plan) => plan.fee > 0)
+      .slice()
+      .sort((a, b) => {
+        if (a.planCode === "express") return 1;
+        if (b.planCode === "express") return -1;
+        if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+        return String(a.label || "").localeCompare(String(b.label || ""));
+      });
+  };
+
+  const refreshCartPaymentSummary = async (apps: OrderCartApp[], planByRef?: Record<string, string>) => {
+    const plans = planByRef || cartFeePlanByRef;
+    const lines: Array<{ label: string; amount: number; reference: string; planCode: string }> = [];
+    let total = 0;
+    let anyNeedsAssessmentSkip = false;
+
+    for (const app of apps) {
+      const preferredPlan = String(plans[app.referenceNumber] || "").trim();
+      if (preferredPlan) {
+        try {
+          await selectFullPaymentPlan(app.referenceNumber, preferredPlan);
+        } catch {
+          // Keep existing plan if express is unavailable for this service.
+        }
+      }
+      const record = await syncApplicationFromBackend(app.referenceNumber, { skipStageSync: true });
+      const auditFee = Number(record.audit_fee_pence || 0);
+      const result = String(record.audit_result || "").toLowerCase();
+      const skipped = Boolean(record.audit_skipped && record.audit_skip_disclaimer_accepted);
+      if (auditFee > 0 && result !== "green" && !skipped) {
+        anyNeedsAssessmentSkip = true;
+      }
+      const planCode = String(record.fee_plan_code || preferredPlan || "standard").trim() || "standard";
+      const due = Number(record.amount_due_pence || record.service_total_pence || 0) / 100;
+      const expressTag = planCode.toLowerCase() === "express" ? " · Express" : "";
+      lines.push({
+        label: `${app.applicantName || "Applicant"} — ${serviceLabelMap[app.service]}${expressTag}`,
+        amount: due,
+        reference: app.referenceNumber,
+        planCode,
+      });
+      total += due;
+    }
+
+    setCartFeePlanByRef((current) => {
+      const next = { ...current };
+      for (const line of lines) {
+        next[line.reference] = line.planCode;
+      }
+      return next;
+    });
+
+    setPaymentSummary({
+      service_label: `${apps.length} applications`,
+      service_fee: total,
+      audit_credit: 0,
+      addons: lines.map((line) => ({
+        label: `${line.label} (${line.reference})`,
+        amount: line.amount,
+      })),
+      total_due: total,
+      currency: "GBP",
+    });
+    setPaymentSummaryError(null);
+    return { anyNeedsAssessmentSkip, lines, total };
+  };
+
+  const applyCartAppFeePlan = async (referenceNumber: string, planCode: string) => {
+    if (!referenceNumber || !planCode) return;
+    try {
+      setFeePlanUpdating(true);
+      const nextPlans = { ...cartFeePlanByRef, [referenceNumber]: planCode };
+      setCartFeePlanByRef(nextPlans);
+      await selectFullPaymentPlan(referenceNumber, planCode);
+      await refreshCartPaymentSummary(orderCartApps, nextPlans);
+      toast.success(planCode === "express" ? "Express applied to this application." : "Standard fee applied.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update fee plan.");
+    } finally {
+      setFeePlanUpdating(false);
+    }
+  };
+
+  const applyCartFeePlanToAll = async (planCode: string) => {
+    if (!orderCartApps.length || !planCode) return;
+    try {
+      setFeePlanUpdating(true);
+      const nextPlans: Record<string, string> = { ...cartFeePlanByRef };
+      for (const app of orderCartApps) {
+        const plans = getCatalogPlansForService(app.service);
+        const hasPlan = plans.some((plan) => plan.planCode === planCode);
+        if (!hasPlan && planCode === "express") continue;
+        const resolved =
+          planCode === "express"
+            ? "express"
+            : plans.find((plan) => plan.planCode !== "express" && plan.isDefault)?.planCode ||
+              plans.find((plan) => plan.planCode !== "express")?.planCode ||
+              "standard";
+        nextPlans[app.referenceNumber] = resolved;
+        try {
+          await selectFullPaymentPlan(app.referenceNumber, resolved);
+        } catch {
+          // Skip apps that cannot take this plan.
+        }
+      }
+      setCartFeePlanByRef(nextPlans);
+      await refreshCartPaymentSummary(orderCartApps, nextPlans);
+      toast.success(planCode === "express" ? "Express applied where available." : "Standard fees applied to all.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update fee plans.");
+    } finally {
+      setFeePlanUpdating(false);
+    }
+  };
+
+  const prepareCartCombinedPayment = async (apps: OrderCartApp[]) => {
+    const incomplete = apps.filter((app) => !app.docsComplete);
+    if (incomplete.length > 0) {
+      const targetIndex = apps.findIndex((app) => !app.docsComplete);
+      toast.error(
+        `Finish documents for ${incomplete.map((app) => `${app.applicantName || "Applicant"} — ${serviceLabelMap[app.service]}`).join("; ")} before payment.`,
+      );
+      if (targetIndex >= 0) {
+        await activateOrderCartApp(apps, targetIndex);
+      }
+      return;
+    }
+
+    setApiLoading(true);
+    try {
+      const initialPlans: Record<string, string> = {};
+      for (const app of apps) {
+        const plans = getCatalogPlansForService(app.service);
+        const defaultPlan =
+          plans.find((plan) => plan.planCode !== "express" && plan.isDefault) ||
+          plans.find((plan) => plan.planCode !== "express") ||
+          plans[0];
+        initialPlans[app.referenceNumber] =
+          cartFeePlanByRef[app.referenceNumber] || defaultPlan?.planCode || "standard";
+      }
+      setCartFeePlanByRef(initialPlans);
+      const { anyNeedsAssessmentSkip } = await refreshCartPaymentSummary(apps, initialPlans);
+
+      if (anyNeedsAssessmentSkip) {
+        setCartSkipAssessmentAccepted(false);
+      }
+
+      setPaymentConsentsAccepted(false);
+      setStage("full-payment");
+      setBannerMessage(
+        anyNeedsAssessmentSkip
+          ? "All documents are ready. Confirm assessment skip for this order, then pay once for every application."
+          : "All applicants are ready. Choose Express on any application (or all), then pay once.",
+      );
+      toast.success("Ready for combined checkout.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not prepare combined payment.");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  const advanceOrderCartAfterDocs = async () => {
+    if (orderCartApps.length <= 1) return false;
+
+    const updated = orderCartApps.map((app, index) =>
+      index === orderCartIndex ? { ...app, docsComplete: true } : app,
+    );
+    setOrderCartApps(updated);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(
+        "flyoci:order-cart-apps",
+        JSON.stringify({ createdAt: Date.now(), apps: updated }),
+      );
+    }
+
+    const nextIndex = updated.findIndex((app, index) => index > orderCartIndex && !app.docsComplete);
+    const fallbackIndex = updated.findIndex((app) => !app.docsComplete);
+
+    if (nextIndex >= 0 || fallbackIndex >= 0) {
+      const targetIndex = nextIndex >= 0 ? nextIndex : fallbackIndex;
+      toast.success(
+        `Saved documents for ${updated[orderCartIndex]?.applicantName || "applicant"}. Continue with the next application.`,
+      );
+      await activateOrderCartApp(updated, targetIndex);
+      return true;
+    }
+
+    await prepareCartCombinedPayment(updated);
+    return true;
+  };
 
   const mapChecklistServiceType = (service: ServiceId | null): "new-oci" | "oci-renewal" | "oci-update" | "passport-renewal" => {
     if (service === "new-oci") return "new-oci";
@@ -2743,18 +3286,34 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
  
 
-  const proceedToSummary = () => {
-    if (!requiredComplete) return;
+  const proceedToSummary = async () => {
+    if (!requiredComplete) {
+      const missing = requiredDocs.filter((doc) => !isDocUploaded(doc.id));
+      if (missing[0]?.id) {
+        setExpandedChecklistDocIds((current) => ({ ...current, [missing[0].id]: true }));
+      }
+      toast.error(
+        missing.length
+          ? `Please upload: ${missing.map((doc) => doc.title).join(", ")}`
+          : "Please upload all required documents before continuing.",
+      );
+      return;
+    }
     if (!uploadConsentsAccepted) {
       toast.error("Please accept the upload consent before continuing.");
       return;
     }
+
+    if (orderCartApps.length > 1) {
+      const advanced = await advanceOrderCartAfterDocs();
+      if (advanced) return;
+    }
+
     setMessageRequestedDocIds([]);
-    setAuditPaymentTab(null);
+    setAuditPaymentTab("take-audit");
     setUploadedDocsSummaryOpen(false);
-    setPassportFlowSummaryOpen(false);
     setStage("summary");
-    setBannerMessage("Review your upload summary and audit fee.");
+    setBannerMessage("Review your upload summary and assessment fee.");
   };
 
   const openDocRequestUpload = (docId: string) => {
@@ -2798,70 +3357,6 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       redirectToStripeCheckout(getStripeCheckoutUrl(order));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Audit payment failed.");
-    } finally {
-      setApiLoading(false);
-    }
-  };
-
-  const submitPassportRequestForQuote = async () => {
-    if (!uploadConsentsAccepted) {
-      toast.error("Please accept the upload consents before continuing.");
-      return;
-    }
-
-    const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
-    const refNum = app?.reference_number;
-    if (!refNum) {
-      toast.error("Application reference not found.");
-      return;
-    }
-
-    try {
-      setApiLoading(true);
-      const response = await submitPassportRenewalRequest(refNum);
-      setPassportMaskedEmail(String(response.masked_email || ""));
-      setPassportCaseReference(String(response.case_reference || response.file_number || refNum));
-      setPassportQuoteAcknowledged(false);
-      setStage("passport-quote-pending");
-      setBannerMessage("Passport renewal request submitted. We will notify you when the quote is ready in your dashboard.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not submit passport renewal request.");
-    } finally {
-      setApiLoading(false);
-    }
-  };
-
-  const payPassportQuotedFee = async () => {
-    const app = await syncApplicationFromBackend(referenceNumber).catch(() => applicationRecord);
-    const refNum = String(app?.reference_number || referenceNumber || "").trim();
-    if (!refNum) {
-      toast.error("Application reference not found.");
-      return;
-    }
-
-    if (!paymentConsentsAccepted) {
-      toast.error("Please accept the payment consents before continuing.");
-      return;
-    }
-
-    if (!passportQuoteAcknowledged) {
-      toast.error("Please acknowledge the quote before payment.");
-      return;
-    }
-
-    try {
-      setApiLoading(true);
-      const raw = await createPassportRenewalQuoteOrder(refNum);
-      const order = normalizePayload<{
-        order: { id: string; amount: number; currency: string; url?: string };
-        checkout_url?: string;
-        key_id: string;
-        amount_pence: number;
-      }>(raw);
-
-      redirectToStripeCheckout(getStripeCheckoutUrl(order));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Passport quote payment failed.");
     } finally {
       setApiLoading(false);
     }
@@ -2919,6 +3414,41 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       toast.error(error instanceof Error ? error.message : "Failed to submit review.");
     } finally {
       setReviewSubmitting(false);
+    }
+  };
+
+  const requestDocumentDeletion = async () => {
+    const refNum = String(applicationRecord?.reference_number || referenceNumber || "").trim();
+    if (!refNum || docDeletionBusy) return;
+    try {
+      setDocDeletionBusy(true);
+      await createDocumentDeletionRequest(refNum, docDeletionReason.trim());
+      const payload = await getDocumentDeletionRequests(refNum);
+      setDocDeletion(payload);
+      setDocDeletionReason("");
+      toast.success("Deletion request submitted for admin review.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to request document deletion.");
+    } finally {
+      setDocDeletionBusy(false);
+    }
+  };
+
+  const confirmExecuteDocumentDeletion = async () => {
+    const refNum = String(applicationRecord?.reference_number || referenceNumber || "").trim();
+    const requestId = docDeletion?.open_request?.id;
+    if (!refNum || !requestId || docDeletionBusy) return;
+    try {
+      setDocDeletionBusy(true);
+      await executeDocumentDeletionRequest(refNum, requestId);
+      const payload = await getDocumentDeletionRequests(refNum);
+      setDocDeletion(payload);
+      setDocDeleteConfirmOpen(false);
+      toast.success("Your documents have been removed from FlyOCI servers.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete documents.");
+    } finally {
+      setDocDeletionBusy(false);
     }
   };
 
@@ -3130,19 +3660,54 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
   };
 
   const proceedToFullPayment = () => {
-    setPaymentSummary(null);
-    setPaymentSummaryError(null);
-    setMessageRequestedDocIds([]);
-    setStage("full-payment");
-    setBannerMessage("Proceed to full service payment.");
-  };
-
-  const skipAuditAndProceedToPayment = async () => {
-    if (!paymentConsentsAccepted) {
-      toast.error("Please accept the payment consents before continuing.");
+    if (assessmentEligibilityPending) {
+      toast.error("Loading fees… please wait a moment.");
       return;
     }
 
+    // Multi-app order: never jump to pay until every applicant × service pack is done.
+    if (orderCartApps.length > 1) {
+      const allOthersDone = orderCartApps.every(
+        (app, index) => index === orderCartIndex || app.docsComplete,
+      );
+      if (!allOthersDone || !orderCartApps[orderCartIndex]?.docsComplete) {
+        void advanceOrderCartAfterDocs();
+        return;
+      }
+      void prepareCartCombinedPayment(orderCartApps);
+      return;
+    }
+
+    if (assessmentOffered) {
+      const result = String(
+        applicationRecord?.audit_result || auditOutcome || auditResultData?.status || "",
+      ).toLowerCase();
+      const skipped = Boolean(
+        applicationRecord?.audit_skipped && applicationRecord?.audit_skip_disclaimer_accepted,
+      );
+      if (result !== "green" && !skipped) {
+        setAuditPaymentTab("take-audit");
+        setStage("summary");
+        setBannerMessage(
+          "Pay the assessment fee first. Full service payment is available after your document check is approved.",
+        );
+        toast.error("Please complete the assessment step before full service payment.");
+        return;
+      }
+    }
+    setPaymentSummary(null);
+    setPaymentSummaryError(null);
+    setMessageRequestedDocIds([]);
+    setPaymentConsentsAccepted(false);
+    setStage("full-payment");
+    setBannerMessage(
+      assessmentOffered
+        ? "Document check approved. Proceed to full service payment."
+        : "Documents uploaded. Proceed to service payment.",
+    );
+  };
+
+  const skipAuditAndProceedToPayment = async () => {
     const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
     const refNum = app?.reference_number;
     if (!refNum) {
@@ -3154,9 +3719,10 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       setApiLoading(true);
       await skipAuditWithDisclaimer(refNum, supportNotes);
       await syncApplicationFromBackend(refNum);
+      setPaymentConsentsAccepted(false);
       setStage("full-payment");
-      setBannerMessage("Audit skipped with risk acknowledgement. Full payment is now available.");
-      toast.success("Audit skipped. Proceeding to full payment.");
+      setBannerMessage("Assessment skipped with risk acknowledgement. Full payment is now available.");
+      toast.success("Assessment skipped. Continuing to service payment.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to skip audit.");
     } finally {
@@ -3197,6 +3763,65 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     if (!paymentConsentsAccepted) {
       toast.error("Please accept the payment consents before continuing.");
       return;
+    }
+
+    const isCartCheckout = orderCartApps.length > 1;
+    if (isCartCheckout) {
+      try {
+        setApiLoading(true);
+        for (const app of orderCartApps) {
+          const record = await syncApplicationFromBackend(app.referenceNumber, { skipStageSync: true });
+          const auditFee = Number(record.audit_fee_pence || 0);
+          const result = String(record.audit_result || "").toLowerCase();
+          const skipped = Boolean(record.audit_skipped && record.audit_skip_disclaimer_accepted);
+          if (auditFee > 0 && result !== "green" && !skipped) {
+            if (!cartSkipAssessmentAccepted) {
+              toast.error("Please confirm you skip the document assessment for this multi-application order.");
+              return;
+            }
+            await skipAuditWithDisclaimer(
+              app.referenceNumber,
+              supportNotes || "Multi-applicant order — assessment skipped.",
+            );
+          }
+        }
+
+        const refs = orderCartApps.map((app) => app.referenceNumber);
+        const raw = await createCartFullPaymentOrder(refs);
+        const order = normalizePayload<{
+          checkout_url?: string;
+          order_id?: string;
+          stripe_session_id?: string;
+          currency?: string;
+          key_id?: string;
+        }>(raw);
+        redirectToStripeCheckout(getStripeCheckoutUrl(order));
+        setProcessingStep(1);
+        setBannerMessage("Redirecting to secure checkout for your full order…");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Cart payment failed.");
+      } finally {
+        setApiLoading(false);
+      }
+      return;
+    }
+
+    if (assessmentOffered) {
+      const result = String(applicationRecord?.audit_result || "").toLowerCase();
+      const skipped = Boolean(
+        applicationRecord?.audit_skipped && applicationRecord?.audit_skip_disclaimer_accepted,
+      );
+      if (result !== "green" && !skipped) {
+        setAuditPaymentTab("take-audit");
+        setStage("summary");
+        setBannerMessage(
+          "Pay the assessment fee first. Full service payment is available after your document check is approved.",
+        );
+        toast.error(
+          "Full service payment is available after your document check is approved, or if you skip the assessment.",
+        );
+        return;
+      }
     }
 
     const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
@@ -3259,11 +3884,46 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
     setChecklistGenerationError(null);
     setLastChecklistAnswers(null);
     setAuditId(null);
-    setBannerMessage("Start a new document audit and follow the full checklist flow.");
+    setBannerMessage("Start a new application and follow the full checklist flow.");
   };
 
-  if (!loaded) {
-    return <div className="rounded-3xl border border-border bg-white p-6 text-textMuted shadow-sm">Loading audit journey...</div>;
+  if (postPaymentRedirecting) {
+    return (
+      <PageLoader
+        title="Confirming your payment…"
+        subtitle="Taking you to your dashboard."
+      />
+    );
+  }
+
+  if (!loaded || (resumeReference && !resumeHydrated)) {
+    return (
+      <PageLoader
+        title={resumeReference ? "Opening your application…" : "Loading application…"}
+        subtitle={
+          resumeReference
+            ? `Reference ${resumeReference}`
+            : "Setting up your checklist and next steps."
+        }
+      />
+    );
+  }
+
+  if (resumeReference && applicationStartError) {
+    return (
+      <div className="mx-auto w-full max-w-[640px] px-4 pb-10 sm:px-6">
+        <div className="rounded-3xl border border-rose-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-rose-700">Could not open application</h2>
+          <p className="mt-2 text-sm text-slate-600">{applicationStartError}</p>
+          <Link
+            href="/dashboard"
+            className="mt-4 inline-flex rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white"
+          >
+            Back to dashboard
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   // Always show full journey catalog (all categories). Live API may only return OCI —
@@ -3314,8 +3974,25 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       journeyId: "passport-renewal",
       name: "Indian Passport Renewal",
       description: "Renewal support for UK or US residents",
-      price: "Price on request",
-      feeNumber: null,
+      price: (() => {
+        const row = catalogServices.find(
+          (item) => String(item.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === "passport_renewal",
+        );
+        if (row && typeof row.totalFee === "number" && row.totalFee > 0) {
+          return formatGbp(row.totalFee);
+        }
+        if (typeof serviceFeeMap["passport-renewal"] === "number" && serviceFeeMap["passport-renewal"] > 0) {
+          return formatGbp(serviceFeeMap["passport-renewal"]);
+        }
+        return "See fee at checkout";
+      })(),
+      feeNumber: (() => {
+        const row = catalogServices.find(
+          (item) => String(item.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === "passport_renewal",
+        );
+        if (row && typeof row.totalFee === "number" && row.totalFee > 0) return row.totalFee;
+        return serviceFeeMap["passport-renewal"];
+      })(),
       category: "passport",
       categoryName: "Passport",
     },
@@ -3324,41 +4001,75 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       journeyId: "apostille",
       name: "Apostille Services",
       description: "Document apostille / legalization support",
-      price: "Price on request",
-      feeNumber: null,
+      price: (() => {
+        const row = catalogServices.find(
+          (item) => String(item.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === "apostille",
+        );
+        if (row && typeof row.totalFee === "number" && row.totalFee > 0) {
+          return formatGbp(row.totalFee);
+        }
+        if (typeof serviceFeeMap.apostille === "number" && serviceFeeMap.apostille > 0) {
+          return formatGbp(serviceFeeMap.apostille);
+        }
+        return "See fee at checkout";
+      })(),
+      feeNumber: (() => {
+        const row = catalogServices.find(
+          (item) => String(item.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === "apostille",
+        );
+        if (row && typeof row.totalFee === "number" && row.totalFee > 0) return row.totalFee;
+        return serviceFeeMap.apostille;
+      })(),
       category: "apostille",
       categoryName: "Apostille",
     },
   ];
 
-  const journeyCatalogServices = catalogServices.filter(
-    (row) =>
-      row.serviceType !== "document_audit" &&
-      !String(row.serviceType).startsWith("evisa") &&
-      !String(row.serviceType).toLowerCase().includes("express") &&
-      String(row.category || "").toLowerCase() !== "express" &&
-      !String(row.name || "").toLowerCase().includes("express service"),
-  );
+  const journeyCatalogServices = catalogServices.filter((row) => {
+    // Assessment is an OCI add-on step, not a primary start-order product.
+    if (row.serviceType === "document_audit") return false;
+    return true;
+  });
+
+  const categoryLabelFor = (category: string, categoryName?: string, serviceType?: string) => {
+    if (categoryName) return categoryName;
+    const key = String(category || "").toLowerCase();
+    const type = String(serviceType || "").toLowerCase();
+    if (key === "pan_card" || key === "uncategorized" || type === "pan_card") return "PAN CARD SERVICE";
+    return (
+      (
+        {
+          oci: "OCI",
+          passport: "Indian Passport",
+          evisa: "Indian Visa",
+          apostille: "Apostille",
+          other: "Others",
+          uncategorized: "PAN CARD SERVICE",
+          pan_card: "PAN CARD SERVICE",
+        } as Record<string, string>
+      )[key] || "Others"
+    );
+  };
 
   const dynamicOrderServices = journeyCatalogServices
     .map((row) => {
       const journeyId = mapCatalogServiceType(row.serviceType);
-      const optionId = String(row.serviceType || row.id || "").trim();
-      if (!optionId) return null;
+      const optionId = `svc-${row.id}`;
+      const serviceType = String(row.serviceType || "").toLowerCase();
+      const categoryKey =
+        serviceType === "pan_card"
+          ? "pan_card"
+          : String(row.category || "other").toLowerCase() || "other";
       return {
         id: optionId,
-        journeyId: journeyId || optionId.replace(/_/g, "-"),
+        catalogId: row.id,
+        journeyId: journeyId || String(row.serviceType || "").replace(/_/g, "-"),
         name: row.name,
         description: row.description || row.categoryName || "",
         price: priceDisplay(row),
         feeNumber: row.isQuoteBased ? null : row.totalFee,
-        category: row.category || "other",
-        categoryName:
-          row.categoryName ||
-          ({ oci: "OCI", passport: "Passport", apostille: "Apostille", other: "Other" } as Record<string, string>)[
-            String(row.category || "other").toLowerCase()
-          ] ||
-          "Other",
+        category: categoryKey,
+        categoryName: categoryLabelFor(categoryKey, row.categoryName, serviceType),
       };
     })
     .filter(
@@ -3366,6 +4077,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         row,
       ): row is {
         id: string;
+        catalogId: number | string;
         journeyId: string;
         name: string;
         description: string;
@@ -3376,25 +4088,38 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       } => Boolean(row),
     );
 
-  const byId = new Map<string, (typeof BASELINE_ORDER_SERVICES)[number]>();
-  for (const row of BASELINE_ORDER_SERVICES) byId.set(row.id, row);
-  for (const row of dynamicOrderServices) {
-    // Live pricing wins when present; keep baseline for any missing category/service
-    byId.set(row.id, {
-      ...row,
-      categoryName:
-        row.categoryName && row.categoryName !== "Other"
-          ? row.categoryName
-          : byId.get(row.id)?.categoryName || row.categoryName,
-    });
+  const liveServiceTypes = new Set(
+    journeyCatalogServices.map((row) =>
+      String(row.serviceType || "")
+        .toLowerCase()
+        .replace(/[\s-]+/g, "_"),
+    ),
+  );
+
+  // Prefer live catalog rows (unique per Service.pk). Only keep baseline entries that
+  // exist in the live catalog — never offer ghost services that /applications/create/ cannot resolve.
+  const byId = new Map<string, (typeof BASELINE_ORDER_SERVICES)[number] & { catalogId?: number | string | null }>();
+  if (dynamicOrderServices.length > 0) {
+    for (const row of dynamicOrderServices) {
+      byId.set(row.id, row);
+    }
+  } else {
+    for (const row of BASELINE_ORDER_SERVICES) {
+      if (liveServiceTypes.size === 0 || liveServiceTypes.has(row.id)) {
+        byId.set(row.id, row);
+      }
+    }
   }
 
-  // Stable category order: OCI → Passport → Apostille → anything else
+  // Stable category order: OCI → Indian Passport → Indian Visa → Apostille → Others → PAN CARD
   const categoryRank = (key: string) => {
     const k = key.toLowerCase();
-    if (k.includes("oci")) return 0;
-    if (k.includes("passport")) return 1;
-    if (k.includes("apostille")) return 2;
+    if (k === "oci") return 0;
+    if (k === "passport") return 1;
+    if (k === "evisa") return 2;
+    if (k === "apostille") return 3;
+    if (k === "other" || k === "others") return 4;
+    if (k === "pan_card" || k === "uncategorized") return 5;
     return 9;
   };
 
@@ -3406,6 +4131,43 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
   return (
     <div className="space-y-6">
+      {orderCartApps.length > 1 && stage !== "service" ? (
+        <div className="rounded-2xl border border-[#c7dbf5] bg-[#f3f8ff] px-4 py-3">
+          <p className="text-sm font-semibold text-[#0B69B7]">
+            Multi-application order · {orderCartApps.filter((app) => app.docsComplete).length}/{orderCartApps.length} document packs complete
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {orderCartApps.map((app, index) => {
+              const active = index === orderCartIndex && stage !== "full-payment" && stage !== "processing";
+              return (
+                <button
+                  key={app.referenceNumber}
+                  type="button"
+                  disabled={apiLoading}
+                  onClick={() => {
+                    if (index === orderCartIndex && stage !== "full-payment") return;
+                    void activateOrderCartApp(orderCartApps, index);
+                  }}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
+                    app.docsComplete
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : active
+                        ? "border-[#1A56DB] bg-[#1A56DB] text-white"
+                        : "border-[#D7E4F4] bg-white text-[#627D98] hover:border-[#1A56DB]"
+                  }`}
+                >
+                  {index + 1}. {app.applicantName || "Applicant"} · {serviceLabelMap[app.service]}
+                  {app.docsComplete ? " ✓" : ""}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[12px] text-[#627D98]">
+            Smart questionnaire and document upload run separately for each applicant × service. Files from one application are not reused on the next — upload again when the same doc type is required. Payment is combined at the end.
+          </p>
+        </div>
+      ) : null}
+
       {stage === "service" ? null : bannerMessage ? (
         <p className="text-sm text-slate-600">{bannerMessage}</p>
       ) : null}
@@ -3435,7 +4197,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       ) : null}
 
 
-{stage === "service" && (
+{stage === "service" && !resumeReference && (
   <StartOrderPanel
     services={[
       ...orderServices,
@@ -3484,9 +4246,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         (fromCatalog?.journeyId as ServiceId | undefined) ||
         mapBackendServiceType(serviceId);
       const normalized = (mapped || serviceId) as ServiceId;
-      setSelectedService(normalized);
-      setShowServicePicker(false);
-      void loadQuestionsForService(normalized);
+      // Order panel only tracks selection — do not load questions here (avoids update loops).
+      // Questions load when the cart continues / an app is activated.
+      if (selectedService !== normalized) {
+        setSelectedService(normalized);
+      }
     }}
     onContinue={(cart) => {
       if (!primaryApplicant.fullName.trim() || !primaryApplicant.email.trim()) {
@@ -3505,7 +4269,7 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
         toast.error("Each applicant needs at least one service selected.");
         return;
       }
-      // One application per applicant × service — existing questionnaire/docs pipeline unchanged per app
+      // One application per applicant × service; walk Q&A + docs per app, pay once at end.
       void handleOrderCartContinue(cart);
     }}
   />
@@ -3515,15 +4279,24 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
           <div className="mx-auto w-full max-w-[820px] rounded-xl border border-[#E1E7EF] bg-white p-4 shadow-sm sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#1A56DB]">Selected service</p>
-              <p className="mt-0.5 text-[15px] font-semibold text-[#0F1F3D]">{serviceLabelMap[selectedService ?? "undecided"]}</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#1A56DB]">
+                {orderCartApps.length > 1
+                  ? `Applicant ${orderCartIndex + 1} of ${orderCartApps.length}`
+                  : "Selected service"}
+              </p>
+              <p className="mt-0.5 text-[15px] font-semibold text-[#0F1F3D]">
+                {orderCartApps.length > 1
+                  ? `${orderCartApps[orderCartIndex]?.applicantName || "Applicant"} — ${serviceLabelMap[selectedService ?? "undecided"]}`
+                  : serviceLabelMap[selectedService ?? "undecided"]}
+              </p>
             </div>
             <button
               type="button"
               onClick={() => setStage("service")}
-              className="rounded-lg border border-[#D0D7E2] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#486581] hover:bg-[#F7F9FC]"
+              disabled={orderCartApps.length > 1}
+              className="rounded-lg border border-[#D0D7E2] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#486581] hover:bg-[#F7F9FC] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Change service
+              {orderCartApps.length > 1 ? "Order in progress" : "Change service"}
             </button>
           </div>
           <InlineSmartQuestions
@@ -3533,12 +4306,23 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               options: q.options || [],
               question_type: q.question_type,
               help_text: q.help_text,
-              is_required: true,
+              is_required: q.is_required !== false,
+              depends_on_code: q.depends_on_code,
+              options_by_answer: q.options_by_answer,
             }))}
             answers={answers}
             disabled={apiLoading}
             onChange={(code, value) => {
-              setAnswers((prev) => ({ ...prev, [code]: value }));
+              setAnswers((prev) => {
+                const next = { ...prev, [code]: value };
+                // Changing country clears its paired state answer.
+                if (code.endsWith("_state")) return next;
+                const matched = activeQuestions.find((q) => q.id === code);
+                if (matched && String(matched.question_type || "").toLowerCase() === "country") {
+                  next[countryStateAnswerKey(code)] = "";
+                }
+                return clearDependentAnswers(activeQuestions, code, next);
+              });
             }}
           />
           <div className="mt-4 flex justify-end border-t border-[#E8EEF6] pt-4">
@@ -3546,12 +4330,23 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               isLoading={apiLoading}
               className="w-full sm:w-auto"
               onClick={() => {
-                const missing = activeQuestions.find((q) => !(answers[q.id] || "").trim());
-                if (missing) {
-                  toast.error("Please answer all quick questions.");
-                  return;
-                }
-                void completeQuestionnaire(answers);
+                void (async () => {
+                  const visible = activeQuestions.filter((q) => isQuestionVisible(q, answers));
+                  for (const q of visible) {
+                    if (q.is_required === false) continue;
+                    if (!(answers[q.id] || "").trim()) {
+                      toast.error("Please answer all quick questions.");
+                      return;
+                    }
+                    if (String(q.question_type || "").toLowerCase() !== "country") continue;
+                    const states = await fetchStatesForCountry(answers[q.id] || "");
+                    if (states.length > 0 && !(answers[countryStateAnswerKey(q.id)] || "").trim()) {
+                      toast.error("Please select a state / region.");
+                      return;
+                    }
+                  }
+                  void completeQuestionnaire(answers);
+                })();
               }}
             >
               Continue to checklist
@@ -3580,8 +4375,38 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
             </p>
           ) : null}
 
-          <div className="mt-6 grid gap-4">
-            {uploadChecklist.map((doc) => {
+          {([
+            {
+              key: "required" as const,
+              docs: requiredDocs,
+              heading: null as string | null,
+              subtitle: null as string | null,
+            },
+            {
+              key: "optional" as const,
+              docs: optionalDocs,
+              heading: "Optional supporting documents",
+              subtitle: "From your checklist. These do not block continuing once required documents are uploaded.",
+            },
+          ] as const).map((section) => {
+            if (section.docs.length === 0) return null;
+            return (
+              <div
+                key={section.key}
+                className={
+                  section.key === "optional"
+                    ? "mt-8 rounded-2xl border border-dashed border-border bg-white p-5"
+                    : "mt-6"
+                }
+              >
+                {section.heading ? (
+                  <>
+                    <h4 className="text-lg font-heading font-semibold text-primary">{section.heading}</h4>
+                    {section.subtitle ? <p className="mt-1 text-sm text-textMuted">{section.subtitle}</p> : null}
+                  </>
+                ) : null}
+                <div className={section.key === "optional" ? "mt-4 grid gap-4" : "grid gap-4"}>
+                  {section.docs.map((doc) => {
               const normalizedDocId = normalizeChecklistKey(doc.id);
               const flaggedMatch = flaggedDocumentsLookup.get(normalizedDocId);
               const applicationStatus = String(applicationRecord?.application_status || "").trim().toLowerCase();
@@ -3592,9 +4417,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 Boolean(flaggedMatch?.reuploaded) ||
                 String(flaggedMatch?.status || "").toLowerCase() === "reuploaded" ||
                 Boolean(flaggedReuploads[doc.id]);
-              const isUploaded = Boolean(documents[doc.id]?.fileName) || flaggedUploaded;
+              const isUploaded = isDocUploaded(doc.id) || flaggedUploaded;
               const flaggedDocLabel = flaggedMatch?.document_type || formatDocumentTypeLabel(doc.id) || doc.title;
-              const state: DocumentStatus = isUploaded ? "uploaded" : (flaggedMatch ? "pending_reupload" : (documents[doc.id]?.status || "not_uploaded"));
+              const state: DocumentStatus = isUploaded
+                ? "uploaded"
+                : flaggedMatch
+                  ? "pending_reupload"
+                  : "not_uploaded";
               const mistakeItems = Array.isArray(doc.commonMistakes) ? doc.commonMistakes : [];
               const specialLabel =
                 doc.specialRequirement === "apostille"
@@ -3725,42 +4554,17 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 </div>
               );
             })}
-          </div>
+                </div>
+              </div>
+            );
+          })}
 
           <div className="mt-8 rounded-2xl border border-dashed border-border bg-white p-5">
-            <h4 className="text-lg font-heading font-semibold text-primary">Optional supporting documents</h4>
-            <p className="mt-1 text-sm text-textMuted">Useful for complex cases. These do not block your main audit payment.</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {defaultSupportDocs.map((item) => (
-                <div key={item.id} className="rounded-xl border border-border bg-bg-page p-4">
-                  <p className="font-semibold text-primary text-sm">{item.title}</p>
-                  <p className="mt-1 text-xs text-textMuted">{item.description}</p>
-                  <label className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-primary/20 bg-white px-3 py-2 text-xs font-semibold text-primary hover:bg-bg-blue">
-                    <Upload className="mr-2 h-3.5 w-3.5" /> Upload
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        setSupportUploads((current) => ({
-                          ...current,
-                          [item.id]: file ? file.name : "",
-                        }));
-                      }}
-                    />
-                  </label>
-                  {supportUploads[item.id] ? <p className="mt-2 text-[11px] text-slate-500">{supportUploads[item.id]}</p> : null}
-                </div>
-              ))}
-            </div>
-            <div className="mt-5">
-              <ConsentCheckboxes
-                mode="upload"
-                showMinorConsent={answers.ageGroup === "Child (under 18)"}
-                onAcceptanceChange={setUploadConsentsAccepted}
-              />
-            </div>
+            <ConsentCheckboxes
+              mode="upload"
+              showMinorConsent={answers.ageGroup === "Child (under 18)"}
+              onAcceptanceChange={setUploadConsentsAccepted}
+            />
             <div className="mt-4">
               <label className="block text-sm font-semibold text-primary mb-2">Notes to FlyOCI team</label>
               <textarea
@@ -3775,11 +4579,47 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm text-textMuted">
-              {uploadedDocs.length} of {uploadChecklist.length} documents uploaded
+              {uploadedRequiredDocs.length} of {requiredDocs.length} required documents uploaded
+              {missingRequiredDocs.length > 0 ? (
+                <span className="block text-xs font-medium text-amber-800 sm:inline sm:before:content-['·'] sm:before:mx-1">
+                  Still needed: {missingRequiredDocs.map((doc) => doc.title).join(", ")}
+                </span>
+              ) : null}
+              {optionalDocs.length > 0
+                ? ` · ${uploadedDocs.length - uploadedRequiredDocs.length} of ${optionalDocs.length} optional`
+                : ""}
             </div>
             <div className="flex flex-wrap gap-3">
               <Button variant="outline" onClick={() => setStage("checklist")}>Back to checklist</Button>
-              <Button isLoading={apiLoading} onClick={proceedToSummary} disabled={!requiredComplete || !uploadConsentsAccepted}>Review & Proceed to Payment</Button>
+              <Button
+                isLoading={apiLoading || pricingLoading}
+                onClick={() => {
+                  if (pricingLoading || assessmentEligibilityPending) {
+                    toast.error("Loading fees… please wait a moment.");
+                    return;
+                  }
+                  // Multi-app cart must walk every pack (even when assessment is not offered).
+                  if (orderCartApps.length > 1) {
+                    void proceedToSummary();
+                    return;
+                  }
+                  if (!assessmentOffered) {
+                    proceedToFullPayment();
+                    return;
+                  }
+                  void proceedToSummary();
+                }}
+                disabled={!requiredComplete || !uploadConsentsAccepted || pricingLoading}
+              >
+                {orderCartApps.length > 1
+                  ? orderCartIndex < orderCartApps.length - 1 ||
+                    orderCartApps.some((app, index) => index !== orderCartIndex && !app.docsComplete)
+                    ? "Save & continue to next applicant"
+                    : "Review order & pay"
+                  : assessmentOffered || assessmentEligibilityPending
+                    ? "Review & Proceed to Payment"
+                    : "Continue to Payment"}
+              </Button>
             </div>
           </div>
         </div>
@@ -3787,11 +4627,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
       {stage === "summary" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">{selectedService === "passport-renewal" ? "Upload Summary and Request Submission" : assessmentOffered ? "Upload Summary and Assessment Fee Payment" : "Upload Summary"}</h3>
+          <h3 className="text-2xl font-heading font-bold text-primary">{assessmentOffered ? "Upload Summary and Assessment Fee Payment" : "Upload Summary"}</h3>
           <p className="mt-2 text-textMuted">
-            {selectedService === "passport-renewal"
-              ? "Submit your passport renewal request now. Our team will review your documents and share a Price on request quote in your dashboard within 24-48 working hours."
-              : assessmentOffered
+            {assessmentOffered
                 ? `We will review your documents and confirm if they are acceptable for submission. The assessment fee is fully adjusted against your final service fee when you proceed within ${AUDIT_CREDIT_VALIDITY_DAYS} days.`
                 : "We will review your documents and confirm if they are acceptable for submission."}
           </p>
@@ -3823,53 +4661,30 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 </div>
               ) : null}
             </div>
-            {selectedService === "passport-renewal" ? (
-              <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5 text-slate-700">
-                <button
-                  type="button"
-                  onClick={() => setPassportFlowSummaryOpen((open) => !open)}
-                  className="flex w-full items-center justify-between gap-3 text-left"
-                  aria-expanded={passportFlowSummaryOpen}
-                >
-                  <h4 className="font-semibold text-primary">Price on request flow</h4>
-                  <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${passportFlowSummaryOpen ? "rotate-180" : ""}`} />
-                </button>
-                {passportFlowSummaryOpen ? (
-                  <>
-                    <p className="mt-2 text-sm">Your documents are submitted for review. Once our team validates your case details, your quoted fee will appear in your dashboard for secure payment.</p>
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
-                      <p className="flex justify-between"><span>Service</span><strong>Indian Passport Renewal</strong></p>
-                      <p className="mt-2 flex justify-between"><span>Pricing</span><strong>Price on request</strong></p>
-                      <p className="mt-2 flex justify-between"><span>Quote turnaround</span><strong>24-48 working hours</strong></p>
-                    </div>
-                  </>
-                ) : null}
-              </div>
-            ) : (
               <div className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
                 {assessmentOffered ? (
                 <div className="flex gap-2 border-b border-[#dce7f8] pb-3">
                   <button
                     type="button"
-                    onClick={() => setAuditPaymentTab((current) => (current === "take-audit" ? null : "take-audit"))}
+                    onClick={() => setAuditPaymentTab("take-audit")}
                     className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
                       auditPaymentTab === "take-audit"
                         ? "bg-primary text-white shadow-sm"
                         : "bg-white text-slate-600 hover:bg-[#eef5ff]"
                     }`}
-                    aria-expanded={auditPaymentTab === "take-audit"}
+                    aria-pressed={auditPaymentTab === "take-audit"}
                   >
                     Take Assessment
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAuditPaymentTab((current) => (current === "skip-audit" ? null : "skip-audit"))}
+                    onClick={() => setAuditPaymentTab("skip-audit")}
                     className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
                       auditPaymentTab === "skip-audit"
                         ? "bg-rose-600 text-white shadow-sm"
                         : "bg-white text-slate-600 hover:bg-rose-50"
                     }`}
-                    aria-expanded={auditPaymentTab === "skip-audit"}
+                    aria-pressed={auditPaymentTab === "skip-audit"}
                   >
                     Skip Assessment
                   </button>
@@ -3878,16 +4693,26 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
                 {assessmentOffered && auditPaymentTab === "take-audit" ? (
                   <div className="mt-4 space-y-4 text-slate-700">
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+                      <h4 className="font-semibold">Why take assessment?</h4>
+                      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm">
+                        <li>We catch document mistakes early — most applications have at least one issue.</li>
+                        <li>You avoid embassy / VFS rejections and long correction delays later.</li>
+                        <li>The £{auditFee} fee is fully credited against your OCI service fee if you proceed within {AUDIT_CREDIT_VALIDITY_DAYS} days (New OCI, OCI Renewal, or OCI Update).</li>
+                        <li>Recommended path — safer and usually no extra cost when you continue with us.</li>
+                      </ul>
+                    </div>
+
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
                       <h4 className="font-semibold">Assessment fee breakdown</h4>
                       <p className="mt-2 text-sm">
-                        One-time expert pre-check. If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update) within {AUDIT_CREDIT_VALIDITY_DAYS} days, this amount is deducted from your final fee (e.g., New OCI £88 - £{auditFee} = £{Math.max(serviceFeeForMath - auditFee, 0)} to pay later). Assessment credit does not apply to e-Visa or Passport Renewal.
+                        One-time expert pre-check. Example: service £{serviceFeeForMath} − assessment £{auditFee} = £{Math.max(serviceFeeForMath - auditFee, 0)} left to pay later. Assessment credit does not apply to e-Visa or Passport Renewal.
                       </p>
                       <div className="mt-4 space-y-2 text-sm">
                         <p className="flex justify-between"><span>Assessment fee</span><strong>£{auditFee}</strong></p>
                         <p className="flex justify-between"><span>Credit if you proceed</span><strong>-£{auditFee}</strong></p>
                         <p className="flex justify-between"><span>Credit validity</span><strong>{AUDIT_CREDIT_VALIDITY_DAYS} days from payment</strong></p>
-                        <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>{serviceFee === null ? "Price on request" : `£${serviceFee}`}</strong></p>
+                        <p className="flex justify-between border-t border-amber-200 pt-2"><span>Example service fee</span><strong>{serviceFee === null ? "See fee at checkout" : `£${serviceFee}`}</strong></p>
                       </div>
                     </div>
 
@@ -3908,10 +4733,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 ) : assessmentOffered && auditPaymentTab === "skip-audit" ? (
                   <div className="mt-4 space-y-4 text-slate-700">
                     <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-                      <p className="font-semibold">Skip assessment? You can, but it is not recommended.</p>
-                      <p className="mt-2">
-                        More than 50% of applications have document issues we catch early. The £{auditFee} assessment fee is fully deducted from your OCI service fee (New OCI, OCI Renewal, or OCI Update) if you proceed with us within {AUDIT_CREDIT_VALIDITY_DAYS} days. Assessment credit does not apply to e-Visa or Passport Renewal.
-                      </p>
+                      <p className="font-semibold">Why skipping is not recommended</p>
+                      <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                        <li>More than 50% of applications have document issues we normally catch in assessment.</li>
+                        <li>Problems found after full payment mean extra correction rounds and delays.</li>
+                        <li>You still pay the same overall for OCI services if you take assessment — the £{auditFee} is credited within {AUDIT_CREDIT_VALIDITY_DAYS} days.</li>
+                        <li>Skip only if you accept the risk of rejection or rework after paying the full fee.</li>
+                      </ul>
                     </div>
 
                     <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
@@ -3924,41 +4752,36 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                       <span>I understand that skipping assessment can cause delays and extra correction rounds after payment.</span>
                     </label>
 
-                    <ConsentCheckboxes
-                      mode="payment"
-                      includeAuditFeeAcknowledgement
-                      onAcceptanceChange={setPaymentConsentsAccepted}
-                    />
-
                     <Button
                       variant="outline"
                       isLoading={apiLoading}
-                      disabled={!skipAuditDisclaimerAccepted || apiLoading || !paymentConsentsAccepted}
+                      disabled={!skipAuditDisclaimerAccepted || apiLoading}
                       onClick={() => void skipAuditAndProceedToPayment()}
                     >
-                      Skip & Pay Full Fee
+                      Skip & Continue to Payment
                     </Button>
                   </div>
                 ) : !assessmentOffered ? (
                   <div className="mt-1 space-y-4 text-slate-700">
                     <p className="text-sm text-slate-600">
-                      Continue with your application. You can pay the full service fee after document review.
+                      Assessment is not required for this service. Continue to the payment page to confirm and pay.
                     </p>
-                    <ConsentCheckboxes
-                      mode="payment"
-                      onAcceptanceChange={setPaymentConsentsAccepted}
-                    />
                     <Button
                       isLoading={apiLoading}
-                      disabled={apiLoading || !paymentConsentsAccepted}
-                      onClick={() => void skipAuditAndProceedToPayment()}
+                      onClick={() => {
+                        if (orderCartApps.length > 1) {
+                          void proceedToSummary();
+                          return;
+                        }
+                        proceedToFullPayment();
+                      }}
                     >
-                      Continue to payment
+                      {orderCartApps.length > 1 ? "Save & continue order" : "Continue to payment"}
                     </Button>
                   </div>
                 ) : null}
               </div>
-            )}          </div>
+          </div>
 
           <div className="mt-6">
             <Button variant="outline" onClick={() => {
@@ -3966,92 +4789,20 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               setMessageRequestedDocIds([]);
               setStage("checklist");
             }}>Back to uploads</Button>
-            {selectedService === "passport-renewal" ? (
-              <Button className="ml-3" isLoading={apiLoading} onClick={() => void submitPassportRequestForQuote()} disabled={!uploadConsentsAccepted}>Submit Passport Renewal Request</Button>
-            ) : null}
-          </div>
-        </div>
-      )}
-
-      {stage === "passport-quote-pending" && (
-        <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Passport Renewal Request Submitted</h3>
-          <p className="mt-2 text-textMuted">Our team will review your uploaded documents and update your dashboard quote status within 24-48 working hours.</p>
-          <div className="mt-5 rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5 text-sm text-slate-700">
-            <p className="flex justify-between"><span>Case number</span><strong>{passportCaseReference || applicationRecord?.file_number || applicationRecord?.reference_number || referenceNumber || "N/A"}</strong></p>
-            <p className="mt-2 flex justify-between"><span>Updates sent to</span><strong>{passportMaskedEmail || "your registered email"}</strong></p>
-            <p className="mt-2 flex justify-between"><span>Quote status</span><strong>{String(applicationRecord?.quote_status || "PENDING_QUOTE").replaceAll("_", " ")}</strong></p>
-          </div>
-
-          {String(applicationRecord?.quote_status || "").toUpperCase() === "PENDING_QUOTE" ? (
-            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              Your quote is being prepared by our team. We'll notify you by email when it's ready. Expected: within 24 hours.
-            </div>
-          ) : null}
-
-          {String(applicationRecord?.quote_status || "").toUpperCase() === "QUOTED" ? (
-            <div id="passport-quote-box" ref={quoteCardRef} className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
-              {(() => {
-                const quotedFeeRaw = String(applicationRecord?.quoted_fee || "").trim();
-                const quotedFeeNumber = Number.parseFloat(quotedFeeRaw);
-                const quoteAmountPence = Number(applicationRecord?.quote_amount_pence || 0);
-                const displayAmount = Number.isFinite(quotedFeeNumber) && quotedFeeNumber > 0
-                  ? quotedFeeNumber.toFixed(2)
-                  : quoteAmountPence > 0
-                    ? (quoteAmountPence / 100).toFixed(2)
-                    : "0.00";
-
-                return (
-                  <>
-              <p className="text-lg font-semibold">Your Quote is Ready!</p>
-              <p className="mt-2 text-base font-semibold">Passport Renewal: £{displayAmount}</p>
-              <p className="mt-1">Valid until: {applicationRecord?.quote_expires_at ? new Date(applicationRecord.quote_expires_at).toLocaleString() : "Not set"}</p>
-              <div className="mt-4 flex flex-wrap gap-3">
-                <Button onClick={() => router.push(`/passport-renewal/pay?reference=${encodeURIComponent(String(applicationRecord?.reference_number || referenceNumber || ""))}`)}>
-                  Pay Now
-                </Button>
-                <Button variant="outline" onClick={() => router.push(`/passport-renewal/pay?reference=${encodeURIComponent(String(applicationRecord?.reference_number || referenceNumber || ""))}`)}>
-                  View Details
-                </Button>
-              </div>
-                  </>
-                );
-              })()}
-            </div>
-          ) : null}
-
-          {String(applicationRecord?.quote_status || "").toUpperCase() === "EXPIRED" ? (
-            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-              <p>Your quote has expired. Please contact us for a new quote.</p>
-              <div className="mt-3">
-                <Button variant="outline" onClick={() => router.push("/contact")}>Contact Support</Button>
-              </div>
-            </div>
-          ) : null}
-
-          {["QUOTE_ACCEPTED", "PAID"].includes(String(applicationRecord?.quote_status || "").toUpperCase()) ? (
-            <div className="mt-5 rounded-2xl border border-[#dce7f8] bg-[#f5f9ff] p-4 text-sm text-slate-700">
-              Payment is in progress or confirmed. Your application is moving to processing.
-            </div>
-          ) : null}
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Button variant="outline" onClick={() => router.push("/dashboard")}>Back to Dashboard</Button>
-            <Button variant="outline" onClick={() => router.push("/services/passport-renewal")}>View Passport Service Details</Button>
           </div>
         </div>
       )}
 
       {stage === "audit-pending" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Audit Pending</h3>
+          <h3 className="text-2xl font-heading font-bold text-primary">Document Check Pending</h3>
           <p className="mt-2 text-textMuted">Your review is being prepared. Expected review time: within 12–24 working hours.</p>
           <div className="mt-4 rounded-2xl border border-[#dce7f8] bg-bg-page p-5 text-sm text-slate-600">
             <p className="font-semibold text-primary">Status</p>
-            <p className="mt-1">New application → Audit Pending</p>
+            <p className="mt-1">New application → Document check pending</p>
             <p className="mt-3">Email confirmation and WhatsApp confirmation will be sent after payment.</p>
             <p className="mt-3 text-xs text-slate-500">
-              Your audit fee credit is valid for {AUDIT_CREDIT_VALIDITY_DAYS} days from the date of payment when you proceed with an eligible OCI service.
+              Your assessment credit is valid for {AUDIT_CREDIT_VALIDITY_DAYS} days from the date of payment when you proceed with an eligible OCI service.
             </p>
           </div>
           <div className="mt-6 flex items-center gap-3 text-sm text-textMuted">
@@ -4069,8 +4820,8 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
             </>
           ) : (
             <>
-              <h3 className="text-2xl font-heading font-bold text-primary">Audit Result</h3>
-              <p className="mt-2 text-textMuted">Email + WhatsApp message sent with a link to view your audit result.</p>
+              <h3 className="text-2xl font-heading font-bold text-primary">Document Check Result</h3>
+              <p className="mt-2 text-textMuted">We emailed and WhatsApped you a link to view this result.</p>
             </>
           )}
 
@@ -4088,13 +4839,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
           ) : (
             <div className="mt-5 space-y-5">
               <div className={`rounded-2xl border p-5 ${auditStatus === "green" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : auditStatus === "amber" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-rose-200 bg-rose-50 text-rose-900"}`}>
-                <h4 className="font-semibold text-lg">{auditStatus === "green" ? "Green - All Good" : auditStatus === "amber" ? "Amber - Minor Flaws" : "Red - Major Issues"}</h4>
+                <h4 className="font-semibold text-lg">{auditStatus === "green" ? "Approved — all good" : auditStatus === "amber" ? "Needs minor fixes" : "Major issues found"}</h4>
                 <p className="mt-2 text-sm">
                   {auditStatus === "green"
-                    ? "All your documents are correct and ready to proceed."
+                    ? "Your documents look correct and you can proceed to full service payment."
                     : auditStatus === "amber"
-                      ? "These 1–2 docs need re-upload or additional detail."
-                      : "Important documents are missing or not acceptable. These extra steps are needed: apostille, affidavit, translation, or bilingual certificate."}
+                      ? "A few documents need small corrections before we can proceed."
+                      : "Important documents need to be fixed or replaced before we can proceed."}
                 </p>
                 <div className="mt-4 text-sm">
                   {auditStatus === "green" && <p>Proceed directly to the full service payment stage.</p>}
@@ -4328,16 +5079,13 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
 
           {auditStatus === "green" && (
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button isLoading={apiLoading} onClick={async () => {
-                setApiLoading(true);
-                try {
-                  const refNum = requireReferenceNumber();
-                  router.push(`/dashboard/payment?reference=${encodeURIComponent(refNum)}`);
-                } finally {
-                  setApiLoading(false);
-                }
-              }}>
-                Proceed to Full Service Payment
+              <Button
+                isLoading={apiLoading}
+                onClick={() => {
+                  proceedToFullPayment();
+                }}
+              >
+                Proceed to Payment
               </Button>
             </div>
           )}
@@ -4347,7 +5095,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
       {stage === "full-payment" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
           <h3 className="text-2xl font-heading font-bold text-primary">Full Service Payment</h3>
-          <p className="mt-2 text-textMuted">Once documents are audit approved, pay the remaining service amount.</p>
+          <p className="mt-2 text-textMuted">
+            {assessmentOffered
+              ? "After your document check is approved, pay the remaining service amount."
+              : "Pay the catalog service fee to confirm and start processing your application."}
+          </p>
 
           {(() => {
             const appServiceType = String(applicationRecord?.service_type || selectedService || "")
@@ -4373,6 +5125,11 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
               checkoutPlans.find((plan) => plan.isDefault)?.planCode ||
               checkoutPlans[0]?.planCode ||
               "standard";
+            const expressSelected = activePlanCode === "express";
+            // If Express is chosen, only show Express — hide Standard / other plans.
+            const visiblePlans = expressSelected
+              ? checkoutPlans.filter((plan) => plan.planCode === "express")
+              : checkoutPlans;
 
             return (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -4389,39 +5146,152 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                 <p className="mt-4 text-sm text-rose-700">Unable to load payment details. Please refresh or contact support.</p>
               ) : paymentSummary ? (
                 <div className="mt-4 space-y-2 text-sm text-slate-600">
-                  <p className="flex justify-between"><span>Service ({paymentSummary.service_label})</span><strong>£{paymentSummary.service_fee.toFixed(2)}</strong></p>
-                  <p className="flex justify-between"><span>Audit credit</span><strong>- £{paymentSummary.audit_credit.toFixed(2)}</strong></p>
-                  {paymentSummary.audit_credit > 0 ? (
-                    <p className="text-xs text-slate-500">
-                      Audit credit applies when you pay within {AUDIT_CREDIT_VALIDITY_DAYS} days of your audit fee payment.
-                    </p>
-                  ) : null}
-                  {paymentSummary.addons.map((addon) => (
-                    <p key={addon.label} className="flex justify-between"><span>{addon.label}</span><strong>£{addon.amount.toFixed(2)}</strong></p>
-                  ))}
-                  <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary"><span className="font-semibold">Total due</span><strong>£{paymentSummary.total_due.toFixed(2)}</strong></p>
+                  {orderCartApps.length > 1 ? (
+                    <>
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={apiLoading || feePlanUpdating}
+                          onClick={() => void applyCartFeePlanToAll("express")}
+                          className="rounded-lg border border-[#c2410c]/40 bg-[#fff7ed] px-2.5 py-1.5 text-[11px] font-semibold text-[#c2410c] disabled:opacity-60"
+                        >
+                          Make all Express
+                        </button>
+                        <button
+                          type="button"
+                          disabled={apiLoading || feePlanUpdating}
+                          onClick={() => void applyCartFeePlanToAll("standard")}
+                          className="rounded-lg border border-[#D0D7E2] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#486581] disabled:opacity-60"
+                        >
+                          All Standard
+                        </button>
+                      </div>
+                      {orderCartApps.map((app) => {
+                        const plans = getCatalogPlansForService(app.service);
+                        const expressPlan = plans.find((plan) => plan.planCode === "express");
+                        const standardPlan =
+                          plans.find((plan) => plan.planCode !== "express" && plan.isDefault) ||
+                          plans.find((plan) => plan.planCode !== "express");
+                        const activePlan = String(cartFeePlanByRef[app.referenceNumber] || "standard").toLowerCase();
+                        const isExpress = activePlan === "express";
+                        const amount =
+                          paymentSummary.addons.find((addon) => addon.label.includes(app.referenceNumber))?.amount ??
+                          null;
+                        return (
+                          <div
+                            key={app.referenceNumber}
+                            className="rounded-xl border border-[#E4EAF2] bg-white px-3 py-2.5"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[13px] font-semibold text-[#0F1F3D]">
+                                  {app.applicantName || "Applicant"} — {serviceLabelMap[app.service]}
+                                  {isExpress ? (
+                                    <span className="ml-1.5 text-[11px] font-semibold text-[#c2410c]">· Express</span>
+                                  ) : null}
+                                </p>
+                                <p className="text-[11px] text-[#829AB1]">{app.referenceNumber}</p>
+                              </div>
+                              <strong className="shrink-0 text-[13px] text-[#0F1F3D]">
+                                {amount == null ? "—" : `£${amount.toFixed(2)}`}
+                              </strong>
+                            </div>
+                            {expressPlan ? (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={apiLoading || feePlanUpdating}
+                                  onClick={() =>
+                                    void applyCartAppFeePlan(
+                                      app.referenceNumber,
+                                      standardPlan?.planCode || "standard",
+                                    )
+                                  }
+                                  className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60 ${
+                                    !isExpress
+                                      ? "border-[#1A56DB] bg-[#EFF6FF] text-[#1A56DB]"
+                                      : "border-[#E1E7EF] bg-white text-[#627D98]"
+                                  }`}
+                                >
+                                  Standard{standardPlan ? ` £${standardPlan.fee.toFixed(0)}` : ""}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={apiLoading || feePlanUpdating}
+                                  onClick={() => void applyCartAppFeePlan(app.referenceNumber, "express")}
+                                  className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60 ${
+                                    isExpress
+                                      ? "border-[#c2410c] bg-[#fff7ed] text-[#c2410c]"
+                                      : "border-[#E1E7EF] bg-white text-[#627D98]"
+                                  }`}
+                                >
+                                  Express £{expressPlan.fee.toFixed(0)}
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="mt-1 text-[11px] text-[#829AB1]">Express not available for this service.</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary">
+                        <span className="font-semibold">Order total</span>
+                        <strong>£{paymentSummary.total_due.toFixed(2)}</strong>
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="flex justify-between"><span>Service ({paymentSummary.service_label})</span><strong>£{paymentSummary.service_fee.toFixed(2)}</strong></p>
+                      {paymentSummary.audit_credit > 0 ? (
+                        <>
+                          <p className="flex justify-between"><span>Assessment credit</span><strong>- £{paymentSummary.audit_credit.toFixed(2)}</strong></p>
+                          <p className="text-xs text-slate-500">
+                            Assessment credit applies when you pay within {AUDIT_CREDIT_VALIDITY_DAYS} days of your assessment fee payment.
+                          </p>
+                        </>
+                      ) : null}
+                      {paymentSummary.addons.map((addon) => (
+                        <p key={addon.label} className="flex justify-between"><span>{addon.label}</span><strong>£{addon.amount.toFixed(2)}</strong></p>
+                      ))}
+                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary"><span className="font-semibold">Total due</span><strong>£{paymentSummary.total_due.toFixed(2)}</strong></p>
+                    </>
+                  )}
                 </div>
               ) : null}
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <h4 className="font-semibold text-primary">What happens next</h4>
+              <h4 className="font-semibold text-primary">Confirm & pay</h4>
               <p className="mt-3 text-sm text-slate-600">On successful payment, your status moves to Service Confirmed – In Process and notifications are sent by email and WhatsApp.</p>
-              <label className="mt-5 flex items-start gap-2 text-sm text-slate-600">
-                <input type="checkbox" className="mt-1" />
-                <span>I confirm I want FlyOCI to begin processing my application.</span>
-              </label>
               <div className="mt-5">
                 <ConsentCheckboxes mode="payment" onAcceptanceChange={setPaymentConsentsAccepted} />
               </div>
 
-              {hasExpress || checkoutPlans.length > 1 ? (
+              {orderCartApps.length > 1 ? (
+                <label className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={cartSkipAssessmentAccepted}
+                    onChange={(event) => setCartSkipAssessmentAccepted(event.target.checked)}
+                  />
+                  <span>
+                    I skip individual document assessments for this multi-application order and accept that FlyOCI will proceed with the uploaded documents for all applicants/services in one checkout.
+                  </span>
+                </label>
+              ) : null}
+
+              {orderCartApps.length <= 1 && (hasExpress || checkoutPlans.length > 1) ? (
                 <div className="mt-5 border-t border-slate-200 pt-4">
-                  <p className="text-sm font-semibold text-primary">Processing speed</p>
+                  <p className="text-sm font-semibold text-primary">
+                    {expressSelected ? "Express service" : "Processing speed"}
+                  </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    Optional — choose Express only if you want faster handling. Charged only when selected.
+                    {expressSelected
+                      ? "Express selected — your case will be marked urgent after payment."
+                      : "Optional on every service — Express marks your case as urgent priority for our team."}
                   </p>
                   <div className="mt-3 grid gap-2">
-                    {checkoutPlans.map((plan) => {
+                    {visiblePlans.map((plan) => {
                       const selected = activePlanCode === plan.planCode;
                       const isExpress = plan.planCode === "express";
                       return (
@@ -4432,7 +5302,9 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                           onClick={() => void applyFeePlanSelection(plan.planCode)}
                           className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-3 text-left transition ${
                             selected
-                              ? "border-[#1A56DB] bg-[#EFF6FF] shadow-[0_0_0_1px_#1A56DB]"
+                              ? isExpress
+                                ? "border-[#c2410c] bg-[#fff7ed] shadow-[0_0_0_1px_#c2410c]"
+                                : "border-[#1A56DB] bg-[#EFF6FF] shadow-[0_0_0_1px_#1A56DB]"
                               : "border-[#E1E7EF] bg-white hover:border-[#B8C9DE]"
                           } disabled:opacity-60`}
                         >
@@ -4441,24 +5313,91 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
                               {plan.label || (isExpress ? "Express Service" : "Standard")}
                             </span>
                             <span className="mt-0.5 block text-[11px] text-[#829AB1]">
-                              {isExpress ? "Faster handling — premium fee plan" : "Standard processing fee"}
+                              {isExpress
+                                ? "Urgent priority handling after full payment"
+                                : "Standard processing fee"}
                             </span>
                           </span>
-                          <span className="shrink-0 text-[14px] font-bold text-[#1A56DB]">£{plan.fee.toFixed(2)}</span>
+                          <span className={`shrink-0 text-[14px] font-bold ${isExpress ? "text-[#c2410c]" : "text-[#1A56DB]"}`}>
+                            £{plan.fee.toFixed(2)}
+                          </span>
                         </button>
                       );
                     })}
                   </div>
+                  {expressSelected ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-[12px] font-semibold text-[#1A56DB] hover:underline"
+                      disabled={apiLoading || feePlanUpdating}
+                      onClick={() => {
+                        const standard =
+                          checkoutPlans.find((plan) => plan.planCode !== "express" && plan.isDefault) ||
+                          checkoutPlans.find((plan) => plan.planCode !== "express");
+                        if (standard) void applyFeePlanSelection(standard.planCode);
+                        else setSelectedFeePlanCode("");
+                      }}
+                    >
+                      Switch to Standard instead
+                    </button>
+                  ) : hasExpress ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-[12px] font-semibold text-[#c2410c] hover:underline"
+                      disabled={apiLoading || feePlanUpdating}
+                      onClick={() => void applyFeePlanSelection("express")}
+                    >
+                      Choose Express instead
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
+
+              <div className="mt-5">
+                <Button
+                  className="w-full"
+                  isLoading={apiLoading || feePlanUpdating}
+                  onClick={() => void confirmFullPayment()}
+                  disabled={paymentSummaryLoading || !!paymentSummaryError || !paymentSummary || !paymentConsentsAccepted || feePlanUpdating}
+                >
+                  Pay & Confirm My Application
+                </Button>
+              </div>
             </div>
           </div>
             );
           })()}
 
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button variant="outline" onClick={() => setStage("audit-result")}>Back to audit result</Button>
-            <Button isLoading={apiLoading || feePlanUpdating} onClick={() => void confirmFullPayment()} disabled={paymentSummaryLoading || !!paymentSummaryError || !paymentSummary || !paymentConsentsAccepted || feePlanUpdating}>Pay & Confirm My Application</Button>
+            {orderCartApps.length > 1 && orderCartApps.some((app) => !app.docsComplete) ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const incompleteIndex = orderCartApps.findIndex((app) => !app.docsComplete);
+                  const targetIndex = incompleteIndex >= 0 ? incompleteIndex : orderCartIndex;
+                  void activateOrderCartApp(orderCartApps, targetIndex);
+                }}
+              >
+                Continue remaining applicants
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (orderCartApps.length > 1) {
+                    router.push("/dashboard");
+                    return;
+                  }
+                  setStage(assessmentOffered ? "audit-result" : "checklist");
+                }}
+              >
+                {orderCartApps.length > 1
+                  ? "Back to dashboard"
+                  : assessmentOffered
+                    ? "Back to assessment result"
+                    : "Back to uploads"}
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -4590,6 +5529,143 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
             );
           })()}
 
+          {!docDeletionLoading && docDeletion ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-primary">Document retention</p>
+                  <p className="mt-1 text-xs text-textMuted">
+                    After your service is complete you can ask us to remove uploaded documents from our servers.
+                  </p>
+                </div>
+                {(() => {
+                  const openStatus = docDeletion.open_request?.status;
+                  const chip =
+                    docDeletion.documents_deleted || openStatus === "executed"
+                      ? { label: "Deleted", className: "border-emerald-200 bg-emerald-50 text-emerald-800" }
+                      : openStatus === "pending"
+                        ? { label: "Pending", className: "border-amber-200 bg-amber-50 text-amber-800" }
+                        : openStatus === "approved"
+                          ? { label: "Approved", className: "border-blue-200 bg-blue-50 text-blue-800" }
+                          : openStatus === "rejected" || docDeletion.requests?.[0]?.status === "rejected"
+                            ? { label: "Rejected", className: "border-rose-200 bg-rose-50 text-rose-800" }
+                            : null;
+                  return chip ? (
+                    <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${chip.className}`}>
+                      {chip.label}
+                    </span>
+                  ) : null;
+                })()}
+              </div>
+
+              {docDeletion.documents_deleted || docDeletion.open_request?.status === "executed" ? (
+                <p className="mt-3 text-sm text-emerald-900">Documents removed from FlyOCI servers.</p>
+              ) : docDeletion.open_request?.status === "pending" ? (
+                <p className="mt-3 text-sm text-amber-900">
+                  Your deletion request is pending admin review. You will be able to delete documents once it is approved.
+                </p>
+              ) : docDeletion.open_request?.status === "approved" ? (
+                <div className="mt-3 space-y-3">
+                  <p className="text-sm text-blue-900">
+                    Your request was approved. You can permanently delete your uploaded documents now.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={docDeletionBusy}
+                    onClick={() => setDocDeleteConfirmOpen(true)}
+                    className="inline-flex items-center rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    Delete my documents
+                  </button>
+                </div>
+              ) : docDeletion.eligible && !docDeletion.open_request ? (
+                <div className="mt-3 space-y-3">
+                  <textarea
+                    value={docDeletionReason}
+                    onChange={(event) => setDocDeletionReason(event.target.value)}
+                    rows={2}
+                    placeholder="Optional reason"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-primary"
+                  />
+                  <button
+                    type="button"
+                    disabled={docDeletionBusy}
+                    onClick={() => void requestDocumentDeletion()}
+                    className="inline-flex items-center rounded-lg bg-btn-primary px-3 py-1.5 text-xs font-semibold text-white shadow-btn transition hover:shadow-btn-hover hover:-translate-y-0.5 disabled:opacity-50"
+                  >
+                    Request document deletion
+                  </button>
+                </div>
+              ) : docDeletion.requests?.[0]?.status === "rejected" ? (
+                <p className="mt-3 text-sm text-rose-900">
+                  Your latest deletion request was rejected
+                  {docDeletion.requests[0].review_notes ? `: ${docDeletion.requests[0].review_notes}` : "."}
+                </p>
+              ) : null}
+
+              {docDeletion.requests.length > 0 ? (
+                <div className="mt-4 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Request history</p>
+                  <ul className="mt-2 space-y-2">
+                    {docDeletion.requests.map((row) => (
+                      <li
+                        key={row.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600"
+                      >
+                        <span className="capitalize font-semibold text-slate-800">{row.status}</span>
+                        <span>
+                          {row.requested_at
+                            ? new Date(row.requested_at).toLocaleString()
+                            : "—"}
+                        </span>
+                        {row.reviewed_by_name ? <span>Reviewed by {row.reviewed_by_name}</span> : null}
+                        {row.review_notes ? <span className="w-full text-slate-500">{row.review_notes}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {docDeleteConfirmOpen ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+              onClick={() => {
+                if (!docDeletionBusy) setDocDeleteConfirmOpen(false);
+              }}
+              role="presentation"
+            >
+              <div
+                className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.22)]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <p className="text-sm font-semibold text-primary">Delete your documents?</p>
+                <p className="mt-2 text-sm text-slate-600">
+                  This permanently removes uploaded files for this case from FlyOCI servers. You cannot undo this action.
+                </p>
+                <div className="mt-5 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={docDeletionBusy}
+                    onClick={() => setDocDeleteConfirmOpen(false)}
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={docDeletionBusy}
+                    onClick={() => void confirmExecuteDocumentDeletion()}
+                    className="inline-flex items-center rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    {docDeletionBusy ? "Deleting…" : "Delete permanently"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-5 grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl border border-slate-200 bg-bg-page p-4">
               <p className="text-sm font-semibold text-primary">Download case summary</p>
@@ -4626,7 +5702,12 @@ if (isPassport && !hasUploadedDocs && !hasChecklistArtifacts) {
             </div>
           </div>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button variant="outline" onClick={() => setStage("service")}><ArrowRight className="mr-2 h-4 w-4" /> Start another application</Button>
+            <Link
+              href="/dashboard/document-audit?start=1"
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              <ArrowRight className="mr-2 h-4 w-4" /> Start another application
+            </Link>
           </div>
           {reviewModalOpen ? (
             <div

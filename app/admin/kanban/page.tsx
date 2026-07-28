@@ -21,13 +21,16 @@ import toast from "react-hot-toast";
 
 const STAGE_LABELS: Record<KanbanStage, string> = Object.fromEntries(KANBAN_COLUMNS.map((column) => [column.id, column.title])) as Record<KanbanStage, string>;
 
-const LIVE_STAGES: KanbanStage[] = ["PASSPORT_QUOTE_PENDING", "DOCUMENTS_REQUIRED", "PAYMENT_PENDING", "REVIEW_PENDING"];
+const LIVE_STAGES: KanbanStage[] = ["DOCUMENTS_REQUIRED", "PAYMENT_PENDING", "REVIEW_PENDING"];
 
 const filterFieldClass =
   "mt-1 w-full rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm text-[#102A43]";
 
 const normalizeStage = (stage?: string): KanbanStage => {
   const normalized = (stage || "").trim().toUpperCase().replace(/\s+/g, "_");
+  if (normalized === "PASSPORT_QUOTE_PENDING") return "PAYMENT_PENDING";
+  if (normalized === "AUDIT_PENDING") return "ASSESSMENT_PENDING";
+  if (normalized === "AUDIT_COMPLETED") return "ASSESSMENT_COMPLETED";
   return (KANBAN_COLUMNS.find((column) => column.id === normalized)?.id || "NEW_LEAD") as KanbanStage;
 };
 

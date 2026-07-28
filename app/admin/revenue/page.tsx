@@ -8,7 +8,7 @@ import {
   isStaffOwnRevenueDashboard,
   type AdminDashboardOverview,
 } from "@/lib/admin-auth";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line } from "recharts";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LineChart, Line, Legend } from "recharts";
 import { motion } from "framer-motion";
 import { TrendingUp, BarChart3, Landmark } from "lucide-react";
 import toast from "react-hot-toast";
@@ -107,33 +107,36 @@ export default function RevenuePage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-4">
+          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-4 overflow-hidden">
             <h2 className="text-[#102A43] font-heading font-semibold mb-2">My revenue (last 7 days)</h2>
-            <div className="h-[240px]">
+            <div className="h-[260px] w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dailyRevenue}>
+                <BarChart data={dailyRevenue} margin={{ top: 12, right: 16, left: 4, bottom: 8 }} barCategoryGap="28%">
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                  <XAxis dataKey="day" tick={{ fill: "#486581" }} />
-                  <YAxis tick={{ fill: "#486581" }} />
+                  <XAxis dataKey="day" tick={{ fill: "#486581", fontSize: 11 }} interval={0} />
+                  <YAxis tick={{ fill: "#486581", fontSize: 11 }} width={48} />
                   <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                  <Bar dataKey="actual" fill="#009877" name="My revenue" />
+                  <Bar dataKey="actual" fill="#009877" name="My revenue" radius={[6, 6, 0, 0]} maxBarSize={36} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
-          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-4">
+          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-4 overflow-hidden">
             <h2 className="text-[#102A43] font-heading font-semibold mb-2">My revenue split</h2>
             {serviceRows.length === 0 ? (
               <p className="text-sm text-[#627D98]">No attributed revenue yet.</p>
             ) : (
               <div className="space-y-2 text-sm text-[#486581]">
                 {serviceRows.map((row) => (
-                  <p key={row.service}>
-                    {row.service}: {formatInr(row.revenue)} ({row.share.toFixed(1)}%)
+                  <p key={row.service} className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="min-w-0 break-words">{row.service}</span>
+                    <span className="shrink-0 font-semibold text-[#102A43]">
+                      {formatInr(row.revenue)} ({row.share.toFixed(1)}%)
+                    </span>
                   </p>
                 ))}
-                <p className="pt-2 border-t border-[#E5EAF0] text-xs">
-                  Order {formatInr(Number(staffRevenue?.order_revenue || 0))} · Audit{" "}
+                <p className="pt-2 border-t border-[#E5EAF0] text-xs leading-relaxed">
+                  Order {formatInr(Number(staffRevenue?.order_revenue || 0))} · Assessment{" "}
                   {formatInr(Number(staffRevenue?.audit_revenue || 0))} · Full payment{" "}
                   {formatInr(Number(staffRevenue?.full_revenue || 0))}
                 </p>
@@ -172,31 +175,32 @@ export default function RevenuePage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <motion.div whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
+        <motion.div whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm overflow-hidden">
           <h2 className="text-[#102A43] font-heading font-semibold mb-2">Daily Revenue vs Expected</h2>
-          <div className="h-[240px]">
+          <div className="h-[280px] w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dailyRevenue}>
+              <BarChart data={dailyRevenue} margin={{ top: 28, right: 16, left: 4, bottom: 8 }} barCategoryGap="22%" barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                <XAxis dataKey="day" tick={{ fill: "#486581" }} />
-                <YAxis tick={{ fill: "#486581" }} />
+                <XAxis dataKey="day" tick={{ fill: "#486581", fontSize: 11 }} interval={0} />
+                <YAxis tick={{ fill: "#486581", fontSize: 11 }} width={48} />
                 <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                <Bar dataKey="actual" fill="#33A1FD" />
-                <Bar dataKey="expected" fill="#B87333" />
+                <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="actual" fill="#33A1FD" name="Actual" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="expected" fill="#B87333" name="3-day avg" radius={[6, 6, 0, 0]} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </motion.div>
-        <motion.div whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm">
+        <motion.div whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 shadow-sm overflow-hidden">
           <h2 className="text-[#102A43] font-heading font-semibold mb-2">Monthly Trend</h2>
-          <div className="h-[240px]">
+          <div className="h-[280px] w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyRevenue}>
+              <LineChart data={monthlyRevenue} margin={{ top: 12, right: 16, left: 4, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                <XAxis dataKey="month" tick={{ fill: "#486581" }} />
-                <YAxis tick={{ fill: "#486581" }} />
+                <XAxis dataKey="month" tick={{ fill: "#486581", fontSize: 11 }} interval={0} />
+                <YAxis tick={{ fill: "#486581", fontSize: 11 }} width={48} />
                 <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                <Line dataKey="revenue" stroke="#009877" strokeWidth={3} />
+                <Line dataKey="revenue" stroke="#009877" strokeWidth={3} name="Revenue" dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

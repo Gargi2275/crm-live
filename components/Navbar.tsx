@@ -9,8 +9,6 @@ import { Menu, X, ChevronDown, CircleUserRound, ArrowRight } from "lucide-react"
 import { Button } from "./ui/Button";
 import Image from "next/image";
 import { useAuth } from "@/context/AuthContext";
-import { authenticatedFetch } from "@/lib/api";
-import { API_BASE_URL } from "@/lib/config";
 import { usePublicPricing } from "@/hooks/usePublicPricing";
 import { groupServicesByCategory } from "@/lib/service-categories";
 
@@ -27,20 +25,13 @@ const baseNavLinks = [
 export function Navbar() {
   const router = useRouter();
   const { isAuthenticated, logout, loading } = useAuth();
-  const { services, loading: pricingLoading, assessmentFee } = usePublicPricing();
-  const navLinks = useMemo(() => {
-    if (assessmentFee == null || assessmentFee <= 0) return baseNavLinks;
-    const links = [...baseNavLinks];
-    links.splice(3, 0, { name: "Early Assessment", href: "/document-audit" });
-    return links;
-  }, [assessmentFee]);
+  const { services, loading: pricingLoading } = usePublicPricing();
+  const navLinks = baseNavLinks;
   const [isScrolled, setIsScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  // const [dashboardQuoteHref, setDashboardQuoteHref] = useState<string>("/dashboard");
-  const [hasQuoteNotification, setHasQuoteNotification] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
@@ -132,50 +123,6 @@ export function Navbar() {
       document.removeEventListener("keydown", onEsc);
     };
   }, [profileMenuOpen]);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setHasQuoteNotification(false);
-      // setDashboardQuoteHref("/dashboard");
-      return;
-    }
-
-    let cancelled = false;
-    const loadQuoteNotification = async () => {
-      try {
-        const response = await authenticatedFetch(`${API_BASE_URL}/applications/`, { method: "GET" });
-        const raw = await response.json().catch(() => ({}));
-        if (!response.ok || cancelled) {
-          return;
-        }
-
-        const apps = ((raw as { data?: Array<{ reference_number?: string; quote_status?: string; service_type?: string }> }).data || []);
-        const quotedPassport = apps.find((app) => {
-          const serviceType = String(app.service_type || "").toLowerCase();
-          return serviceType.includes("passport") && String(app.quote_status || "").toUpperCase() === "QUOTED";
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        if (quotedPassport?.reference_number) {
-          setHasQuoteNotification(true);
-        } else {
-          setHasQuoteNotification(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setHasQuoteNotification(false);
-        }
-      }
-    };
-
-    void loadQuoteNotification();
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, pathname]);
 
   return (
     <>
@@ -318,8 +265,7 @@ export function Navbar() {
                 <Button variant="outline" className="text-base" disabled>Loading...</Button>
               ) : isAuthenticated ? (
                 <>
-                  <Link href="/dashboard" className="relative">
-                    {hasQuoteNotification ? <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-rose-500" aria-hidden="true" /> : null}
+                  <Link href="/dashboard">
                     <Button variant="outline" className="text-base">Dashboard</Button>
                   </Link>
                   <Button
@@ -571,15 +517,9 @@ export function Navbar() {
                       </Link>
                       <p className="text-sm text-[#627d98]">
                         Unsure where to begin?{" "}
-                        {assessmentFee != null && assessmentFee > 0 ? (
-                          <Link href="/document-audit" className="font-semibold text-[#1c69dd] hover:underline">
-                            Start with an early assessment
-                          </Link>
-                        ) : (
-                          <Link href="/services" className="font-semibold text-[#1c69dd] hover:underline">
-                            Browse services
-                          </Link>
-                        )}
+                        <Link href="/services" className="font-semibold text-[#1c69dd] hover:underline">
+                          Browse services
+                        </Link>
                       </p>
                     </div>
                   </div>

@@ -1,4 +1,4 @@
-export type StripePaymentKind = "audit" | "full" | "passport-quote" | "apostille" | "evisa" | "easyfly";
+export type StripePaymentKind = "audit" | "full" | "cart_full" | "passport-quote" | "apostille" | "evisa" | "easyfly";
 
 export function getStripeCheckoutUrl(payload: {
   checkout_url?: string | null;

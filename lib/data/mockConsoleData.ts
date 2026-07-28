@@ -1,7 +1,7 @@
 export type ConsoleRole =
   | "Admin / CEO"
   | "Operations Manager"
-  | "Audit Officer"
+  | "Assessment Officer"
   | "Staff / Case Worker"
   | "Viewer";
 export type ServiceType = "OCI" | "Passport Renewal" | "E-Visa";
@@ -10,8 +10,8 @@ export type StaffLoadStatus = "Available" | "Busy" | "Overloaded";
 
 export type KanbanStage =
   | "NEW_LEAD"
-  | "AUDIT_PENDING"
-  | "AUDIT_COMPLETED"
+  | "ASSESSMENT_PENDING"
+  | "ASSESSMENT_COMPLETED"
   | "DOCUMENTS_REQUIRED"
   | "PAYMENT_PENDING"
   | "DOCUMENT_UPLOAD_PENDING"
@@ -54,15 +54,15 @@ export interface PipelineCase {
 export const FLYOCI_ROLES: ConsoleRole[] = [
   "Admin / CEO",
   "Operations Manager",
-  "Audit Officer",
+  "Assessment Officer",
   "Staff / Case Worker",
   "Viewer",
 ];
 
 export const KANBAN_COLUMNS: { id: KanbanStage; title: string; color: string }[] = [
   { id: "NEW_LEAD", title: "NEW LEAD", color: "bg-sky-100 text-sky-700 border-sky-200" },
-  { id: "AUDIT_PENDING", title: "AUDIT PENDING", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
-  { id: "AUDIT_COMPLETED", title: "AUDIT COMPLETED", color: "bg-green-100 text-green-700 border-green-200" },
+  { id: "ASSESSMENT_PENDING", title: "ASSESSMENT PENDING", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+  { id: "ASSESSMENT_COMPLETED", title: "ASSESSMENT COMPLETED", color: "bg-green-100 text-green-700 border-green-200" },
   { id: "DOCUMENTS_REQUIRED", title: "DOCUMENTS REQUIRED", color: "bg-orange-100 text-orange-700 border-orange-200" },
   { id: "PAYMENT_PENDING", title: "PAYMENT PENDING", color: "bg-red-100 text-red-700 border-red-200" },
   {
@@ -85,7 +85,7 @@ export const STAFF_MEMBERS: StaffMember[] = [
   {
     id: "s1",
     name: "Nimit",
-    role: "Audit Officer",
+    role: "Assessment Officer",
     initials: "NI",
     assigned: 8,
     completed: 5,
@@ -153,7 +153,7 @@ export const PIPELINE_CASES: PipelineCase[] = [
     flag: "🇮🇳",
     amount: 5000,
     paymentStatus: "Paid",
-    stage: "AUDIT_PENDING",
+    stage: "ASSESSMENT_PENDING",
     assignedTo: "Nimit",
     slaTimer: "01:38:00",
     slaBreached: false,

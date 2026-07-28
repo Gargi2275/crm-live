@@ -384,8 +384,8 @@ export function HubCountryForm({
           <div>
             <h2 className="text-sm font-semibold text-[#102A43]">2. Services &amp; fees</h2>
             <p className="mt-1 max-w-xl text-xs text-[#829AB1]">
-              Pick services from your catalog, set location fees, drag to reorder. Star one as Most
-              Popular. Leave govt fee empty when there isn’t one.
+              Pick services from your catalog, set location fees, drag to reorder. Star one as
+              Featured (shown in the hub hero). Leave govt fee empty when there isn’t one.
             </p>
           </div>
           <button
@@ -444,7 +444,7 @@ export function HubCountryForm({
                               }`}
                             >
                               <Star className={`h-3.5 w-3.5 ${row.is_popular ? "fill-amber-500" : ""}`} />
-                              {row.is_popular ? "Most popular" : "Make popular"}
+                              {row.is_popular ? "Featured" : "Make featured"}
                             </button>
                             <label className="flex items-center gap-1.5 text-xs text-[#486581]">
                               <input

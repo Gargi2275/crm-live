@@ -7,15 +7,15 @@ import { useAuth } from "@/context/AuthContext";
 
 const container = {
   hidden: {},
-  visible: { transition: { staggerChildren: 0.08, delayChildren: 0.04 } },
+  visible: { transition: { staggerChildren: 0.06, delayChildren: 0.03 } },
 };
 
 const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
+  hidden: { opacity: 0, y: 16 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
+    transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] as const },
   },
 };
 
@@ -67,103 +67,112 @@ export function ServicePageLayout({
 
   return (
     <>
-      {/* Hero */}
-      <section className="relative overflow-hidden bg-[linear-gradient(180deg,#f5f9ff_0%,#ffffff_72%)] px-4 pb-14 pt-24 sm:px-6 sm:pt-28 lg:px-8 lg:pb-16">
-        <div className="pointer-events-none absolute -right-20 -top-16 h-64 w-64 rounded-full bg-[#dcecff] blur-3xl motion-safe:animate-pulse" />
-        <div className="pointer-events-none absolute -bottom-12 -left-12 h-48 w-48 rounded-full bg-[#edf5ff] blur-3xl" />
+      {/* Compact action-first hero */}
+      <section className="relative overflow-hidden bg-[linear-gradient(180deg,#f3f8ff_0%,#ffffff_60%)] px-4 pb-8 pt-24 sm:px-6 sm:pb-10 sm:pt-28 lg:px-8">
+        <div className="pointer-events-none absolute -right-16 top-8 h-52 w-52 rounded-full bg-[#dbeafe] blur-3xl" />
 
-        <div className="relative z-10 mx-auto max-w-6xl">
+        <div className="relative z-10 mx-auto max-w-7xl">
           <motion.div
             variants={container}
             initial={reduceMotion ? false : "hidden"}
             animate="visible"
-            className="grid items-start gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)] lg:gap-10"
+            className="grid items-start gap-5 lg:grid-cols-[1.15fr_0.85fr] lg:gap-7"
           >
             <div>
               <motion.div
                 variants={fadeUp}
-                className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#cfe1fb] bg-white px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[#1c69dd] shadow-sm"
+                className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#cfe1fb] bg-white/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#1c69dd] shadow-sm"
               >
-                <Sparkles className="h-3.5 w-3.5" />
+                <Sparkles className="h-3 w-3" />
                 {eyebrow}
               </motion.div>
 
               <motion.h1
                 variants={fadeUp}
-                className="font-heading text-[clamp(1.85rem,4.2vw,2.75rem)] font-black leading-tight tracking-[-0.02em] text-[#041020]"
+                className="font-heading text-[clamp(1.7rem,3.5vw,2.55rem)] font-black leading-[1.12] tracking-[-0.03em] text-[#041020]"
               >
                 {title}
               </motion.h1>
 
               <motion.p
                 variants={fadeUp}
-                className="mt-4 max-w-3xl text-base font-semibold leading-relaxed text-[#334e68] sm:text-lg"
+                className="mt-2.5 max-w-2xl text-[15px] leading-relaxed text-[#486581] sm:text-base"
               >
                 {description}
               </motion.p>
 
-              {bulletPoints && bulletPoints.length > 0 && (
-                <motion.ul variants={container} className="mt-6 space-y-2.5">
+              {bulletPoints && bulletPoints.length > 0 ? (
+                <motion.ul variants={container} className="mt-4 space-y-2">
                   {bulletPoints.map((point) => (
                     <motion.li
                       key={point}
                       variants={fadeUp}
-                      className="flex items-start gap-2.5 text-sm font-semibold text-[#486581] sm:text-[15px]"
+                      className="flex items-start gap-2 text-sm font-semibold text-[#486581]"
                     >
                       <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
                       {point}
                     </motion.li>
                   ))}
                 </motion.ul>
-              )}
+              ) : null}
 
-              {highlights && highlights.length > 0 && (
-                <motion.div
-                  variants={container}
-                  className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-3"
-                >
+              {highlights && highlights.length > 0 ? (
+                <motion.div variants={fadeUp} className="mt-4 flex flex-wrap gap-2">
                   {highlights.map((item) => (
-                    <motion.div
+                    <span
                       key={item.label}
-                      variants={fadeUp}
-                      whileHover={reduceMotion ? undefined : { y: -4, scale: 1.02 }}
-                      className="rounded-2xl border border-[#d9e8ff] bg-white px-4 py-3.5 shadow-[0_8px_24px_rgba(30,74,135,0.08)] transition-shadow hover:shadow-[0_14px_32px_rgba(28,105,221,0.12)]"
+                      className="rounded-full border border-[#d6e8ff] bg-white px-3 py-1.5 text-xs font-semibold text-[#486581]"
                     >
-                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#2b5e93]">
-                        {item.label}
-                      </p>
-                      <p className="mt-1 text-sm font-bold text-[#041020]">{item.value}</p>
-                    </motion.div>
+                      <span className="text-[#829ab1]">{item.label}: </span>
+                      {item.value}
+                    </span>
                   ))}
                 </motion.div>
-              )}
+              ) : null}
 
-              {extraHeroContent && (
-                <motion.div variants={fadeUp} className="mt-6">
+              {extraHeroContent ? (
+                <motion.div variants={fadeUp} className="mt-4">
                   {extraHeroContent}
                 </motion.div>
-              )}
+              ) : null}
+
+              {/* Quick benefits under CTA area on mobile — pulled from whatYouGet */}
+              {whatYouGet ? (
+                <motion.div
+                  variants={fadeUp}
+                  className="mt-5 hidden rounded-2xl border border-[#e2ecf8] bg-[#f8fbff] p-4 lg:block"
+                >
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#1c69dd]">
+                    {whatYouGet.title}
+                  </p>
+                  <ul className="mt-2.5 grid gap-2 sm:grid-cols-2">
+                    {whatYouGet.items.map((item) => (
+                      <li key={item} className="flex items-start gap-2 text-sm font-medium text-[#334e68]">
+                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1c69dd]" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </motion.div>
+              ) : null}
             </div>
 
-            <motion.div variants={fadeUp}>
-              <motion.div
-                whileHover={reduceMotion ? undefined : { y: -8 }}
-                transition={{ type: "spring", stiffness: 280, damping: 22 }}
-                className="overflow-hidden rounded-3xl border border-[#d6e8ff] bg-white shadow-[0_20px_56px_rgba(30,74,135,0.12)]"
-              >
+            {/* Pricing / start card — primary action */}
+            <motion.div variants={fadeUp} className="lg:sticky lg:top-24">
+              <div className="overflow-hidden rounded-2xl border border-[#d6e8ff] bg-white shadow-[0_16px_40px_rgba(28,105,221,0.12)]">
                 <div className="h-1 bg-gradient-to-r from-[#1c69dd] via-[#60a5fa] to-[#1c69dd]" />
-                <div className="p-6 sm:p-7">
-                  <h2 className="font-heading text-lg font-black text-[#041020]">
-                    {pricing.title ?? "Service Summary"}
+                <div className="p-5 sm:p-6">
+                  <h2 className="font-heading text-base font-bold text-[#041020]">
+                    {pricing.title ?? "Start this service"}
                   </h2>
-                  <div className="mt-5 space-y-3">
+                  <div className="mt-4 space-y-2">
                     {pricing.lines.map((line) => (
                       <div
                         key={line.label}
                         className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm ${
                           line.highlight
                             ? "border border-[#dbeafe] bg-[#f0f7ff] font-bold text-[#041020]"
-                            : "text-[#486581]"
+                            : "bg-[#f8fbff] text-[#486581]"
                         }`}
                       >
                         <span className="font-semibold">{line.label}</span>
@@ -173,184 +182,115 @@ export function ServicePageLayout({
                       </div>
                     ))}
                   </div>
-                  {pricing.footnote && (
-                    <p className="mt-4 text-xs font-medium leading-relaxed text-[#627d98]">
-                      {pricing.footnote}
-                    </p>
-                  )}
-                  <Link href={startHref} className="group mt-6 block">
-                    <motion.span
-                      whileHover={reduceMotion ? undefined : { scale: 1.02 }}
-                      whileTap={reduceMotion ? undefined : { scale: 0.98 }}
-                      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#1c69dd] to-[#2563eb] px-4 py-3.5 text-sm font-bold text-white shadow-[0_10px_28px_rgba(28,105,221,0.35)] transition-shadow hover:shadow-[0_14px_36px_rgba(28,105,221,0.45)]"
-                    >
-                      {pricing.ctaLabel}
-                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                    </motion.span>
+                  {pricing.footnote ? (
+                    <p className="mt-3 text-xs leading-relaxed text-[#627d98]">{pricing.footnote}</p>
+                  ) : null}
+                  <Link
+                    href={startHref}
+                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#1c69dd] px-4 py-3.5 text-sm font-bold text-white shadow-[0_10px_24px_rgba(28,105,221,0.3)] transition hover:bg-[#1558c0]"
+                  >
+                    {pricing.ctaLabel}
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                  <Link
+                    href="/services"
+                    className="mt-2.5 flex w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-[#1c69dd] hover:bg-[#f4f8ff]"
+                  >
+                    Browse all services
                   </Link>
                 </div>
-              </motion.div>
+              </div>
             </motion.div>
           </motion.div>
 
-          {stats && stats.length > 0 && (
-            <motion.div
-              variants={container}
-              initial={reduceMotion ? false : "hidden"}
-              whileInView="visible"
-              viewport={{ once: true, margin: "-40px" }}
-              className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
-            >
+          {stats && stats.length > 0 ? (
+            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {stats.map((stat) => (
-                <motion.div
+                <div
                   key={stat.label}
-                  variants={fadeUp}
-                  whileHover={reduceMotion ? undefined : { y: -6 }}
-                  className="group rounded-2xl border border-[#d9e8ff] bg-white px-5 py-4 shadow-[0_8px_24px_rgba(30,74,135,0.07)] transition-all hover:border-[#1c69dd]/25 hover:shadow-[0_16px_40px_rgba(28,105,221,0.12)]"
+                  className="rounded-xl border border-[#e2ecf8] bg-white px-4 py-3 shadow-sm"
                 >
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#2b5e93]">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#829ab1]">
                     {stat.label}
                   </p>
-                  <p className="mt-2 text-sm font-bold leading-snug text-[#041020] group-hover:text-[#1c69dd]">
-                    {stat.value}
-                  </p>
-                </motion.div>
+                  <p className="mt-1 text-sm font-bold text-[#041020]">{stat.value}</p>
+                </div>
               ))}
-            </motion.div>
-          )}
+            </div>
+          ) : null}
         </div>
       </section>
 
-      {/* Who for + What you get */}
-      {(whoFor || whatYouGet) && (
-        <section className="bg-white py-14 sm:py-16">
-          <div className="mx-auto grid max-w-6xl gap-10 px-4 sm:px-6 lg:grid-cols-2 lg:px-8">
-            {whoFor && (
-              <motion.div
-                initial={reduceMotion ? false : { opacity: 0, x: -24 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5 }}
-              >
-                <h2 className="mb-6 font-heading text-2xl font-black text-[#041020]">{whoFor.title}</h2>
-                <ul className="space-y-3">
+      {/* Secondary detail — denser, below the fold */}
+      {(whoFor || whatYouGet || whatWeDo || (processSteps && processSteps.length > 0)) && (
+        <section className="border-t border-[#e8f1ff] bg-[#f8fbff] px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
+          <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-2">
+            {whoFor ? (
+              <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5">
+                <h2 className="font-heading text-lg font-bold text-[#041020]">{whoFor.title}</h2>
+                <ul className="mt-3 space-y-2">
                   {whoFor.items.map((item) => (
-                    <motion.li
-                      key={item}
-                      whileHover={reduceMotion ? undefined : { x: 6 }}
-                      className="flex items-start gap-3 rounded-xl border border-transparent px-3 py-2.5 text-[15px] font-semibold text-[#334e68] transition-colors hover:border-[#dbeafe] hover:bg-[#f8fbff]"
-                    >
+                    <li key={item} className="flex items-start gap-2 text-sm font-medium text-[#334e68]">
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
                       {item}
-                    </motion.li>
+                    </li>
                   ))}
                 </ul>
-                {whoFor.footnote && (
-                  <p className="mt-6 text-sm font-semibold italic text-[#2b5e93]">{whoFor.footnote}</p>
-                )}
-              </motion.div>
-            )}
+                {whoFor.footnote ? (
+                  <p className="mt-3 text-xs font-medium text-[#627d98]">{whoFor.footnote}</p>
+                ) : null}
+              </div>
+            ) : null}
 
-            {whatYouGet && (
-              <motion.div
-                initial={reduceMotion ? false : { opacity: 0, x: 24 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5 }}
-              >
-                <h2 className="mb-6 font-heading text-2xl font-black text-[#041020]">{whatYouGet.title}</h2>
-                <motion.div
-                  whileHover={reduceMotion ? undefined : { y: -4 }}
-                  className="rounded-2xl border border-[#d9e8ff] bg-gradient-to-br from-[#fbfdff] to-[#f0f7ff] p-6 shadow-[0_10px_32px_rgba(30,74,135,0.08)]"
-                >
-                  <ul className="space-y-3">
-                    {whatYouGet.items.map((item) => (
-                      <li
-                        key={item}
-                        className="flex items-start gap-2.5 text-sm font-semibold text-[#486581] sm:text-[15px]"
-                      >
-                        <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </motion.div>
-              </motion.div>
-            )}
-          </div>
-        </section>
-      )}
+            {whatYouGet ? (
+              <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5 lg:hidden">
+                <h2 className="font-heading text-lg font-bold text-[#041020]">{whatYouGet.title}</h2>
+                <ul className="mt-3 space-y-2">
+                  {whatYouGet.items.map((item) => (
+                    <li key={item} className="flex items-start gap-2 text-sm font-medium text-[#334e68]">
+                      <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
-      {/* What we do */}
-      {whatWeDo && (
-        <section className="bg-[#f7fbff] py-14 sm:py-16">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-            <motion.div
-              initial={reduceMotion ? false : { opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              whileHover={reduceMotion ? undefined : { y: -4 }}
-              className="rounded-3xl border border-[#d9e8ff] bg-white p-6 shadow-[0_12px_40px_rgba(30,74,135,0.08)] sm:p-8"
-            >
-              <h3 className="mb-5 font-heading text-xl font-black text-[#041020] sm:text-2xl">
-                {whatWeDo.title}
-              </h3>
-              <ul className="grid gap-3 sm:grid-cols-2">
-                {whatWeDo.items.map((item) => (
-                  <li
-                    key={item}
-                    className="flex items-start gap-2.5 rounded-xl bg-[#f8fbff] px-3 py-3 text-sm font-semibold text-[#334e68] transition-colors hover:bg-[#eff6ff]"
-                  >
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              {whatWeDo.footnote && (
-                <p className="mt-5 text-xs font-medium italic text-[#627d98]">{whatWeDo.footnote}</p>
-              )}
-            </motion.div>
-          </div>
-        </section>
-      )}
+            {whatWeDo ? (
+              <div className={`rounded-2xl border border-[#e2ecf8] bg-white p-5 ${whoFor ? "" : "lg:col-span-2"}`}>
+                <h2 className="font-heading text-lg font-bold text-[#041020]">{whatWeDo.title}</h2>
+                <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {whatWeDo.items.map((item) => (
+                    <li key={item} className="flex items-start gap-2 text-sm font-medium text-[#334e68]">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                {whatWeDo.footnote ? (
+                  <p className="mt-3 text-xs font-medium text-[#627d98]">{whatWeDo.footnote}</p>
+                ) : null}
+              </div>
+            ) : null}
 
-      {/* Process steps */}
-      {processSteps && processSteps.length > 0 && (
-        <section className="bg-[#f7fbff] py-14 sm:py-16">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-            <motion.div
-              initial={reduceMotion ? false : { opacity: 0, y: 28 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="overflow-hidden rounded-3xl border border-[#d9e8ff] bg-white p-6 shadow-[0_16px_48px_rgba(30,74,135,0.1)] sm:p-10"
-            >
-              <h2 className="mb-8 font-heading text-2xl font-black text-[#041020] sm:text-3xl">
-                Step-by-Step Process
-              </h2>
-              <motion.div
-                variants={container}
-                initial={reduceMotion ? false : "hidden"}
-                whileInView="visible"
-                viewport={{ once: true }}
-                className="grid gap-4 md:grid-cols-2"
-              >
-                {processSteps.map((step, i) => (
-                  <motion.div
-                    key={step}
-                    variants={fadeUp}
-                    whileHover={reduceMotion ? undefined : { y: -5, scale: 1.01 }}
-                    className="group flex items-start gap-4 rounded-2xl border border-[#dbe9ff] bg-[#f8fbff] p-4 transition-all hover:border-[#1c69dd]/30 hover:bg-white hover:shadow-[0_12px_32px_rgba(28,105,221,0.1)]"
-                  >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1c69dd] to-[#2563eb] text-sm font-black text-white shadow-[0_4px_14px_rgba(28,105,221,0.3)]">
-                      {i + 1}
+            {processSteps && processSteps.length > 0 ? (
+              <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5 lg:col-span-2">
+                <h2 className="font-heading text-lg font-bold text-[#041020]">Step-by-step process</h2>
+                <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {processSteps.map((step, i) => (
+                    <div
+                      key={step}
+                      className="flex items-start gap-3 rounded-xl border border-[#eef3fa] bg-[#f8fbff] px-3.5 py-3"
+                    >
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1c69dd] text-xs font-bold text-white">
+                        {i + 1}
+                      </span>
+                      <p className="pt-0.5 text-sm font-semibold leading-snug text-[#041020]">{step}</p>
                     </div>
-                    <p className="pt-1 font-heading text-base font-bold leading-snug text-[#041020] group-hover:text-[#1c69dd] sm:text-lg">
-                      {step}
-                    </p>
-                  </motion.div>
-                ))}
-              </motion.div>
-            </motion.div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
       )}

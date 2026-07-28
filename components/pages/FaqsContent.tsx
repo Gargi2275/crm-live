@@ -15,7 +15,7 @@ export function FaqsContent() {
       <PageHero
         eyebrow="Help Centre"
         title="Frequently Asked Questions"
-        description="Clear answers about OCI, e-Visa, passport renewal, document audits, and how FlyOCI supports UK and US residents."
+        description="Clear answers about OCI, e-Visa, passport renewal, document checks, and how FlyOCI supports UK and US residents."
         highlights={[
           { label: "Topics", value: "OCI · e-Visa · Passport" },
           { label: "Support", value: "Email & WhatsApp" },

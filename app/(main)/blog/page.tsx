@@ -41,8 +41,8 @@ export default async function BlogPage() {
 
           <p className="mt-12 text-center text-sm text-[#6b8099]">
             Need hands-on help?{" "}
-            <Link href="/document-audit" className="font-semibold text-[#155fc4] hover:underline">
-              Start a document audit
+            <Link href="/services" className="font-semibold text-[#155fc4] hover:underline">
+              Browse our services
             </Link>{" "}
             or{" "}
             <Link href="/contact" className="font-semibold text-[#155fc4] hover:underline">

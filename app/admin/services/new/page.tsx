@@ -45,6 +45,7 @@ type FormState = {
   base_fee: string;
   audit_fee: string;
   is_active: boolean;
+  show_on_homepage: boolean;
 };
 
 type DraftDoc = { key: string; name: string; is_mandatory: boolean; is_active: boolean };
@@ -87,10 +88,11 @@ export default function AdminNewServicePage() {
   const [form, setForm] = useState<FormState>({
     service_name: "",
     description: "",
-    category: "oci",
+    category: "",
     base_fee: "0",
-    audit_fee: "15",
+    audit_fee: "",
     is_active: true,
+    show_on_homepage: false,
   });
 
   const [draftDocs, setDraftDocs] = useState<DraftDoc[]>([]);
@@ -111,11 +113,6 @@ export default function AdminNewServicePage() {
       const payload = await listAdminServices({ page: 1, page_size: 1, active: "all" });
       const nextMeta = payload.meta || { service_types: [], categories: [], code_keyed_types: [] };
       setMeta(nextMeta);
-      const defaultCategory = nextMeta.categories[0]?.id || "oci";
-      setForm((current) => ({
-        ...current,
-        category: current.category || defaultCategory,
-      }));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load categories.");
     }
@@ -149,11 +146,12 @@ export default function AdminNewServicePage() {
   const validate = () => {
     const errors: Record<string, string> = {};
     if (!form.service_name.trim()) errors.service_name = "Name is required.";
-    if (!form.category) errors.category = "Category is required.";
-    for (const key of ["base_fee", "audit_fee"] as const) {
-      if (form[key] === "" || Number.isNaN(Number(form[key]))) {
-        errors[key] = "Enter a valid number.";
-      }
+    if (form.base_fee === "" || Number.isNaN(Number(form.base_fee))) {
+      errors.base_fee = "Enter a valid number.";
+    }
+    // Assessment fee is optional — empty means 0.
+    if (form.audit_fee.trim() !== "" && Number.isNaN(Number(form.audit_fee))) {
+      errors.audit_fee = "Enter a valid number.";
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length) {
@@ -248,12 +246,13 @@ export default function AdminNewServicePage() {
         service_name: form.service_name.trim(),
         description: form.description.trim(),
         service_type: typeFromCategory(form.category),
-        category: form.category,
+        category: form.category || null,
         base_fee: form.base_fee,
         government_fee: "0",
         total_fee: form.base_fee,
-        audit_fee: form.audit_fee,
+        audit_fee: form.audit_fee.trim() === "" ? "0" : form.audit_fee,
         is_active: form.is_active,
+        show_on_homepage: form.show_on_homepage,
       });
       if (!created?.id) {
         throw new Error("Service was created but no id was returned.");
@@ -360,12 +359,13 @@ export default function AdminNewServicePage() {
                 </label>
 
                 <label className="block lg:col-span-3">
-                  <span className={labelClass}>Category</span>
+                  <span className={labelClass}>Category <span className="font-normal text-[#829AB1]">(optional)</span></span>
                   <select
                     value={form.category}
                     onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
                     className={fieldClass}
                   >
+                    <option value="">No category</option>
                     {meta.categories.map((row) => (
                       <option key={row.id} value={row.id}>
                         {row.label}
@@ -388,6 +388,18 @@ export default function AdminNewServicePage() {
                 </label>
               </div>
 
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.show_on_homepage}
+                  onChange={(e) => setForm((f) => ({ ...f, show_on_homepage: e.target.checked }))}
+                  className="h-4 w-4 rounded border-[#D9E1EA]"
+                />
+                <span className="text-[14px] font-semibold text-[#334E68]">
+                  Show on homepage pricing teaser
+                </span>
+              </label>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block">
                   <span className={labelClass}>Service fee (£)</span>
@@ -407,13 +419,17 @@ export default function AdminNewServicePage() {
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
+                    placeholder="0"
                     value={form.audit_fee}
                     onChange={(e) => setForm((f) => ({ ...f, audit_fee: e.target.value }))}
                     className={fieldClass}
                   />
                   {fieldErrors.audit_fee ? (
                     <span className="mt-1 block text-xs text-[#B42318]">{fieldErrors.audit_fee}</span>
-                  ) : null}
+                  ) : (
+                    <span className="mt-1 block text-xs text-[#627D98]">Leave empty for £0</span>
+                  )}
                 </label>
               </div>
 

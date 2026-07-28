@@ -8,7 +8,6 @@ interface PricingItem {
   name: string;
   price: string;
   creditApplied?: string;
-  popular?: boolean;
 }
 
 interface PricingTableProps {
@@ -44,7 +43,7 @@ export function PricingTable({ items }: PricingTableProps) {
             <tr className="border-b-2 border-border">
               <th className="py-4 px-6 text-primary font-heading font-bold text-lg">Service</th>
               <th className="py-4 px-6 text-primary font-heading font-bold text-lg">Our Fee</th>
-              <th className="py-4 px-6 text-primary font-heading font-bold text-lg hidden sm:table-cell">With Audit Credit</th>
+              <th className="py-4 px-6 text-primary font-heading font-bold text-lg hidden sm:table-cell">With Assessment Credit</th>
               <th className="py-4 px-6"></th>
             </tr>
           </thead>
@@ -57,11 +56,6 @@ export function PricingTable({ items }: PricingTableProps) {
               >
                 <td className="py-5 px-6 font-body font-medium text-primary flex items-center">
                   {item.name}
-                  {item.popular && (
-                    <span className="ml-3 bg-primary/10 text-primary text-xs px-2 py-1 rounded-full font-bold uppercase tracking-wider">
-                      Popular
-                    </span>
-                  )}
                 </td>
                 <td className="py-5 px-6 font-mono font-semibold text-lg text-primary">
                   {item.price}

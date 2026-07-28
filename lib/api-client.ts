@@ -73,6 +73,8 @@ export type EVisaConfigResponse = ApiEnvelope<{
 
 export type EVisaMagicLinkResponse = ApiEnvelope<{
   case_number: string;
+  reference_number?: string;
+  file_number?: string | null;
   masked_email: string;
   expires_in_minutes: number;
   message: string;
@@ -193,6 +195,8 @@ export type EVisaUploadResponse = ApiEnvelope<{
 
 export type TrackRequestOtpResponse = ApiEnvelope<{
   case_number: string;
+  reference_number?: string;
+  file_number?: string | null;
   masked_email: string;
   expires_in_minutes: number;
   otp_expires_in_minutes: number;
@@ -201,6 +205,8 @@ export type TrackRequestOtpResponse = ApiEnvelope<{
 
 export type TrackVerifyOtpResponse = ApiEnvelope<{
   case_number: string;
+  reference_number?: string;
+  file_number?: string | null;
   tracking_token_hint: string;
   otp: string;
 }>;
@@ -334,10 +340,15 @@ export const eVisaApi = {
     });
   },
 
-  requestMagicLink(caseNumber: string, email?: string): Promise<EVisaMagicLinkResponse> {
+  requestMagicLink(
+    caseNumber: string,
+    email?: string,
+    captchaToken?: string,
+  ): Promise<EVisaMagicLinkResponse> {
     return postJson<EVisaMagicLinkResponse>("/auth/magic-link/request/", {
       case_number: caseNumber,
       ...(email ? { email } : {}),
+      ...(captchaToken ? { captcha_token: captchaToken } : {}),
     });
   },
 
@@ -397,11 +408,15 @@ export const eVisaApi = {
     return json as EVisaUploadResponse;
   },
 
-  trackRequestOtp(caseNumber: string, payload: { email?: string; phone?: string }): Promise<TrackRequestOtpResponse> {
+  trackRequestOtp(
+    caseNumber: string,
+    payload: { email?: string; phone?: string; captchaToken?: string },
+  ): Promise<TrackRequestOtpResponse> {
     return postJson<TrackRequestOtpResponse>("/track/request-otp/", {
       case_number: caseNumber,
       ...(payload.email ? { email: payload.email } : {}),
       ...(payload.phone ? { phone: payload.phone } : {}),
+      ...(payload.captchaToken ? { captcha_token: payload.captchaToken } : {}),
     });
   },
 

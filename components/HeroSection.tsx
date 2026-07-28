@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform, type MotionValue } from "framer-motion";
 import {
   ArrowRight,
   BookUser,
@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePublicPricing } from "@/hooks/usePublicPricing";
 import { formatGbp, type CatalogService } from "@/lib/public-pricing";
 import { home } from "@/components/home/homeTheme";
@@ -34,14 +34,13 @@ const BLURB_BY_CATEGORY: Record<string, string> = {
 
 function startHrefForService(service: CatalogService): string {
   if (service.serviceType.startsWith("evisa")) return "/indian-e-visa";
-  if (service.serviceType === "apostille") return "/apostille-pre-check";
-  if (service.serviceType === "document_audit") return "/document-audit";
+  if (service.serviceType === "document_audit") return "/services";
   return `/dashboard/document-audit?start=1&service=${encodeURIComponent(service.serviceType)}`;
 }
 
 function priceLabel(service: CatalogService): string {
   if (service.isQuoteBased) return "On request";
-  if (service.totalFee <= 0) return "Free pre-check";
+  if (service.totalFee <= 0) return "See fee at checkout";
   return formatGbp(service.totalFee);
 }
 
@@ -72,10 +71,20 @@ const FLOAT_ICONS = [
 
 const FLIGHT_PATH = "M40 78 C 200 18, 520 18, 760 78";
 
-/** Soft sky + particles, floating icons, flight arc kept clear of copy. */
-function HeroAtmosphere({ reduceMotion }: { reduceMotion: boolean | null }) {
+/** Soft sky + particles, floating icons, flight arc — drifts slower than scroll (parallax). */
+function HeroAtmosphere({
+  reduceMotion,
+  parallaxY,
+}: {
+  reduceMotion: boolean | null;
+  parallaxY: MotionValue<number>;
+}) {
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+    <motion.div
+      style={reduceMotion ? undefined : { y: parallaxY }}
+      className="pointer-events-none absolute inset-0 overflow-hidden will-change-transform"
+      aria-hidden
+    >
       <div className="absolute inset-0 bg-[linear-gradient(180deg,#eef6ff_0%,#f8fbff_45%,#ffffff_100%)]" />
 
       <motion.div
@@ -154,12 +163,20 @@ function HeroAtmosphere({ reduceMotion }: { reduceMotion: boolean | null }) {
           <circle cx="400" cy="35" r="3.5" fill="#0D1F2D" />
         )}
       </svg>
-    </div>
+    </motion.div>
   );
 }
 
 export default function HeroSection() {
   const reduceMotion = useReducedMotion();
+  const sectionRef = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: sectionRef,
+    offset: ["start start", "end start"],
+  });
+  const atmosphereY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 56]);
+  const contentY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 20]);
+  const contentOpacity = useTransform(scrollYProgress, [0, 0.85], [1, reduceMotion ? 1 : 0.85]);
   const { services, loading } = usePublicPricing();
 
   const serviceGroups = useMemo(() => {
@@ -236,10 +253,16 @@ export default function HeroSection() {
     "/services";
 
   return (
-    <section className="relative overflow-hidden pt-28 pb-14 sm:pt-32 sm:pb-16 lg:pt-36 lg:pb-20">
-      <HeroAtmosphere reduceMotion={reduceMotion} />
+    <section
+      ref={sectionRef}
+      className="relative overflow-hidden pt-28 pb-14 sm:pt-32 sm:pb-16 lg:pt-36 lg:pb-20"
+    >
+      <HeroAtmosphere reduceMotion={reduceMotion} parallaxY={atmosphereY} />
 
-      <div className={`${home.container} relative z-10 grid grid-cols-1 items-center gap-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)] lg:gap-14`}>
+      <motion.div
+        style={reduceMotion ? undefined : { y: contentY, opacity: contentOpacity }}
+        className={`${home.container} relative z-10 grid grid-cols-1 items-center gap-10 will-change-transform lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)] lg:gap-14`}
+      >
         <div className="text-center lg:text-left">
           <motion.p
             initial={reduceMotion ? false : { opacity: 0, y: 12 }}
@@ -286,7 +309,7 @@ export default function HeroSection() {
             className="mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:justify-center lg:justify-start"
           >
             <Link
-              href="/services"
+              href="/dashboard/document-audit?start=1"
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-[15px] font-normal text-white shadow-btn transition hover:bg-accent hover:shadow-btn-hover"
             >
               Start application
@@ -400,7 +423,7 @@ export default function HeroSection() {
             )}
           </div>
         </motion.div>
-      </div>
+      </motion.div>
     </section>
   );
 }

@@ -14,7 +14,6 @@ const organizationJsonLd = {
     "Indian e-Visa",
     "Apostille services",
     "Indian passport renewal",
-    "Document audit",
   ],
   contactPoint: {
     "@type": "ContactPoint",
@@ -49,7 +48,6 @@ const servicesJsonLd = {
     { "@type": "ListItem", position: 4, name: "Indian e-Visa", url: absoluteUrl("/services/indian-evisa") },
     { "@type": "ListItem", position: 5, name: "Indian Passport Renewal", url: absoluteUrl("/services/passport-renewal") },
     { "@type": "ListItem", position: 6, name: "Apostille Services", url: absoluteUrl("/apostille-services") },
-    { "@type": "ListItem", position: 7, name: "Document Audit", url: absoluteUrl("/document-audit") },
   ],
 };
 

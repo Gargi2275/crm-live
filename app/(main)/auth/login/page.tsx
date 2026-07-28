@@ -10,6 +10,7 @@ import { Globe2, Mail, Phone, ShieldCheck, Sparkles, User2 } from "lucide-react"
 import { useAuth } from "@/context/AuthContext";
 import { authService } from "@/lib/auth";
 import { OTPInput } from "@/components/OTPInput";
+import { RecaptchaField, requireCaptchaToken } from "@/components/RecaptchaField";
 
 const LOGIN_DRAFT_KEY = "flyoci_login_draft";
 type LoginStage = "email" | "existingOtp" | "newDetails" | "newOtp";
@@ -61,6 +62,8 @@ export default function LoginPage() {
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [localError, setLocalError] = useState("");
   const [info, setInfo] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaError, setCaptchaError] = useState("");
 
   useEffect(() => {
     try {
@@ -118,15 +121,23 @@ export default function LoginPage() {
     return { firstName, lastName };
   };
 
-  const sendExistingOtp = async () => {
+  const sendExistingOtp = async (tokenOverride?: string) => {
     if (!normalizedEmail) {
       setLocalError("Enter your email.");
       return;
     }
+    const token = (tokenOverride ?? captchaToken).trim();
+    const captchaMsg = requireCaptchaToken(token);
+    if (captchaMsg) {
+      setCaptchaError(captchaMsg);
+      setLocalError(captchaMsg);
+      return;
+    }
+    setCaptchaError("");
 
     setRequestingOtp(true);
     try {
-      const response = await authService.requestLoginOtp(normalizedEmail);
+      const response = await authService.requestLoginOtp(normalizedEmail, token);
       setOtpRequested(true);
       setStage("existingOtp");
       setInfo(
@@ -151,6 +162,12 @@ export default function LoginPage() {
       setLocalError("Enter your email.");
       return;
     }
+    const captchaMsg = requireCaptchaToken(captchaToken);
+    if (captchaMsg) {
+      setCaptchaError(captchaMsg);
+      return;
+    }
+    setCaptchaError("");
 
     setRequestingOtp(true);
     try {
@@ -161,7 +178,7 @@ export default function LoginPage() {
       setInfo("");
       if (exists) {
         setStage("existingOtp");
-        await sendExistingOtp();
+        await sendExistingOtp(captchaToken);
       } else {
         setStage("newDetails");
       }
@@ -176,6 +193,12 @@ export default function LoginPage() {
     clearError();
     setLocalError("");
     setInfo("");
+    const captchaMsg = requireCaptchaToken(captchaToken);
+    if (captchaMsg) {
+      setCaptchaError(captchaMsg);
+      setLocalError("Complete the captcha again to resend OTP.");
+      return;
+    }
     await sendExistingOtp();
   };
 
@@ -184,8 +207,10 @@ export default function LoginPage() {
     if (stage !== "existingOtp") return;
     if (!accountExists) return;
     if (otpRequested || requestingOtp || !normalizedEmail) return;
+    // Auto-send only when captcha already completed on email step.
+    if (!captchaToken.trim()) return;
     void sendExistingOtp();
-  }, [initialized, stage, accountExists, otpRequested, requestingOtp, normalizedEmail]);
+  }, [initialized, stage, accountExists, otpRequested, requestingOtp, normalizedEmail, captchaToken]);
 
   const handleSendSignupOtp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -197,6 +222,12 @@ export default function LoginPage() {
       setLocalError("Full name, email, mobile, and country of residence are required.");
       return;
     }
+    const captchaMsg = requireCaptchaToken(captchaToken);
+    if (captchaMsg) {
+      setCaptchaError(captchaMsg);
+      return;
+    }
+    setCaptchaError("");
 
     setRequestingOtp(true);
     try {
@@ -205,6 +236,7 @@ export default function LoginPage() {
         fullName: normalizedFullName,
         mobileNumber: mobileNumber.trim(),
         countryOfResidence: countryOfResidence.trim(),
+        captchaToken,
       });
       setOtpRequested(true);
       setStage("newOtp");
@@ -394,6 +426,14 @@ export default function LoginPage() {
                   </div>
                 </label>
 
+                <RecaptchaField
+                  onChange={(token) => {
+                    setCaptchaToken(token);
+                    if (token) setCaptchaError("");
+                  }}
+                  error={captchaError}
+                />
+
                 {(localError || error || info) && (
                   <div
                     className={`rounded-2xl px-4 py-3 text-sm ${
@@ -524,6 +564,14 @@ export default function LoginPage() {
                     </div>
                   </label>
                 </div>
+
+                <RecaptchaField
+                  onChange={(token) => {
+                    setCaptchaToken(token);
+                    if (token) setCaptchaError("");
+                  }}
+                  error={captchaError}
+                />
 
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                   <span>Send OTP after filling in your details.</span>

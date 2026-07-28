@@ -2,19 +2,15 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { Mail, MapPin, Phone } from "lucide-react";
+import { getHubCountries, getPublicSupportEmail, type HubCountrySummary } from "@/lib/api";
 import {
-  ArrowRight,
-  BadgeCheck,
-  Clock3,
-  FileCheck2,
-  Globe2,
-  Mail,
-  MapPin,
-  Phone,
-  ShieldCheck,
-} from "lucide-react";
-import { getHubCountries, type HubCountrySummary } from "@/lib/api";
+  SUPPORT_EMAIL as DEFAULT_SUPPORT_EMAIL,
+  SUPPORT_PHONE_DISPLAY,
+  SUPPORT_PHONE_TEL_HREF,
+} from "@/lib/contact";
 import { HUB_COUNTRIES_FALLBACK } from "@/lib/location-hub";
 
 const links = {
@@ -24,7 +20,7 @@ const links = {
     { name: "OCI Update", href: "/services/oci-update" },
     { name: "Indian e-Visa", href: "/indian-e-visa" },
     { name: "Passport Renewal", href: "/services/passport-renewal" },
-    { name: "Apostille Services", href: "/apostille-services" },
+    { name: "Apostille", href: "/apostille-services" },
   ],
   company: [
     { name: "About", href: "/about" },
@@ -33,31 +29,16 @@ const links = {
     { name: "FAQs", href: "/faqs" },
     { name: "Blog", href: "/blog" },
     { name: "Contact", href: "/contact" },
-    { name: "Verify company", href: "https://ico.org.uk/" },
   ],
   legal: [
-    { name: "Terms & Conditions", href: "/terms-and-conditions" },
-    { name: "Privacy Policy", href: "/privacy-policy" },
-    { name: "GDPR Compliance", href: "/gdpr-compliance" },
-    { name: "Refund Policy", href: "/refund-policy" },
+    { name: "Terms", href: "/terms-and-conditions" },
+    { name: "Privacy", href: "/privacy-policy" },
+    { name: "GDPR", href: "/gdpr-compliance" },
+    { name: "Refunds", href: "/refund-policy" },
     { name: "Cookies", href: "/cookies" },
     { name: "Disclaimer", href: "/disclaimer" },
   ],
 };
-
-const support = [
-  { icon: Mail, label: "support@flyoci.com", href: "mailto:support@flyoci.com" },
-  { icon: Phone, label: "+44 20 7808 6162", href: "tel:+442078086162" },
-  { icon: Clock3, label: "24–48h initial review" },
-  { icon: MapPin, label: "Serving global Indians" },
-];
-
-const assurances = [
-  { icon: ShieldCheck, label: "Encrypted uploads" },
-  { icon: FileCheck2, label: "Document checks" },
-  { icon: BadgeCheck, label: "GDPR compliant" },
-  { icon: Globe2, label: "UK and US support" },
-];
 
 const FALLBACK_COUNTRIES: HubCountrySummary[] = HUB_COUNTRIES_FALLBACK.map((c, index) => ({
   id: index + 1,
@@ -72,33 +53,21 @@ const FALLBACK_COUNTRIES: HubCountrySummary[] = HUB_COUNTRIES_FALLBACK.map((c, i
   })),
 }));
 
-function FooterLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
+function FooterLink({ href, children }: { href: string; children: React.ReactNode }) {
   const className =
-    "group inline-flex items-center gap-1.5 py-1 text-md text-slate-900 transition-colors hover:text-sky-600";
-  const content = (
-    <>
-      <span>{children}</span>
-      <ArrowRight className="h-3 w-3 -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100 text-sky-500" />
-    </>
-  );
+    "block py-1.5 text-[16px] font-medium text-white/65 transition-colors hover:text-white";
 
   if (href.startsWith("http")) {
     return (
       <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
-        {content}
+        {children}
       </a>
     );
   }
 
   return (
     <Link href={href} className={className}>
-      {content}
+      {children}
     </Link>
   );
 }
@@ -112,10 +81,10 @@ function LinkColumn({
 }) {
   return (
     <div>
-      <h2 className="mt-16 text-[15px] font-extrabold uppercase tracking-[0.2em] text-slate-800">
+      <h2 className="font-heading text-[15px] font-bold uppercase tracking-[0.12em] text-white">
         {title}
       </h2>
-      <div className="mt-4 flex flex-col gap-0.5">
+      <div className="mt-5 space-y-0.5">
         {items.map((link) => (
           <FooterLink key={link.name} href={link.href}>
             {link.name}
@@ -126,45 +95,121 @@ function LinkColumn({
   );
 }
 
-/** Cities We Serve — driven by hub Country/City rows from GET /api/countries/. */
-function CityFooterLinks({ countries }: { countries: HubCountrySummary[] }) {
-  const withCities = countries.filter((c) => (c.cities || []).length > 0);
-  if (!withCities.length) return null;
+function CountriesBlock({ countries }: { countries: HubCountrySummary[] }) {
+  const rows = useMemo(
+    () =>
+      countries
+        .filter((c) => c.is_active !== false)
+        .slice()
+        .sort((a, b) => {
+          const ao = typeof a.display_order === "number" ? a.display_order : 999;
+          const bo = typeof b.display_order === "number" ? b.display_order : 999;
+          if (ao !== bo) return ao - bo;
+          return String(a.name).localeCompare(String(b.name));
+        }),
+    [countries],
+  );
+
+  const [openSlug, setOpenSlug] = useState<string>("");
+
+  useEffect(() => {
+    if (!rows.length) return;
+    const firstWithCities = rows.find((c) => (c.cities || []).length > 0);
+    setOpenSlug((current) => current || firstWithCities?.slug || rows[0]?.slug || "");
+  }, [rows]);
+
+  if (!rows.length) return null;
+
+  const open = rows.find((c) => c.slug === openSlug) || rows[0];
+  const cities = (open?.cities || []).filter((city) => city.is_active !== false);
 
   return (
-    <div className="mt-14 border-t border-slate-100 pt-10">
-      <h2 className="text-[15px] font-extrabold uppercase tracking-[0.2em] text-slate-800">
-        Cities We Serve
+    <div className="mt-10 border-t border-white/10 pt-8">
+      <h2 className="font-heading text-[20px] font-bold tracking-[-0.02em] text-white sm:text-[22px]">
+        Countries we serve
       </h2>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {withCities.map((country) => (
-          <div key={country.slug}>
-            <p className="text-sm font-bold text-slate-800">{country.name}</p>
-            <div className="mt-1 flex flex-col gap-0.5">
-              {(country.cities || []).map((city) => (
-                <FooterLink
-                  key={city.slug}
-                  href={`/service/${country.slug}/${city.slug}`}
-                >
-                  {city.name}
-                </FooterLink>
-              ))}
-            </div>
+      <p className="mt-1.5 text-[15px] leading-relaxed text-white/55">
+        Select a country to see cities and regions.
+      </p>
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        {rows.map((country) => {
+          const active = country.slug === open?.slug;
+          return (
+            <button
+              key={country.slug}
+              type="button"
+              onClick={() => setOpenSlug(country.slug)}
+              className={`rounded-full px-3.5 py-2 text-[14px] font-semibold transition ${
+                active
+                  ? "bg-white text-[#0B1B2B]"
+                  : "bg-white/10 text-white/80 hover:bg-white/16 hover:text-white"
+              }`}
+            >
+              {country.name}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="font-heading text-[17px] font-bold text-white">{open?.name}</p>
+          <Link
+            href={`/service/${open!.slug}`}
+            className="text-[14px] font-semibold text-[#7EC4FF] transition hover:text-white"
+          >
+            View hub →
+          </Link>
+        </div>
+        {cities.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+            {cities.map((city) => (
+              <Link
+                key={city.slug}
+                href={`/service/${open!.slug}/${city.slug}`}
+                className="text-[15px] font-medium text-white/60 transition hover:text-white"
+              >
+                {city.name}
+              </Link>
+            ))}
           </div>
-        ))}
+        ) : (
+          <p className="mt-2 text-[14px] text-white/45">Country-wide support available.</p>
+        )}
       </div>
     </div>
   );
 }
 
 export function Footer({ compact = false }: { compact?: boolean }) {
+  const pathname = usePathname() || "";
+  const isDashboard = pathname.startsWith("/dashboard") || pathname.startsWith("/auth");
+  const useCompact = compact || isDashboard;
   const [countries, setCountries] = useState<HubCountrySummary[]>([]);
+  const [supportEmail, setSupportEmail] = useState(DEFAULT_SUPPORT_EMAIL);
 
   useEffect(() => {
+    let cancelled = false;
+    getPublicSupportEmail()
+      .then((email) => {
+        if (!cancelled && email) setSupportEmail(email);
+      })
+      .catch(() => {
+        if (!cancelled) setSupportEmail(DEFAULT_SUPPORT_EMAIL);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (useCompact) return;
     let cancelled = false;
     getHubCountries()
       .then((rows) => {
         if (!cancelled && rows.length) setCountries(rows);
+        else if (!cancelled) setCountries(FALLBACK_COUNTRIES);
       })
       .catch(() => {
         if (!cancelled) setCountries(FALLBACK_COUNTRIES);
@@ -172,103 +217,80 @@ export function Footer({ compact = false }: { compact?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [useCompact]);
 
   return (
-    <footer className="relative overflow-hidden bg-white text-slate-800">
-      <div className="h-1 w-full bg-gradient-to-r from-sky-400 via-blue-500 to-sky-400" />
-
-      <div
-        className="absolute inset-0 opacity-[0.025]"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, #0ea5e9 1px, transparent 0)",
-          backgroundSize: "32px 32px",
-        }}
-      />
-
-      <div className={`relative mx-auto px-6 ${compact ? "py-8" : "py-16"} lg:px-8`}>
-        <div className="grid gap-x-6 gap-y-4 lg:grid-cols-[1.2fr_1fr_1fr_0.8fr_1.1fr] lg:items-start">
-          <div>
-            <Link href="/" className="inline-flex bg-white">
+    <footer className="bg-[#0B1B2B] text-white">
+      <div className={`w-full px-5 sm:px-8 lg:px-10 xl:px-12 ${useCompact ? "py-6 sm:py-7" : "py-10 sm:py-12"}`}>
+        <div className={`grid gap-6 sm:grid-cols-2 lg:grid-cols-4 ${useCompact ? "lg:gap-6" : "lg:gap-8 gap-8"}`}>
+          <div className="sm:col-span-2 lg:col-span-1">
+            <Link href="/" className="inline-flex rounded-md bg-white px-2.5 py-2">
               <Image
                 src="/logo.png"
                 alt="FlyOCI"
-                width={150}
-                height={65}
-                className="h-12 w-auto"
+                width={140}
+                height={60}
+                className={useCompact ? "h-9 w-auto" : "h-11 w-auto"}
                 priority
               />
             </Link>
+            {!useCompact ? (
+              <>
+                <p className="mt-5 font-heading text-[24px] font-bold leading-tight tracking-[-0.03em] text-white sm:text-[28px]">
+                  Clear documents.
+                  <br />
+                  Confident applications.
+                </p>
+                <p className="mt-3 text-[15px] leading-relaxed text-white/55 lg:pr-4">
+                  Independent OCI, e-Visa, passport and apostille support for families and professionals.
+                </p>
+              </>
+            ) : (
+              <p className="mt-3 text-[14px] leading-relaxed text-white/55">
+                Independent OCI, e-Visa, passport and apostille support.
+              </p>
+            )}
 
-            <p className="mt-5 max-w-sm text-md leading-7 text-slate-900">
-              A private documentation assistance service for families, professionals, and frequent
-              travelers who want their paperwork prepared cleanly before it reaches the official
-              portal.
-            </p>
-            <p className="mt-3 max-w-sm text-md leading-7 text-slate-900">
-              We handle the complexity of document preparation so you can focus on what matters —
-              your move, your family, your future.
-            </p>
+            <div className={`space-y-2.5 ${useCompact ? "mt-4" : "mt-6"}`}>
+              <a
+                href={`mailto:${supportEmail}`}
+                className="flex items-center gap-3 text-[15px] font-medium text-white/80 transition hover:text-white"
+              >
+                <Mail className="h-5 w-5 shrink-0 text-[#7EC4FF]" />
+                {supportEmail}
+              </a>
+              <a
+                href={SUPPORT_PHONE_TEL_HREF}
+                className="flex items-center gap-3 text-[15px] font-medium text-white/80 transition hover:text-white"
+              >
+                <Phone className="h-5 w-5 shrink-0 text-[#7EC4FF]" />
+                {SUPPORT_PHONE_DISPLAY}
+              </a>
+              {!useCompact ? (
+                <p className="flex items-center gap-3 text-[15px] font-medium text-white/55">
+                  <MapPin className="h-5 w-5 shrink-0 text-[#7EC4FF]" />
+                  UK · US · Global Indians
+                </p>
+              ) : null}
+            </div>
           </div>
 
           <LinkColumn title="Services" items={links.services} />
           <LinkColumn title="Company" items={links.company} />
-
-          <div className="flex flex-col gap-8">
-            <LinkColumn title="Legal" items={links.legal} />
-          </div>
-
-          <div className="mt-10 flex flex-col gap-4">
-            <div className="flex flex-wrap gap-2">
-              {assurances.map((a) => (
-                <div
-                  key={a.label}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-sky-100 bg-sky-50 px-3 py-1.5 text-sm font-medium text-sky-700"
-                >
-                  <a.icon className="h-3.5 w-3.5" />
-                  {a.label}
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-col gap-2.5">
-              {support.map((item) => (
-                <div key={item.label} className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-sky-100 bg-sky-50 text-sky-600">
-                    <item.icon className="h-3.5 w-3.5" />
-                  </div>
-                  {item.href ? (
-                    <a
-                      href={item.href}
-                      className="text-md text-slate-700 transition-colors hover:text-sky-600"
-                    >
-                      {item.label}
-                    </a>
-                  ) : (
-                    <p className="text-md text-slate-700">{item.label}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+          <LinkColumn title="Legal" items={links.legal} />
         </div>
 
-        {!compact ? <CityFooterLinks countries={countries} /> : null}
+        {!useCompact ? <CountriesBlock countries={countries} /> : null}
 
-        <div className="mt-14 border-t border-slate-100" />
-
-        <div className="mt-8 rounded-2xl border border-amber-100 bg-amber-50 px-6 py-5">
-          <p className="text-md leading-6 text-slate-900">
-            <span className="font-bold text-slate-900">Disclaimer:</span> FlyOCI is an independent
-            private service provider offering document preparation and guidance support. We are not
-            affiliated with the Government of India, VFS Global, embassies, or consulates. Government
-            fees are paid separately to the respective authorities.
+        <div className={`border-t border-white/10 ${useCompact ? "mt-6 pt-4" : "mt-10 pt-5"}`}>
+          <p className="text-[13px] leading-relaxed text-white/45">
+            {useCompact
+              ? "FlyOCI is an independent private service provider — not affiliated with government authorities."
+              : "FlyOCI is an independent private service provider. We are not affiliated with the Government of India, VFS Global, embassies or consulates. Government fees are paid separately to the respective authorities."}
           </p>
-        </div>
-
-        <div className="mt-6 border-t border-slate-100 pt-6 text-center text-md font-semibold text-slate-900">
-          Copyright © 2026 FlyOCI. All rights reserved. Maintained by{" "}
-          <span className="font-semibold text-sky-600">TechnoAdviser Technologies</span>.
+          <p className="mt-3 text-[13px] font-medium text-white/50">
+            © 2026 FlyOCI. All rights reserved.
+          </p>
         </div>
       </div>
     </footer>

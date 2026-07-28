@@ -3,6 +3,7 @@
 import Image from "next/image";
 
 import { FadeInUp } from "@/components/FadeInUp";
+import { SUPPORT_EMAIL, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
 
 function SectionCard({
   id,
@@ -424,9 +425,9 @@ export default function TermsPage() {
 
           <SectionCard id="complaints" title="34. Complaints">
             <p>If you are unhappy with our service, contact us first so we can investigate.</p>
-            <p>Email: [insert complaints email]</p>
-            <p>Phone: +44 20 7808 6162</p>
-            <p>Address: [insert address]</p>
+            <p>Email: {SUPPORT_EMAIL}</p>
+            <p>Phone: {SUPPORT_PHONE_DISPLAY}</p>
+            <p>Address: 71A Thurlby Road, Wembley, HA0 4RT</p>
             <p>Please include full name, applicant name, file number, service purchased, date of purchase, details of complaint and what outcome you are seeking.</p>
             <p>We aim to acknowledge complaints within 3 working days and respond within 14 working days, although complex complaints may take longer.</p>
           </SectionCard>
@@ -445,8 +446,9 @@ export default function TermsPage() {
             <p>Legal name: FlyOCI Limited</p>
             <p>Company number: 16856950</p>
             <p>Registered office: 71A Thurlby Road, Wembley, HA0 4RT</p>
-            <p>Email: support@flyoci.com</p>
+            <p>Email: {SUPPORT_EMAIL}</p>
             <p>Website: www.flyoci.com</p>
+            <p>Phone: {SUPPORT_PHONE_DISPLAY}</p>
           </SectionCard>
         </div>
       </div>

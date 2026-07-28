@@ -8,7 +8,7 @@ export default function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-x-clip">
       <motion.div
         aria-hidden="true"
         className="pointer-events-none absolute left-[-12%] top-[-10%] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.12)_0%,transparent_68%)] blur-3xl"

@@ -311,22 +311,22 @@ export default function RefundPage() {
             <p>Where third-party fees have already been paid or incurred, they are normally non-refundable.</p>
           </SectionCard>
 
-          <SectionCard id="free-pre-check" title="12. Free Pre-Check and Paid Audit">
+          <SectionCard id="free-pre-check" title="12. Free Pre-Check and Paid Assessment">
             <p>Where FlyOCI offers a free pre-check, it may be limited in scope and may not include full application preparation.</p>
             <p>A free pre-check does not guarantee approval, eligibility, submission or acceptance by any authority.</p>
-            <p>Where FlyOCI charges for an audit, document review or pre-check, the audit fee is charged for the review work itself.</p>
-            <p>Once the audit or document review has started, the fee is normally non-refundable.</p>
-            <p>Where FlyOCI states that an audit fee is deductible from a later full-service fee, that deduction applies only if:</p>
+            <p>Where FlyOCI charges for an assessment, document review or pre-check, the assessment fee is charged for the review work itself.</p>
+            <p>Once the assessment or document review has started, the fee is normally non-refundable.</p>
+            <p>Where FlyOCI states that an assessment fee is deductible from a later full-service fee, that deduction applies only if:</p>
             <BulletList
               items={[
                 "The same applicant proceeds with the same service.",
                 "The customer proceeds within the stated validity period.",
-                "The audit fee was paid in full.",
+                "The assessment fee was paid in full.",
                 "FlyOCI confirms the deduction.",
                 "The customer has not already received another discount or offer unless agreed.",
               ]}
             />
-            <p>Audit fee credits are not transferable and have no cash value.</p>
+            <p>Assessment fee credits are not transferable and have no cash value.</p>
           </SectionCard>
 
           <SectionCard id="urgent-fees" title="13. Urgent or Priority Fees">

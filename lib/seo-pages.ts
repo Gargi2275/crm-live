@@ -5,7 +5,7 @@ export const PAGE_SEO = {
     path: "/",
     title: "OCI, Indian e-Visa & Apostille Services UK & US",
     description:
-      "FlyOCI — trusted OCI card, Indian e-Visa, apostille and Indian passport renewal support for UK & US residents. Free document guidance, expert audits and end-to-end application help.",
+      "FlyOCI — trusted OCI card, Indian e-Visa, apostille and Indian passport renewal support for UK & US residents. Clear guidance and end-to-end application help.",
     keywords: [
       "OCI services UK",
       "Indian e visa online",
@@ -25,7 +25,7 @@ export const PAGE_SEO = {
     path: "/services/new-oci",
     title: "New OCI Card Application Service UK & US",
     description:
-      "Apply for a new OCI card from the UK or US with FlyOCI. Document audit, form filling, VFS appointment guidance and end-to-end OCI application support.",
+      "Apply for a new OCI card from the UK or US with FlyOCI. Document checks, form filling, VFS appointment guidance and end-to-end OCI application support.",
     keywords: ["new OCI card UK", "first time OCI application", "OCI card for UK residents", "apply OCI online help"],
   },
   ociRenewal: {
@@ -59,14 +59,14 @@ export const PAGE_SEO = {
     path: "/services/passport-renewal",
     title: "Indian Passport Renewal for UK & US Residents",
     description:
-      "Indian passport renewal support for UK and US residents. FlyOCI helps with forms, document checks, consulate/VFS guidance and quote-based renewal assistance.",
+      "Indian passport renewal support for UK and US residents. FlyOCI helps with forms, document checks, consulate/VFS guidance and fixed-fee renewal assistance.",
     keywords: ["Indian passport renewal UK", "renew Indian passport abroad", "Indian passport VFS"],
   },
   apostilleServices: {
     path: "/apostille-services",
-    title: "Apostille Services UK & India — Free Pre-Check",
+    title: "Apostille Services UK & India",
     description:
-      "Apostille services for UK and Indian documents: birth certificates, marriage certificates, degrees, affidavits and more. Free pre-check before payment at FlyOCI.",
+      "Apostille services for UK and Indian documents: birth certificates, marriage certificates, degrees, affidavits and more. Start in the same guided FlyOCI journey with catalog fees at checkout.",
     keywords: [
       "apostille UK",
       "apostille services",
@@ -79,28 +79,21 @@ export const PAGE_SEO = {
     path: "/apostille-faq",
     title: "Apostille Services FAQ",
     description:
-      "Common questions about apostille services, free document pre-check, payment, processing times and tracking your apostille request with FlyOCI.",
+      "Common questions about apostille services, document assessment, payment, processing times and tracking your apostille request with FlyOCI.",
     keywords: ["apostille FAQ", "how to apostille document UK", "apostille processing time"],
-  },
-  documentAudit: {
-    path: "/document-audit",
-    title: "Document Audit for OCI, e-Visa & Passport",
-    description:
-      "Avoid OCI and visa rejections with FlyOCI's expert early assessment. We review your documents, flag issues early and guide fixes.",
-    keywords: ["OCI document audit", "visa document check", "OCI rejection help", "document review OCI"],
   },
   howItWorks: {
     path: "/how-it-works",
     title: "How FlyOCI Works — OCI & Visa Process",
     description:
-      "See how FlyOCI supports your OCI, e-Visa or passport application from document audit through submission, tracking and final approval.",
+      "See how FlyOCI supports your OCI, e-Visa or passport application from document checks through submission, tracking and final approval.",
     keywords: ["how OCI application works", "FlyOCI process", "OCI application steps"],
   },
   pricing: {
     path: "/pricing",
     title: "Pricing — OCI, e-Visa & Apostille Fees",
     description:
-      "Transparent FlyOCI pricing for OCI card services, Indian e-Visa, document audit, apostille and passport renewal. Fixed service fees with no hidden charges.",
+      "Transparent FlyOCI pricing for OCI card services, Indian e-Visa, apostille and passport renewal. Fixed service fees with no hidden charges.",
     keywords: ["OCI application cost UK", "Indian e visa price", "apostille service fee"],
   },
   faqs: {
@@ -133,7 +126,7 @@ export const PAGE_SEO = {
     path: "/contact",
     title: "Contact FlyOCI — OCI, e-Visa & Apostille Support",
     description:
-      "Contact FlyOCI for help with OCI applications, Indian e-Visa, apostille services, passport renewal or document audits. UK & US resident support.",
+      "Contact FlyOCI for help with OCI applications, Indian e-Visa, apostille services, or passport renewal. UK & US resident support.",
     keywords: ["contact FlyOCI", "OCI help contact", "apostille support UK"],
   },
   trackApostille: {
@@ -144,14 +137,14 @@ export const PAGE_SEO = {
   },
   apostillePreCheck: {
     path: "/apostille-pre-check",
-    title: "Apostille Document Pre-Check",
-    description: "Submit documents for a free apostille pre-check before payment. FlyOCI reviews eligibility and requirements for UK and Indian apostille.",
-    keywords: ["apostille pre check", "free document check apostille"],
+    title: "Start Apostille Application",
+    description: "Start your FlyOCI apostille application — same guided journey as OCI and passport with catalog fees at checkout.",
+    keywords: ["apostille application", "document apostille UK"],
   },
   contactApostilleSupport: {
     path: "/contact-apostille-support",
     title: "Contact Apostille Support",
-    description: "Get help with UK and Indian document apostille at FlyOCI. Contact our apostille support team for pre-check questions, tracking and document guidance.",
+    description: "Get help with UK and Indian document apostille at FlyOCI. Contact our support team for application questions, tracking and document guidance.",
     keywords: ["apostille support UK", "contact apostille service", "FlyOCI apostille help"],
   },
   privacyPolicy: {
@@ -169,7 +162,7 @@ export const PAGE_SEO = {
   refundPolicy: {
     path: "/refund-policy",
     title: "Refund Policy",
-    description: "FlyOCI refund policy for OCI, e-Visa, apostille and document audit services. Clear terms on cancellations and eligible refunds.",
+    description: "FlyOCI refund policy for OCI, e-Visa, apostille and passport services. Clear terms on cancellations and eligible refunds.",
     keywords: ["FlyOCI refund policy"],
   },
   cookies: {
@@ -191,11 +184,51 @@ export const PAGE_SEO = {
     description: "FlyOCI is an independent OCI, e-Visa and apostille support service — not affiliated with any government. Read our full disclaimer.",
     keywords: ["FlyOCI disclaimer", "independent OCI service"],
   },
+  categoryOci: {
+    path: "/services/oci",
+    title: "OCI Services — New, Renewal & Update",
+    description:
+      "Browse FlyOCI OCI services: document assessment, new OCI card, OCI renewal and OCI updates for UK & US residents.",
+    keywords: ["OCI services", "new OCI", "OCI renewal", "OCI update UK"],
+  },
+  categoryIndianPassport: {
+    path: "/services/indian-passport",
+    title: "Indian Passport Services",
+    description:
+      "Indian passport renewal and related documentation support for UK & US residents with clear catalog fees.",
+    keywords: ["Indian passport services", "passport renewal UK", "Indian passport help"],
+  },
+  categoryIndianVisa: {
+    path: "/services/indian-visa",
+    title: "Indian Visa & e-Visa Services",
+    description:
+      "Indian e-Visa services including 1-year and 5-year options with document checks for UK & US applicants.",
+    keywords: ["Indian visa services", "Indian e-Visa", "e visa India UK"],
+  },
+  categoryApostille: {
+    path: "/services/apostille",
+    title: "Apostille Document Services",
+    description:
+      "Apostille services for birth, marriage, death and other certificates — legalisation for use in India.",
+    keywords: ["apostille services", "document apostille", "certificate apostille UK"],
+  },
+  categoryOthers: {
+    path: "/services/others",
+    title: "Other FlyOCI Services",
+    description:
+      "Additional FlyOCI services including PAN card and other India documentation support.",
+    keywords: ["PAN card service", "other FlyOCI services"],
+  },
 } satisfies Record<string, PageSeoConfig>;
 
 export const PUBLIC_SITEMAP_PATHS: Array<{ path: string; changeFrequency?: "weekly" | "monthly" | "yearly"; priority?: number }> = [
   { path: "/", priority: 1, changeFrequency: "weekly" },
   { path: "/services", priority: 0.9, changeFrequency: "weekly" },
+  { path: "/services/oci", priority: 0.9, changeFrequency: "weekly" },
+  { path: "/services/indian-passport", priority: 0.9, changeFrequency: "weekly" },
+  { path: "/services/indian-visa", priority: 0.9, changeFrequency: "weekly" },
+  { path: "/services/apostille", priority: 0.9, changeFrequency: "weekly" },
+  { path: "/services/others", priority: 0.85, changeFrequency: "weekly" },
   { path: "/services/new-oci", priority: 0.9, changeFrequency: "weekly" },
   { path: "/services/oci-renewal", priority: 0.9, changeFrequency: "weekly" },
   { path: "/services/oci-update", priority: 0.85, changeFrequency: "weekly" },
@@ -205,7 +238,6 @@ export const PUBLIC_SITEMAP_PATHS: Array<{ path: string; changeFrequency?: "week
   { path: "/apostille-faq", priority: 0.8, changeFrequency: "monthly" },
   { path: "/apostille-pre-check", priority: 0.85, changeFrequency: "weekly" },
   { path: "/track-apostille", priority: 0.7, changeFrequency: "monthly" },
-  { path: "/document-audit", priority: 0.85, changeFrequency: "weekly" },
   { path: "/how-it-works", priority: 0.75, changeFrequency: "monthly" },
   { path: "/pricing", priority: 0.8, changeFrequency: "monthly" },
   { path: "/faqs", priority: 0.75, changeFrequency: "monthly" },

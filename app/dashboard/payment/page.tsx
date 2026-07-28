@@ -41,7 +41,7 @@ export default function DashboardPaymentPage() {
   useEffect(() => {
     const loadApplication = async () => {
       if (!referenceNumber) {
-        setError("Missing reference number. Please return to Document Audit and try again.");
+        setError("Missing reference number. Please return to your application and try again.");
         setLoading(false);
         return;
       }
@@ -61,6 +61,12 @@ export default function DashboardPaymentPage() {
     void loadApplication();
   }, [referenceNumber]);
 
+  const [confirmingReturn, setConfirmingReturn] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const { sessionId, paymentKind } = readStripeReturnParams();
+    return Boolean(sessionId && paymentKind === "full");
+  });
+
   useEffect(() => {
     const { sessionId, paymentKind, reference } = readStripeReturnParams();
     if (!sessionId || paymentKind !== "full") return;
@@ -70,20 +76,19 @@ export default function DashboardPaymentPage() {
 
     let active = true;
     void (async () => {
+      setConfirmingReturn(true);
       setPaying(true);
       setError("");
       try {
         await verifyFullPayment(refNum, sessionId);
         if (!active) return;
         clearStripeReturnParams();
-        router.push(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&resume=1&payment=success`);
+        router.replace("/dashboard");
       } catch (e) {
         if (!active) return;
+        setConfirmingReturn(false);
         setError(e instanceof Error ? e.message : "Payment verification failed.");
-      } finally {
-        if (active) {
-          setPaying(false);
-        }
+        setPaying(false);
       }
     })();
 
@@ -135,6 +140,26 @@ export default function DashboardPaymentPage() {
     }
   };
 
+  if (confirmingReturn) {
+    return (
+      <div className="min-h-[100svh] flex flex-col">
+        <Navbar />
+        <main className="flex flex-1 items-center justify-center px-4 pt-28 pb-20">
+          <div className="w-full max-w-md rounded-3xl border border-[#d7e5fb] bg-white p-8 text-center shadow-[0_18px_48px_rgba(30,74,135,0.08)]">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+            <p className="mt-4 text-base font-semibold text-primary">Confirming your payment…</p>
+            <p className="mt-1 text-sm text-slate-600">Taking you to your dashboard.</p>
+            {error ? (
+              <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+            ) : null}
+          </div>
+        </main>
+        <Footer />
+        <CookieBanner />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[100svh] flex flex-col">
       <Navbar />
@@ -147,7 +172,7 @@ export default function DashboardPaymentPage() {
               </p>
               <h1 className="mt-3 text-3xl font-heading font-bold text-primary">Complete Full Service Payment</h1>
               <p className="mt-2 text-sm text-slate-600">
-                After audit approval, complete payment to move your application into processing.
+                After document check approval, complete payment to move your application into processing.
               </p>
 
               {loading ? (
@@ -161,7 +186,7 @@ export default function DashboardPaymentPage() {
                     <div className="mt-4 space-y-2 text-sm text-slate-700">
                       <p className="flex justify-between"><span>Reference</span><strong>{referenceNumber || "-"}</strong></p>
                       <p className="flex justify-between"><span>Service ({summary.serviceLabel})</span><strong>£{summary.serviceFee.toFixed(2)}</strong></p>
-                      <p className="flex justify-between"><span>Audit credit</span><strong>- £{summary.auditCredit.toFixed(2)}</strong></p>
+                      <p className="flex justify-between"><span>Assessment credit</span><strong>- £{summary.auditCredit.toFixed(2)}</strong></p>
                       <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary">
                         <span className="font-semibold">Total due</span>
                         <strong>£{summary.totalDue.toFixed(2)}</strong>
@@ -171,7 +196,7 @@ export default function DashboardPaymentPage() {
 
                   {isRejected ? (
                     <div className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                      This application was marked as rejected by audit and cannot proceed to full payment. Please contact support.
+                      This application was marked as rejected after document review and cannot proceed to full payment. Please contact support.
                     </div>
                   ) : isAlreadyPaid ? (
                     <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">

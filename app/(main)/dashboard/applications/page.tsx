@@ -157,10 +157,6 @@ export default function DashboardApplicationsPage() {
 
   const openApplication = async (referenceNumber: string) => {
     const selected = applications.find((item) => item.reference_number === referenceNumber);
-    if (isApostilleDashboardApp(selected)) {
-      router.push("/track-apostille");
-      return;
-    }
     const normalizedServiceType = String(selected?.service_type || "").toLowerCase();
     const isEVisa = normalizedServiceType.startsWith("evisa");
 
@@ -182,10 +178,6 @@ export default function DashboardApplicationsPage() {
 
   const openApplicationDetails = (referenceNumber: string) => {
     const selected = applications.find((item) => item.reference_number === referenceNumber);
-    if (isApostilleDashboardApp(selected)) {
-      router.push("/track-apostille");
-      return;
-    }
     const normalizedServiceType = String(selected?.service_type || "").toLowerCase();
     const isEVisa = normalizedServiceType.startsWith("evisa");
     if (isEVisa) {

@@ -451,6 +451,9 @@ export interface AdminApplication {
   payment_confirmed?: boolean;
   final_submission_completed?: boolean;
   full_payment_id?: string | null;
+  fee_plan_code?: string | null;
+  fee_plan_fee_pence?: number | null;
+  is_express?: boolean;
   delivery?: {
     delivery_name?: string;
     delivery_address_line1?: string;
@@ -818,11 +821,11 @@ export const getStoredAdminUser = (): AdminStaffUser | null => {
   }
 };
 
-export const loginAdmin = async (username: string, password: string) => {
+export const loginAdmin = async (username: string, password: string, captchaToken: string) => {
   const response = await fetch(`${API_BASE_URL}/admin/login/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, captcha_token: captchaToken }),
   });
 
   const payload = await parseApiResponse<{
@@ -1014,6 +1017,7 @@ export type AdminService = {
   category: string;
   processing_time_days: number | null;
   is_active: boolean;
+  show_on_homepage?: boolean;
   created_at?: string;
   updated_at?: string;
   code_keyed?: boolean;
@@ -1096,7 +1100,13 @@ export const deleteAdminService = async (serviceId: number) => {
   const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/`, {
     method: "DELETE",
   });
-  await parseApiResponse(response);
+  const payload = await parseApiResponse<{
+    deleted?: boolean;
+    archived?: boolean;
+    application_count?: number;
+    service?: AdminService;
+  }>(response);
+  return payload.data || { deleted: true, archived: false };
 };
 
 export type AdminDocumentRequirement = {
@@ -1165,6 +1175,8 @@ export type AdminServiceQuestion = {
   label: string;
   question_type: string;
   options: string[];
+  depends_on_code?: string;
+  options_by_answer?: Record<string, string[]>;
   help_text?: string;
   is_required: boolean;
   display_order: number;
@@ -1571,10 +1583,112 @@ export type AdminHomepageModule = {
   updated_at?: string | null;
 };
 
+export type AdminHomepageSettings = {
+  pricing_preview_count: number;
+  pricing_title: string;
+  pricing_subtitle: string;
+  updated_at?: string | null;
+};
+
 export const listAdminHomepageModules = async () => {
   const response = await adminAuthenticatedFetch("/admin/homepage-modules/", { method: "GET" });
   const payload = await parseApiResponse<{ modules: AdminHomepageModule[] }>(response);
   return payload.data?.modules || [];
+};
+
+export const getAdminHomepageSettings = async () => {
+  const response = await adminAuthenticatedFetch("/admin/homepage-settings/", { method: "GET" });
+  const payload = await parseApiResponse<{ settings: AdminHomepageSettings }>(response);
+  return payload.data?.settings || null;
+};
+
+export const updateAdminHomepageSettings = async (input: {
+  pricing_preview_count?: number;
+  pricing_title?: string;
+  pricing_subtitle?: string;
+}) => {
+  const response = await adminAuthenticatedFetch("/admin/homepage-settings/", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  const payload = await parseApiResponse<{ settings: AdminHomepageSettings }>(response);
+  return payload.data?.settings || null;
+};
+
+export type AdminMailCredential = {
+  id: number;
+  label: string;
+  email: string;
+  smtp_host: string;
+  smtp_port: number | null;
+  routing_key: string;
+  routing_label: string;
+  is_default: boolean;
+  is_active: boolean;
+  has_password: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export const listAdminMailCredentials = async () => {
+  const response = await adminAuthenticatedFetch("/admin/mail-credentials/", { method: "GET" });
+  const payload = await parseApiResponse<{ credentials: AdminMailCredential[] }>(response);
+  return payload.data?.credentials || [];
+};
+
+export const createAdminMailCredential = async (input: {
+  label?: string;
+  email: string;
+  smtp_host?: string;
+  smtp_port?: number | null;
+  password: string;
+  routing_key?: string;
+  is_default?: boolean;
+  is_active?: boolean;
+}) => {
+  const response = await adminAuthenticatedFetch("/admin/mail-credentials/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  const payload = await parseApiResponse<{ credential: AdminMailCredential }>(response);
+  return payload.data?.credential || null;
+};
+
+export const updateAdminMailCredential = async (
+  credentialId: number,
+  input: {
+    label?: string;
+    email?: string;
+    smtp_host?: string;
+    smtp_port?: number | null;
+    password?: string;
+    routing_key?: string;
+    is_default?: boolean;
+    is_active?: boolean;
+  },
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/mail-credentials/${credentialId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  const payload = await parseApiResponse<{ credential: AdminMailCredential }>(response);
+  return payload.data?.credential || null;
+};
+
+export const deleteAdminMailCredential = async (credentialId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/mail-credentials/${credentialId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse<{ deleted: boolean }>(response);
+};
+
+export const setDefaultAdminMailCredential = async (credentialId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/mail-credentials/${credentialId}/set-default/`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  const payload = await parseApiResponse<{ credential: AdminMailCredential }>(response);
+  return payload.data?.credential || null;
 };
 
 export const reorderAdminHomepageModules = async (orderedIds: number[]) => {
@@ -1644,11 +1758,11 @@ export const deleteAdminServiceFeePlan = async (serviceId: number, planId: numbe
   await parseApiResponse(response);
 };
 
-export const requestStaffForgotPassword = async (email: string) => {
+export const requestStaffForgotPassword = async (email: string, captchaToken: string) => {
   const response = await fetch(`${API_BASE_URL}/admin/forgot-password/request/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, captcha_token: captchaToken }),
   });
   await parseApiResponse(response);
 };
@@ -2361,6 +2475,92 @@ export const deleteAdminDocumentStorage = async (
     throw new Error("Missing delete response.");
   }
   return payload.data;
+};
+
+export type AdminDocumentDeletionRequest = {
+  id: number;
+  application_id: number;
+  status: "pending" | "approved" | "rejected" | "executed" | "cancelled" | string;
+  reason: string;
+  reference_number: string;
+  file_number: string;
+  customer_email: string;
+  service_name: string;
+  service_type: string;
+  requested_at: string | null;
+  reviewed_by_name: string;
+  reviewed_at: string | null;
+  review_notes: string;
+  executed_at: string | null;
+  executed_by: string;
+  documents_deleted: boolean;
+  updated_at: string | null;
+};
+
+export type AdminDocumentDeletionListParams = {
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  service?: string;
+  q?: string;
+  limit?: number;
+};
+
+export const listAdminDocumentDeletionRequests = async (
+  params: AdminDocumentDeletionListParams = {},
+): Promise<{ requests: AdminDocumentDeletionRequest[]; count: number }> => {
+  const query = new URLSearchParams();
+  if (params.status && params.status !== "all") query.set("status", params.status);
+  if (params.date_from) query.set("date_from", params.date_from);
+  if (params.date_to) query.set("date_to", params.date_to);
+  if (params.service) query.set("service", params.service);
+  if (params.q) query.set("q", params.q);
+  if (params.limit) query.set("limit", String(params.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await adminAuthenticatedFetch(`/admin/document-deletion-requests/${suffix}`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<{ requests: AdminDocumentDeletionRequest[]; count: number }>(response);
+  return {
+    requests: payload.data?.requests || [],
+    count: payload.data?.count || 0,
+  };
+};
+
+export const approveAdminDocumentDeletionRequest = async (
+  requestId: number,
+  notes = "",
+): Promise<AdminDocumentDeletionRequest> => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/document-deletion-requests/${requestId}/approve/`,
+    {
+      method: "POST",
+      body: JSON.stringify({ review_notes: notes }),
+    },
+  );
+  const payload = await parseApiResponse<{ request: AdminDocumentDeletionRequest }>(response);
+  if (!payload.data?.request) {
+    throw new Error("Missing approve response.");
+  }
+  return payload.data.request;
+};
+
+export const rejectAdminDocumentDeletionRequest = async (
+  requestId: number,
+  notes = "",
+): Promise<AdminDocumentDeletionRequest> => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/document-deletion-requests/${requestId}/reject/`,
+    {
+      method: "POST",
+      body: JSON.stringify({ review_notes: notes }),
+    },
+  );
+  const payload = await parseApiResponse<{ request: AdminDocumentDeletionRequest }>(response);
+  if (!payload.data?.request) {
+    throw new Error("Missing reject response.");
+  }
+  return payload.data.request;
 };
 
 export const downloadAdminApostilleDocumentBlob = async (docId: number): Promise<Blob> => {

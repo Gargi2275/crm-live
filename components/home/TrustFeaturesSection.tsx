@@ -12,6 +12,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import Link from "next/link";
+import { ParallaxBlob } from "@/components/home/HomeScrollMotion";
 import { home } from "@/components/home/homeTheme";
 
 const container = {
@@ -20,11 +21,11 @@ const container = {
 };
 
 const cardItem = {
-  hidden: { opacity: 0, y: 28 },
+  hidden: { opacity: 0, y: 24 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const },
+    transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] as const },
   },
 };
 
@@ -57,10 +58,11 @@ const trustFeatures: TrustFeature[] = [
       "Photo and biometric validation",
       "Pre-submission file review",
     ],
-    href: "/document-audit",
+    href: "/how-it-works",
   },
   {
     title: "Apostille Services",
+
     description: "Full guidance on legalisation and attestation.",
     icon: Stamp,
     points: [
@@ -76,7 +78,7 @@ const trustFeatures: TrustFeature[] = [
     icon: MessageCircle,
     points: [
       "Human replies via WhatsApp and email",
-      "Concise written audit reports",
+      "Concise written check reports",
       "Guidance at each next step",
     ],
     href: "/contact",
@@ -87,7 +89,7 @@ const trustFeatures: TrustFeature[] = [
     icon: CheckCircle,
     points: [
       "Clear service vs government fees",
-      "Audit fee credited against service",
+      "Assessment fee credited against service",
       "No hidden extras in our quote",
     ],
     href: "/pricing",
@@ -169,6 +171,10 @@ export function TrustFeaturesSection() {
 
   return (
     <section className={home.sectionSoft}>
+      <ParallaxBlob
+        speed={42}
+        className="pointer-events-none absolute left-1/2 top-0 h-80 w-80 -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.08)_0%,transparent_70%)]"
+      />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(51,161,253,0.06),transparent_50%)]" />
 
       <div className={home.container}>

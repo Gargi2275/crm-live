@@ -34,6 +34,7 @@ function KanbanCardContent({
   blockerLabel,
   customerWaiting,
   isDragging = false,
+  isExpress = false,
 }: KanbanCardContentProps) {
   const hasStatusRow = Boolean(dueLabel || blockerLabel || customerWaiting);
 
@@ -48,14 +49,22 @@ function KanbanCardContent({
         "bg-white p-3 rounded-[12px] border-[0.5px] border-[#D9E1EA] hover:border-[#009877]/45 transition-all mb-2 z-10",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         isDragging && "opacity-90 shadow-lg scale-105 border-[#009877] rotate-1",
-        slaBreached && !isDragging && "border-[#B42318]/45 shadow-[0_0_0_1px_rgba(180,35,24,0.08)]"
+        slaBreached && !isDragging && "border-[#B42318]/45 shadow-[0_0_0_1px_rgba(180,35,24,0.08)]",
+        isExpress && !isDragging && "border-[#C2410C]/50 shadow-[0_0_0_1px_rgba(194,65,12,0.1)]"
       )}
       onClick={onClick}
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-[11px] font-semibold text-[#627D98]">{id}</span>
-        <span className="shrink-0 rounded-full border-[0.5px] border-[#33A1FD]/35 bg-[#33A1FD]/12 px-2 py-0.5 text-[10px] font-medium text-[#0B69B7]">
-          {serviceType}
+        <span className="flex shrink-0 items-center gap-1">
+          {isExpress ? (
+            <span className="rounded-full border-[0.5px] border-[#C2410C]/40 bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-semibold text-[#C2410C]">
+              Express
+            </span>
+          ) : null}
+          <span className="rounded-full border-[0.5px] border-[#33A1FD]/35 bg-[#33A1FD]/12 px-2 py-0.5 text-[10px] font-medium text-[#0B69B7]">
+            {serviceType}
+          </span>
         </span>
       </div>
 

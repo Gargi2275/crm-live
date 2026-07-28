@@ -9,45 +9,50 @@ export type ServiceCategoryMeta = {
 
 export const SERVICE_CATEGORY_META: Record<string, ServiceCategoryMeta> = {
   oci: {
-    title: "OCI Card Application & Renewal",
+    title: "OCI",
     shortTitle: "OCI",
     description:
       "Apply for a new OCI card, renew or transfer an existing one, or complete mandatory updates with guided document support.",
-    href: "/services/new-oci",
+    href: "/services/oci",
   },
   evisa: {
-    title: "Indian e-Visa Services",
-    shortTitle: "e-Visa",
+    title: "Indian Visa",
+    shortTitle: "Indian Visa",
     description:
       "1-year and 5-year e-Visa options prepared and checked so you submit with confidence.",
-    href: "/services/indian-evisa",
+    href: "/services/indian-visa",
   },
   passport: {
-    title: "Indian Passport Services",
-    shortTitle: "Passport",
+    title: "Indian Passport",
+    shortTitle: "Indian Passport",
     description:
-      "Passport renewal support for UK and US residents, with clear quotes based on your category and courier needs.",
-    href: "/services/passport-renewal",
+      "Passport renewal support for UK and US residents, with catalog fees and category/courier options at checkout.",
+    href: "/services/indian-passport",
   },
   apostille: {
-    title: "Apostille & Attestation",
+    title: "Apostille",
     shortTitle: "Apostille",
     description:
-      "UK and US documents legalised for use in India — start with a free document pre-check.",
-    href: "/apostille-services",
-  },
-  audit: {
-    title: "Document Audit",
-    shortTitle: "Document Audit",
-    description:
-      "Pre-check your documents before any application so missing or incorrect papers are caught early.",
-    href: "/document-audit",
+      "UK and US documents legalised for use in India — same guided journey with catalog fees at checkout.",
+    href: "/services/apostille",
   },
   other: {
-    title: "Other Services",
-    shortTitle: "Other",
+    title: "Others",
+    shortTitle: "Others",
     description: "Additional India travel and documentation support under one guided process.",
-    href: "/services",
+    href: "/services/others",
+  },
+  pan_card: {
+    title: "PAN CARD SERVICE",
+    shortTitle: "PAN Card",
+    description: "PAN card application support as a standalone service.",
+    href: "/services/others",
+  },
+  uncategorized: {
+    title: "PAN CARD SERVICE",
+    shortTitle: "PAN Card",
+    description: "PAN card application support as a standalone service.",
+    href: "/services/others",
   },
 };
 
@@ -99,7 +104,7 @@ export function groupServicesByCategory(
   services: CatalogService[],
   options?: { exclude?: PricingCategoryId[] },
 ): ServiceCategoryGroup[] {
-  // Always hide Document Audit as a category (it is a service flow).
+  // Hide document_audit from public category listings.
   const exclude = new Set<PricingCategoryId>(["audit", ...(options?.exclude || [])]);
   const byCategory = new Map<PricingCategoryId, CatalogService[]>();
   const orderByCategory = new Map<PricingCategoryId, number>();
@@ -107,7 +112,8 @@ export function groupServicesByCategory(
 
   for (const service of services) {
     if (exclude.has(service.category)) continue;
-    if (service.serviceType === "document_audit") continue;
+    // Assessment lives under OCI for search/browse; keep it out of other categories.
+    if (service.serviceType === "document_audit" && service.category !== "oci") continue;
     const list = byCategory.get(service.category) || [];
     list.push(service);
     byCategory.set(service.category, list);

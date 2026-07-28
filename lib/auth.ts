@@ -210,6 +210,7 @@ export const authService = {
     fullName: string;
     mobileNumber: string;
     countryOfResidence: string;
+    captchaToken: string;
   }): Promise<{ otpExpiresInMinutes: number; otp?: string; prefill?: { fullName?: string; mobileNumber?: string; countryOfResidence?: string } }> {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/request-signup-otp/`, {
@@ -222,6 +223,7 @@ export const authService = {
           full_name: payload.fullName,
           mobile_number: payload.mobileNumber,
           country_of_residence: payload.countryOfResidence,
+          captcha_token: payload.captchaToken,
         }),
       });
 
@@ -249,14 +251,14 @@ export const authService = {
   /**
    * Request OTP for passwordless login
    */
-  async requestLoginOtp(email: string): Promise<{ otpExpiresInMinutes: number; otp?: string }> {
+  async requestLoginOtp(email: string, captchaToken: string): Promise<{ otpExpiresInMinutes: number; otp?: string }> {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login/request-otp/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, captcha_token: captchaToken }),
       });
 
       const data: RequestLoginOtpResponse = await response.json();
@@ -487,6 +489,8 @@ export const authService = {
       user: UserProfile;
       tokens: AuthTokens;
       case_number?: string;
+      reference_number?: string;
+      file_number?: string | null;
       tracking_otp?: string;
       tracking_otp_expires_in_minutes?: number;
       next_step?: string;

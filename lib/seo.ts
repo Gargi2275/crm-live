@@ -31,7 +31,6 @@ export const DEFAULT_KEYWORDS = [
   "apostille India documents",
   "document apostille UK",
   "birth certificate apostille UK",
-  "OCI document audit",
   "Indian visa services",
   "VFS OCI help",
   "Overseas Citizen of India",
@@ -110,13 +109,18 @@ export const rootMetadata: Metadata = {
     template: `%s | ${SITE_NAME}`,
   },
   description:
-    "FlyOCI helps UK and US residents with OCI card applications, OCI renewal, Indian e-Visa, apostille services, passport renewal, and expert document audits. Independent guidance — not a government website.",
+    "FlyOCI helps UK and US residents with OCI card applications, OCI renewal, Indian e-Visa, apostille services, and passport renewal. Independent guidance — not a government website.",
   keywords: DEFAULT_KEYWORDS,
   applicationName: SITE_NAME,
   authors: [{ name: SITE_NAME, url: SITE_URL }],
   creator: SITE_NAME,
   publisher: SITE_NAME,
   category: "Immigration & Visa Services",
+  icons: {
+    icon: [{ url: "/logo.png", type: "image/png" }],
+    shortcut: "/logo.png",
+    apple: "/logo.png",
+  },
   alternates: {
     canonical: SITE_URL,
   },
@@ -127,7 +131,7 @@ export const rootMetadata: Metadata = {
     siteName: SITE_NAME,
     title: `${SITE_NAME} | ${SITE_TAGLINE}`,
     description:
-      "Expert OCI, Indian e-Visa, apostille and passport support for UK & US residents. Document audit, form filling and end-to-end application guidance.",
+      "Expert OCI, Indian e-Visa, apostille and passport support for UK & US residents. Form filling and end-to-end application guidance.",
     images: [{ url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: SITE_NAME }],
   },
   twitter: {

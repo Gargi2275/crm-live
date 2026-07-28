@@ -18,9 +18,7 @@ export function ServiceCard({ offering, currencySymbol, countrySlug, citySlug }:
     countrySlug,
     citySlug,
   });
-  const badge = offering.is_popular
-    ? "Most Popular"
-    : offering.service.category?.name || null;
+  const badge = offering.service.category?.name || null;
 
   return (
     <article className={`${home.card} flex h-full flex-col p-5`}>

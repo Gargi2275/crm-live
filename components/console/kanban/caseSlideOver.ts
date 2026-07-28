@@ -18,9 +18,11 @@ export type AdminKanbanCase = PipelineCase & {
 
 const STAGE_ALIAS: Record<string, PipelineCase["stage"]> = {
   NEW_LEAD: "NEW_LEAD",
-  PASSPORT_QUOTE_PENDING: "PASSPORT_QUOTE_PENDING",
-  AUDIT_PENDING: "AUDIT_PENDING",
-  AUDIT_COMPLETED: "AUDIT_COMPLETED",
+  PASSPORT_QUOTE_PENDING: "PAYMENT_PENDING",
+  ASSESSMENT_PENDING: "ASSESSMENT_PENDING",
+  ASSESSMENT_COMPLETED: "ASSESSMENT_COMPLETED",
+  AUDIT_PENDING: "ASSESSMENT_PENDING",
+  AUDIT_COMPLETED: "ASSESSMENT_COMPLETED",
   DOCUMENTS_REQUIRED: "DOCUMENTS_REQUIRED",
   PAYMENT_PENDING: "PAYMENT_PENDING",
   UPLOAD_PENDING: "DOCUMENT_UPLOAD_PENDING",
@@ -96,10 +98,22 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
     if (applicationStatus === "rejected" || rawStage === "CORRECTION_REQUESTED") {
       return "DOCUMENTS_REQUIRED";
     }
-    if (applicationStatus === "under_review" || rawStage === "INITIAL_REVIEW" || rawStage === "AUDIT_PENDING") {
-      return "AUDIT_PENDING";
+    if (applicationStatus === "under_review" || rawStage === "INITIAL_REVIEW" || rawStage === "ASSESSMENT_PENDING") {
+      return "ASSESSMENT_PENDING";
     }
-    return (STAGE_ALIAS[rawStage] || "AUDIT_PENDING") as PipelineCase["stage"];
+    return (STAGE_ALIAS[rawStage] || "ASSESSMENT_PENDING") as PipelineCase["stage"];
+  }
+
+  // Passport legacy quote states → PAYMENT_PENDING (docs) / NEW_LEAD (no docs).
+  if (
+    isPassportCase &&
+    (rawStage === "INITIAL_REVIEW" || rawStage === "PASSPORT_QUOTE_PENDING" || applicationStatus === "pending_quote" || quoteStatus === "PENDING_QUOTE")
+  ) {
+    return hasDocuments ? "PAYMENT_PENDING" : "NEW_LEAD";
+  }
+
+  if (isPassportCase && (applicationStatus === "quoted" || ["QUOTED", "EXPIRED", "QUOTE_ACCEPTED"].includes(quoteStatus))) {
+    return "PAYMENT_PENDING";
   }
 
   const backendStage = String(item.stage || "").trim();
@@ -113,17 +127,6 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
 
   if (auditResult === "red" || applicationStatus === "rejected") {
     return "DOCUMENTS_REQUIRED";
-  }
-
-  if (
-    isPassportCase &&
-    (rawStage === "INITIAL_REVIEW" || applicationStatus === "pending_quote" || quoteStatus === "PENDING_QUOTE")
-  ) {
-    return "PASSPORT_QUOTE_PENDING";
-  }
-
-  if (isPassportCase && (applicationStatus === "quoted" || ["QUOTED", "EXPIRED", "QUOTE_ACCEPTED"].includes(quoteStatus))) {
-    return "PAYMENT_PENDING";
   }
 
   if (isEVisaCase) {
@@ -155,9 +158,9 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
   if (rawStage === "PAYMENT_PENDING" || applicationStatus === "payment_pending") return "PAYMENT_PENDING";
   if (rawStage === "FORM_FILLING" || rawStage === "IN_PREPARATION") return "FORM_FILLING";
   if (rawStage === "CORRECTION_REQUESTED" || auditResult === "amber") return "DOCUMENTS_REQUIRED";
-  if (auditResult === "pending" || rawStage === "AUDIT_PENDING" || rawStage === "DOCS_RECEIVED") return "AUDIT_PENDING";
-  if (rawStage === "AUDIT_COMPLETED") {
-    return auditResult === "green" ? "PAYMENT_PENDING" : "AUDIT_COMPLETED";
+  if (auditResult === "pending" || rawStage === "ASSESSMENT_PENDING" || rawStage === "DOCS_RECEIVED") return "ASSESSMENT_PENDING";
+  if (rawStage === "ASSESSMENT_COMPLETED") {
+    return auditResult === "green" ? "PAYMENT_PENDING" : "ASSESSMENT_COMPLETED";
   }
 
   return (STAGE_ALIAS[rawStage] || "NEW_LEAD") as PipelineCase["stage"];
@@ -166,9 +169,8 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
 const getNextAction = (stage: PipelineCase["stage"]): string => {
   const map: Partial<Record<PipelineCase["stage"], string>> = {
     NEW_LEAD: "Open lead and assign service",
-    PASSPORT_QUOTE_PENDING: "Send passport quote to customer",
-    AUDIT_PENDING: "Review uploaded documents",
-    AUDIT_COMPLETED: "Send payment link to customer",
+    ASSESSMENT_PENDING: "Review uploaded documents",
+    ASSESSMENT_COMPLETED: "Send payment link to customer",
     DOCUMENTS_REQUIRED: "Request missing documents from customer",
     PAYMENT_PENDING: "Follow up on payment confirmation",
     DOCUMENT_UPLOAD_PENDING: "Wait for customer document upload",
@@ -206,6 +208,7 @@ export const adminApplicationToKanbanCase = (item: AdminApplication): AdminKanba
       ? String(item.file_number).trim()
       : item.reference_number || `APP-${item.id}`;
   const stage = resolveAdminCaseStage(item);
+  const feePlan = String(item.fee_plan_code || "").trim().toLowerCase();
   return {
     applicationId: item.id,
     createdAt,
@@ -224,6 +227,7 @@ export const adminApplicationToKanbanCase = (item: AdminApplication): AdminKanba
     assignedTo: item.assigned_staff ? String(item.assigned_staff) : null,
     slaTimer: `${ageHours}h`,
     slaBreached: ageHours >= 24 * 7,
+    isExpress: feePlan === "express" || feePlan.startsWith("express") || Boolean(item.is_express),
   };
 };
 

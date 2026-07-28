@@ -47,6 +47,7 @@ export type PublicPricingService = {
   }>;
   processing_time_days: number | null;
   is_active: boolean;
+  show_on_homepage?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -70,6 +71,7 @@ export type CatalogService = {
   auditCreditEligible: boolean;
   isQuoteBased: boolean;
   isPopular: boolean;
+  showOnHomepage: boolean;
   /** Marketing highlights kept for View details (API has no required-docs yet). */
   detailNotes: string[];
 };
@@ -88,11 +90,13 @@ let inflight: Promise<{ services: CatalogService[]; fromFallback: boolean }> | n
 
 const CATEGORY_LABELS: Record<string, string> = {
   oci: "OCI",
-  evisa: "e-Visa",
-  passport: "Passport",
+  evisa: "Indian Visa",
+  passport: "Indian Passport",
   apostille: "Apostille",
-  audit: "Document Audit",
-  other: "Other",
+  audit: "Assessment",
+  other: "Others",
+  pan_card: "PAN CARD SERVICE",
+  uncategorized: "PAN CARD SERVICE",
 };
 
 const DISPLAY_ORDER: ServiceTypeCode[] = [
@@ -108,6 +112,18 @@ const DISPLAY_ORDER: ServiceTypeCode[] = [
 
 /** Last-known hardcoded catalog — used only when API fails or returns empty. */
 export const FALLBACK_PRICING_SERVICES: PublicPricingService[] = [
+  {
+    id: -1,
+    service_name: "Document Assessment",
+    description: "Expert pre-check credited against eligible OCI services",
+    base_fee: "15.00",
+    government_fee: "0.00",
+    total_fee: "15.00",
+    audit_fee: "15.00",
+    service_type: "document_audit",
+    processing_time_days: 1,
+    is_active: true,
+  },
   {
     id: -2,
     service_name: "New OCI Card",
@@ -166,7 +182,7 @@ export const FALLBACK_PRICING_SERVICES: PublicPricingService[] = [
   {
     id: -7,
     service_name: "Indian Passport Renewal",
-    description: "Quote based on category & courier",
+    description: "Fixed service fee — category & courier options at checkout",
     base_fee: "85.00",
     government_fee: "0.00",
     total_fee: "85.00",
@@ -177,10 +193,10 @@ export const FALLBACK_PRICING_SERVICES: PublicPricingService[] = [
   {
     id: -8,
     service_name: "Apostille Services",
-    description: "Document legalisation guidance with free pre-check",
-    base_fee: "0.00",
+    description: "Document legalisation with guided checklist and checkout",
+    base_fee: "79.00",
     government_fee: "0.00",
-    total_fee: "0.00",
+    total_fee: "79.00",
     service_type: "apostille",
     processing_time_days: 7,
     is_active: true,
@@ -192,13 +208,13 @@ const DETAIL_NOTES: Partial<Record<ServiceTypeCode, string[]>> = {
     "Written pass / fix / missing report",
     "Fully credited against OCI services within 30 days",
   ],
-  new_oci: ["End-to-end first-time OCI support", "Audit credit eligible"],
-  oci_renewal: ["Transfer details to a new passport", "Audit credit eligible"],
+  new_oci: ["End-to-end first-time OCI support", "Assessment credit eligible"],
+  oci_renewal: ["Transfer details to a new passport", "Assessment credit eligible"],
   oci_update: ["Government fee is typically nil", "We handle portal work"],
-  evisa_1year: ["Government fee included in total", "Audit credit does not apply"],
-  evisa_5year: ["Government fee included in total", "Audit credit does not apply"],
-  passport_renewal: ["Final quote depends on category & courier", "Share your case for an exact quote"],
-  apostille: ["Free document pre-check first", "Service fee confirmed after review"],
+  evisa_1year: ["Government fee included in total", "Assessment credit does not apply"],
+  evisa_5year: ["Government fee included in total", "Assessment credit does not apply"],
+  passport_renewal: ["Fixed service fee at checkout", "Category and courier options available"],
+  apostille: ["Catalog service fee at checkout", "Optional early assessment when offered"],
 };
 
 export function toNumber(value: string | number | null | undefined): number {
@@ -209,20 +225,41 @@ export function toNumber(value: string | number | null | undefined): number {
 export function formatGbp(amount: number, opts?: { onRequest?: boolean; freeLabel?: string }): string {
   if (opts?.onRequest) return "On request";
   if (amount <= 0 && opts?.freeLabel) return opts.freeLabel;
-  if (amount <= 0) return "Free pre-check";
+  if (amount <= 0) return "See fee at checkout";
   return `£${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}`;
 }
 
 /**
- * Early / initial assessment fee from the active `document_audit` catalog row.
- * Returns null when that product is missing or priced at 0 — callers should hide assessment CTAs.
+ * Early / initial assessment fee (OCI only).
+ * Prefer active `document_audit` catalog row for OCI; else the selected service's `auditFee`.
+ * Returns null when assessment is not offered.
  */
-export function getAssessmentFeeGbp(services?: CatalogService[] | null): number | null {
+export function getAssessmentFeeGbp(
+  services?: CatalogService[] | null,
+  serviceType?: string | null,
+): number | null {
   const rows = services ?? cache;
-  const auditRow = rows?.find((row) => row.serviceType === "document_audit");
-  if (!auditRow) return null;
-  const fee = auditRow.totalFee > 0 ? auditRow.totalFee : auditRow.auditFee;
-  return fee > 0 ? fee : null;
+  const normalized = String(serviceType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  const isOci = !normalized || normalized.includes("oci") || normalized === "document_audit";
+
+  if (isOci) {
+    const auditRow = rows?.find((row) => row.serviceType === "document_audit");
+    if (auditRow) {
+      const fee = auditRow.totalFee > 0 ? auditRow.totalFee : auditRow.auditFee;
+      if (fee > 0) return fee;
+    }
+  }
+
+  if (normalized) {
+    const serviceRow = rows?.find(
+      (row) => String(row.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === normalized,
+    );
+    if (serviceRow && serviceRow.auditFee > 0) return serviceRow.auditFee;
+  }
+  return null;
 }
 
 export function hasAssessmentFee(services?: CatalogService[] | null): boolean {
@@ -235,20 +272,36 @@ export function getAuditFeeGbp(): number {
 }
 
 export function categoryForServiceType(serviceType: ServiceTypeCode): PricingCategoryId {
-  // Document Audit is not a catalog category — keep it out of category tabs/cards.
-  if (serviceType === "document_audit") return "other";
-  if (serviceType === "apostille") return "apostille";
-  if (serviceType === "passport_renewal") return "passport";
-  if (serviceType.startsWith("evisa")) return "evisa";
-  if (serviceType.includes("oci")) return "oci";
+  const key = String(serviceType || "").toLowerCase();
+  if (key === "document_audit") return "oci";
+  if (key === "pan_card") return "pan_card";
+  if (key === "apostille" || key.startsWith("apostille_")) return "apostille";
+  if (
+    key === "passport_renewal" ||
+    key === "passport_services" ||
+    key === "birth_reg_minor_passport" ||
+    key === "surrender_indian_passport" ||
+    key === "police_clearance"
+  ) {
+    return "passport";
+  }
+  if (key.startsWith("evisa") || key === "morocco_turkey_evisa") return "evisa";
+  if (key === "uk_passport_renewal" || key === "express_file" || key === "express") return "other";
+  if (key.includes("oci")) return "oci";
   return "other";
 }
 
 function normalizeCategory(raw: string | undefined, serviceType: ServiceTypeCode): PricingCategoryId {
   // Keep admin category slugs so drag-order and custom categories work on the public site.
-  if (serviceType === "document_audit") return "other";
+  if (String(serviceType || "").toLowerCase() === "document_audit") return "oci";
   const key = (raw || "").trim().toLowerCase();
-  if (!key || key === "audit") return categoryForServiceType(serviceType);
+  if (!key || key === "audit") {
+    // Truly uncategorized catalog rows (e.g. PAN CARD SERVICE) stay outside OCI/Visa/etc.
+    if (!key && String(serviceType || "").toLowerCase() === "pan_card") {
+      return "pan_card";
+    }
+    return categoryForServiceType(serviceType);
+  }
   return key;
 }
 
@@ -259,41 +312,40 @@ function resolveCategoryName(rawName: string | undefined, category: PricingCateg
 }
 
 export function hrefForServiceType(serviceType: ServiceTypeCode): string {
-  switch (serviceType) {
-    case "document_audit":
-      return "/document-audit";
-    case "new_oci":
-      return "/services/new-oci";
-    case "oci_renewal":
-      return "/services/oci-renewal";
-    case "oci_update":
-      return "/services/oci-update";
-    case "evisa_1year":
-    case "evisa_5year":
-      return "/services/indian-evisa";
-    case "passport_renewal":
-      return "/services/passport-renewal";
-    case "apostille":
-      return "/apostille-services";
-    default:
-      return "/services";
+  const key = String(serviceType || "").toLowerCase();
+  if (key === "document_audit") return "/services";
+  if (key === "apostille" || key.startsWith("apostille_")) return "/apostille-services";
+  if (key === "oci_renewal" || key === "oci_update") return "/services/oci-renewal";
+  if (key.includes("oci")) return "/services/new-oci";
+  if (
+    key.startsWith("evisa") ||
+    key === "morocco_turkey_evisa"
+  ) {
+    return "/services/indian-evisa";
   }
+  if (
+    key.includes("passport") ||
+    key === "police_clearance" ||
+    key === "birth_reg_minor_passport"
+  ) {
+    return "/services/passport-renewal";
+  }
+  return `/dashboard/document-audit?start=1&service=${encodeURIComponent(key)}`;
 }
 
 export function ctaForServiceType(serviceType: ServiceTypeCode): string {
   if (serviceType === "document_audit") return "Start assessment";
-  if (serviceType === "passport_renewal") return "Get a quote";
-  if (serviceType === "apostille") return "Start pre-check";
+  if (serviceType === "passport_renewal" || serviceType === "apostille") return "Start application";
   return "View service";
 }
 
 export function isAuditCreditEligible(serviceType: ServiceTypeCode): boolean {
-  return serviceType === "new_oci" || serviceType === "oci_renewal" || serviceType === "oci_update";
+  const key = String(serviceType || "").toLowerCase();
+  return key.includes("oci") && key !== "document_audit";
 }
 
-export function isQuoteBased(serviceType: ServiceTypeCode, totalFee: number): boolean {
-  if (serviceType === "passport_renewal") return true;
-  if (serviceType === "apostille" && totalFee <= 0) return true;
+export function isQuoteBased(_serviceType: ServiceTypeCode, _totalFee: number): boolean {
+  // All catalog services use published fees / plans (including apostille).
   return false;
 }
 
@@ -336,6 +388,7 @@ export function mapPublicService(raw: PublicPricingService): CatalogService {
     auditCreditEligible: isAuditCreditEligible(serviceType),
     isQuoteBased: isQuoteBased(serviceType, totalFee),
     isPopular: serviceType === "new_oci",
+    showOnHomepage: Boolean(raw.show_on_homepage),
     detailNotes: DETAIL_NOTES[serviceType] ?? [],
   };
 }
@@ -403,12 +456,6 @@ export function creditPriceLabel(service: CatalogService, auditFee?: number): st
 }
 
 export function priceDisplay(service: CatalogService): string {
-  if (service.serviceType === "passport_renewal") {
-    return service.totalFee > 0 ? `From ${formatGbp(service.totalFee)}` : "On request";
-  }
-  if (service.serviceType === "apostille" && service.totalFee <= 0) {
-    return "Free pre-check";
-  }
   return formatGbp(service.totalFee);
 }
 

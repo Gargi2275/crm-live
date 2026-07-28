@@ -1,6 +1,7 @@
 "use client";
 
 import { FadeInUp } from "@/components/FadeInUp";
+import { ParallaxBlob } from "@/components/home/HomeScrollMotion";
 import { Button } from "@/components/ui/Button";
 import { usePublicPricing } from "@/hooks/usePublicPricing";
 import Link from "next/link";
@@ -30,8 +31,14 @@ export function HowItWorksSection() {
 
   return (
     <section className={home.sectionSoft}>
-      <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.10)_0%,transparent_70%)]" />
-      <div className="pointer-events-none absolute -bottom-16 -left-16 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(15,126,232,0.08)_0%,transparent_70%)]" />
+      <ParallaxBlob
+        speed={56}
+        className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.10)_0%,transparent_70%)]"
+      />
+      <ParallaxBlob
+        speed={36}
+        className="pointer-events-none absolute -bottom-16 -left-16 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(15,126,232,0.08)_0%,transparent_70%)]"
+      />
 
       <div className={home.container}>
         <FadeInUp>
@@ -41,19 +48,19 @@ export function HowItWorksSection() {
           </div>
         </FadeInUp>
 
-        <FadeInUp delay={0.1}>
-          <div className="grid gap-4 md:grid-cols-3">
-            {STEPS.map((step, index) => (
-              <div key={step.title} className={`${home.card} p-5`}>
+        <div className="grid gap-4 md:grid-cols-3">
+          {STEPS.map((step, index) => (
+            <FadeInUp key={step.title} delay={0.08 + index * 0.08}>
+              <div className={`${home.card} p-5`}>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
                   Step {index + 1}
                 </p>
                 <h3 className="mt-1.5 font-heading text-base font-bold text-dark">{step.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-textMuted">{step.description}</p>
               </div>
-            ))}
-          </div>
-        </FadeInUp>
+            </FadeInUp>
+          ))}
+        </div>
 
         {assessmentLabel ? (
           <FadeInUp delay={0.2} className="mt-6">
@@ -69,7 +76,7 @@ export function HowItWorksSection() {
         ) : null}
 
         <FadeInUp delay={0.3} className="mt-8 text-center">
-          <Link href="/services">
+          <Link href="/dashboard/document-audit?start=1">
             <Button variant="primary" className="px-8 py-3.5 text-base shadow-btn">
               Start my application
             </Button>

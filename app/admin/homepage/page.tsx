@@ -19,14 +19,20 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Eye, EyeOff, GripVertical, LayoutTemplate, RefreshCw } from "lucide-react";
+import { Eye, EyeOff, GripVertical, LayoutTemplate, RefreshCw, Save } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
+  getAdminHomepageSettings,
   listAdminHomepageModules,
+  listAdminServices,
   reorderAdminHomepageModules,
   updateAdminHomepageModule,
+  updateAdminHomepageSettings,
+  updateAdminService,
   type AdminHomepageModule,
+  type AdminHomepageSettings,
+  type AdminService,
 } from "@/lib/admin-auth";
 
 function SortableModuleRow({
@@ -97,21 +103,43 @@ function SortableModuleRow({
   );
 }
 
+const DEFAULT_SETTINGS: AdminHomepageSettings = {
+  pricing_preview_count: 6,
+  pricing_title: "Our services & fees",
+  pricing_subtitle: "Transparent pricing, clearly separated from government fees where they apply.",
+};
+
 export default function AdminHomepageModulesPage() {
   const { adminUser } = useAdminAuth();
   const isAdmin = adminUser?.role === "admin";
 
   const [rows, setRows] = useState<AdminHomepageModule[]>([]);
+  const [settings, setSettings] = useState<AdminHomepageSettings>(DEFAULT_SETTINGS);
+  const [settingsDraft, setSettingsDraft] = useState<AdminHomepageSettings>(DEFAULT_SETTINGS);
+  const [services, setServices] = useState<AdminService[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const modules = await listAdminHomepageModules();
+      const [modules, homepageSettings, servicePayload] = await Promise.all([
+        listAdminHomepageModules(),
+        getAdminHomepageSettings(),
+        listAdminServices({ page: 1, page_size: 100, active: "1" }),
+      ]);
       setRows(modules);
+      const nextSettings = homepageSettings || DEFAULT_SETTINGS;
+      setSettings(nextSettings);
+      setSettingsDraft(nextSettings);
+      setServices(
+        (servicePayload.services || []).filter(
+          (row) => String(row.service_type || "").toLowerCase() !== "document_audit",
+        ),
+      );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load homepage modules.");
+      toast.error(error instanceof Error ? error.message : "Failed to load homepage settings.");
     } finally {
       setLoading(false);
     }
@@ -122,13 +150,13 @@ export default function AdminHomepageModulesPage() {
   }, [load]);
 
   useSetAdminPageChrome({
-    title: "Homepage modules",
-    subtitle: "Drag to set public homepage section order",
+    title: "Homepage settings",
+    subtitle: "Sections, pricing teaser count, and featured services",
     actions: (
       <button
         type="button"
         onClick={() => void load()}
-        disabled={loading || saving}
+        disabled={loading || saving || savingSettings}
         className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#D9E1EA] bg-white px-3 text-sm font-semibold text-[#486581] hover:bg-[#F5F7FA] disabled:opacity-50"
       >
         <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -182,11 +210,179 @@ export default function AdminHomepageModulesPage() {
     }
   };
 
+  const handleSaveSettings = async () => {
+    if (!isAdmin || savingSettings) return;
+    setSavingSettings(true);
+    try {
+      const saved = await updateAdminHomepageSettings({
+        pricing_preview_count: Number(settingsDraft.pricing_preview_count) || 6,
+        pricing_title: settingsDraft.pricing_title,
+        pricing_subtitle: settingsDraft.pricing_subtitle,
+      });
+      if (saved) {
+        setSettings(saved);
+        setSettingsDraft(saved);
+      }
+      toast.success("Homepage pricing settings saved.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save settings.");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleToggleFeatured = async (service: AdminService) => {
+    if (!isAdmin || saving) return;
+    setSaving(true);
+    try {
+      const updated = await updateAdminService(service.id, {
+        show_on_homepage: !Boolean(service.show_on_homepage),
+      });
+      if (updated) {
+        setServices((prev) => prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
+      }
+      toast.success(
+        service.show_on_homepage ? "Removed from homepage pricing teaser." : "Added to homepage pricing teaser.",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update service.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const featuredCount = services.filter((row) => row.show_on_homepage).length;
+
   return (
     <div className="space-y-4">
       <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 sm:p-5">
         <div className="mb-4 flex items-start gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-[#E8F7F3] text-[#006F57]">
+            <LayoutTemplate className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-semibold text-[#102A43]">Pricing teaser settings</h2>
+            <p className="mt-0.5 text-sm text-[#627D98]">
+              Homepage shows a limited service &amp; fees grid. Full catalog stays on{" "}
+              <span className="font-medium text-[#334E68]">/pricing</span>.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-1">
+            <span className="mb-1 block text-xs font-semibold text-[#486581]">Cards on homepage (1–24)</span>
+            <input
+              type="number"
+              min={1}
+              max={24}
+              value={settingsDraft.pricing_preview_count}
+              disabled={!isAdmin || savingSettings}
+              onChange={(e) =>
+                setSettingsDraft((current) => ({
+                  ...current,
+                  pricing_preview_count: Number(e.target.value) || 6,
+                }))
+              }
+              className="w-full rounded-[8px] border border-[#D0D7E2] px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/15 disabled:bg-[#F5F7FA]"
+            />
+          </label>
+          <div className="flex items-end sm:col-span-1">
+            <p className="rounded-[8px] border border-[#E4ECF4] bg-[#F8FAFC] px-3 py-2 text-xs text-[#627D98]">
+              Currently featured: <span className="font-semibold text-[#334E68]">{featuredCount}</span> · Live
+              preview uses up to{" "}
+              <span className="font-semibold text-[#334E68]">{settings.pricing_preview_count}</span> cards.
+            </p>
+          </div>
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-xs font-semibold text-[#486581]">Section title</span>
+            <input
+              type="text"
+              value={settingsDraft.pricing_title}
+              disabled={!isAdmin || savingSettings}
+              onChange={(e) => setSettingsDraft((current) => ({ ...current, pricing_title: e.target.value }))}
+              className="w-full rounded-[8px] border border-[#D0D7E2] px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/15 disabled:bg-[#F5F7FA]"
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-xs font-semibold text-[#486581]">Section subtitle</span>
+            <input
+              type="text"
+              value={settingsDraft.pricing_subtitle}
+              disabled={!isAdmin || savingSettings}
+              onChange={(e) =>
+                setSettingsDraft((current) => ({ ...current, pricing_subtitle: e.target.value }))
+              }
+              className="w-full rounded-[8px] border border-[#D0D7E2] px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/15 disabled:bg-[#F5F7FA]"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            disabled={!isAdmin || savingSettings}
+            onClick={() => void handleSaveSettings()}
+            className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#1A56DB] px-3 text-sm font-semibold text-white hover:bg-[#1648b8] disabled:opacity-50"
+          >
+            <Save className="h-3.5 w-3.5" />
+            {savingSettings ? "Saving…" : "Save pricing settings"}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 sm:p-5">
+        <h2 className="font-semibold text-[#102A43]">Featured services on homepage</h2>
+        <p className="mt-0.5 text-sm text-[#627D98]">
+          Toggle which catalog services can appear in the homepage teaser. The preview count above still
+          limits how many are shown.
+        </p>
+        <div className="mt-4 max-h-[320px] overflow-y-auto rounded-[10px] border border-[#E4ECF4]">
+          <table className="min-w-full text-left text-sm">
+            <thead className="sticky top-0 bg-[#F8FAFC] text-[11px] uppercase tracking-wide text-[#829AB1]">
+              <tr>
+                <th className="px-3 py-2.5 font-semibold">Service</th>
+                <th className="px-3 py-2.5 font-semibold">Category</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Homepage</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EEF2F6] bg-white">
+              {loading ? (
+                <tr>
+                  <td colSpan={3} className="px-3 py-8 text-center text-[#829AB1]">
+                    Loading services…
+                  </td>
+                </tr>
+              ) : (
+                services.map((service) => (
+                  <tr key={service.id} className="hover:bg-[#F8FCFF]">
+                    <td className="px-3 py-2.5 font-medium text-[#102A43]">{service.service_name}</td>
+                    <td className="px-3 py-2.5 text-[#486581]">{service.category || "—"}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button
+                        type="button"
+                        disabled={!isAdmin || saving}
+                        onClick={() => void handleToggleFeatured(service)}
+                        className={`inline-flex h-8 items-center rounded-[8px] border px-2.5 text-xs font-semibold disabled:opacity-50 ${
+                          service.show_on_homepage
+                            ? "border-[#86E8C4] bg-[#E6F7F2] text-[#006F57]"
+                            : "border-[#D9E1EA] text-[#486581] hover:bg-[#F5F7FA]"
+                        }`}
+                      >
+                        {service.show_on_homepage ? "Featured" : "Add"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 sm:p-5">
+        <div className="mb-4 flex items-start gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-[#EFF6FF] text-[#1A56DB]">
             <LayoutTemplate className="h-5 w-5" />
           </div>
           <div>

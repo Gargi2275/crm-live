@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, BadgeCheck, ChevronDown, Sparkles } from "lucide-react";
+import { ArrowRight, BadgeCheck, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { CTABanner } from "@/components/CTABanner";
 import { PageHero } from "@/components/pages/PageHero";
@@ -19,7 +19,7 @@ import {
 const notes = [
   "All service fees are per applicant unless stated otherwise.",
   "Government, VFS, and courier fees are separate where applicable.",
-  "Apostille pricing is confirmed after free document pre-check.",
+  "Apostille uses catalog fees shown at checkout; optional early assessment when offered.",
 ];
 
 function PricingCardSkeleton() {
@@ -53,21 +53,12 @@ function PricingCard({
       variants={pageFadeUp}
       whileHover={reduceMotion ? undefined : { y: -4 }}
       className={`relative flex flex-col overflow-hidden rounded-3xl border p-5 shadow-[0_12px_32px_rgba(30,74,135,0.08)] transition-shadow hover:shadow-[0_16px_40px_rgba(28,105,221,0.12)] sm:p-6 ${
-        service.isPopular
-          ? "border-[#1c69dd]/35 bg-gradient-to-br from-[#f0f7ff] to-white ring-1 ring-[#1c69dd]/15"
-          : service.isQuoteBased
-            ? "border-dashed border-[#c5d9f5] bg-[#f8fbff]"
-            : "border-[#d9e8ff] bg-white"
+        service.isQuoteBased
+          ? "border-dashed border-[#c5d9f5] bg-[#f8fbff]"
+          : "border-[#d9e8ff] bg-white"
       }`}
     >
-      {service.isPopular && (
-        <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-[#1c69dd] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-          <Sparkles className="h-3 w-3" />
-          Popular
-        </span>
-      )}
-
-      <h3 className="pr-16 font-heading text-lg font-black leading-snug text-[#041020] sm:text-xl">
+      <h3 className="font-heading text-lg font-black leading-snug text-[#041020] sm:text-xl">
         {service.name}
       </h3>
       <p className="mt-1.5 line-clamp-2 text-sm font-medium text-[#486581]">
@@ -114,7 +105,7 @@ function PricingCard({
               ))}
               {service.auditCreditEligible ? (
                 <li className="text-xs font-medium text-[#627d98]">
-                  Save {formatGbp(auditFee)} when you audit first
+                  Save {formatGbp(auditFee)} with assessment credit
                 </li>
               ) : null}
             </ul>
@@ -124,11 +115,7 @@ function PricingCard({
 
       <Link href={service.href} className="group mt-auto pt-4">
         <span
-          className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold transition-colors ${
-            service.isPopular
-              ? "bg-gradient-to-r from-[#1c69dd] to-[#2563eb] text-white shadow-[0_8px_24px_rgba(28,105,221,0.3)]"
-              : "border border-[#cfe2ff] bg-white text-[#1c69dd] hover:bg-[#f4f8ff]"
-          }`}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#cfe2ff] bg-white px-4 py-2.5 text-sm font-bold text-[#1c69dd] transition-colors hover:bg-[#f4f8ff]"
         >
           {service.cta}
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
@@ -155,9 +142,9 @@ export function PricingContent() {
         title="Simple, Fixed Service Fees"
         description="No hidden charges. Know our fee upfront — government and VFS costs are always explained separately before you proceed."
         highlights={[
-          { label: "Audit credit", value: `${formatGbp(auditFee)} off OCI services` },
+          { label: "Assessment credit", value: `${formatGbp(auditFee)} off OCI services` },
           { label: "Payment", value: "Secure online checkout" },
-          { label: "Quote-based", value: "Passport & apostille" },
+          { label: "Quote-based", value: "Apostille only" },
         ]}
       />
 

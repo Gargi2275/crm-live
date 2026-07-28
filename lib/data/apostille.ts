@@ -1,8 +1,8 @@
 export const apostilleTrustBadges = [
-  "Free Pre-Check",
-  "Clear Process",
-  "Secure Document Handling",
-  "Trackable Application Status",
+  "Catalog fees at checkout",
+  "Clear process",
+  "Secure document handling",
+  "Trackable application status",
 ];
 
 export const apostilleReasons = [
@@ -34,39 +34,39 @@ export const apostilleReasons = [
 
 export const apostilleSimpleProcess = [
   {
-    title: "Free Document Pre-Check",
-    text: "Upload your document and tell us what it is needed for.",
+    title: "Start your application",
+    text: "Answer a few questions and upload the document that needs apostille.",
   },
   {
-    title: "Expert Review",
-    text: "We review the document and confirm whether it is suitable for Apostille.",
+    title: "Optional early assessment",
+    text: "Choose catalog assessment when offered, or continue straight to full payment.",
   },
   {
-    title: "Approval and Payment",
-    text: "Once approved, you receive your file number, service details, and secure payment link.",
+    title: "Pay and process",
+    text: "Confirm the published service fee at checkout and we handle the next steps.",
   },
   {
-    title: "Processing and Tracking",
-    text: "Your case moves forward with clear status updates and organised handling.",
+    title: "Track progress",
+    text: "Follow status updates from your FlyOCI dashboard.",
   },
 ];
 
 export const apostilleWhyFlyOci = [
   {
-    title: "Checked Before Payment",
-    text: "Avoid paying for the wrong route or incomplete document handling.",
+    title: "Same guided journey",
+    text: "Apostille uses the same questions → documents → assessment → payment flow as OCI and passport.",
   },
   {
-    title: "Clear Next Steps",
-    text: "We help reduce confusion by confirming what is needed before you proceed.",
+    title: "Published fees",
+    text: "Service fees come from the catalog — no separate quote path.",
   },
   {
-    title: "Built for Real Use Cases",
+    title: "Built for real use cases",
     text: "Suitable for document-led journeys such as OCI, legalisation, immigration, and overseas submissions.",
   },
   {
-    title: "Track Your Application",
-    text: "Use your FlyOCI file number to check progress online.",
+    title: "Track your application",
+    text: "Resume anytime from your dashboard with your FlyOCI reference.",
   },
 ];
 
@@ -93,12 +93,12 @@ export const apostilleFaqItems = [
     answer: "An Apostille is an official certification used to verify the authenticity of a document for use in another country.",
   },
   {
-    question: "Do I pay before document review?",
-    answer: "No. FlyOCI reviews your document first and only requests payment after approval.",
+    question: "How does pricing work?",
+    answer: "Apostille uses published catalog fees shown at checkout. Optional early assessment is charged only when you choose it.",
   },
   {
     question: "Do all documents need notarisation?",
-    answer: "Not always. It depends on the document type and its route. This is checked during pre-check.",
+    answer: "Not always. It depends on the document type and its route. We confirm this during your application.",
   },
   {
     question: "Can you help with UK and Indian documents?",
@@ -106,22 +106,22 @@ export const apostilleFaqItems = [
   },
   {
     question: "What if my document is not ready?",
-    answer: "We inform you during pre-check and let you know the next step, where possible.",
+    answer: "We flag issues during assessment or document review and tell you the next step where possible.",
   },
   {
     question: "How do I track my Apostille request?",
-    answer: "You can track your request using your FlyOCI file number and the email address used during submission.",
+    answer: "Open your application from the FlyOCI dashboard using your reference number.",
   },
   {
-    question: "Is the pre-check really free?",
-    answer: "Yes. The pre-check is free. Payment is requested only if your request is approved for the next step.",
+    question: "Is assessment required?",
+    answer: "No. Early assessment is optional when offered — you can skip and continue to full payment.",
   },
 ];
 
 export const apostilleStatusStages = [
-  "Pre-Check Submitted",
-  "Under Review",
-  "Approved",
+  "Application started",
+  "Documents uploaded",
+  "Assessment",
   "Payment",
   "Processing",
   "Completed",

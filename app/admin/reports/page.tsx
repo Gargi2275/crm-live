@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   getAdminDashboardOverview,
@@ -89,8 +89,8 @@ const REPORT_OPTIONS: { id: ReportType; label: string; description: string; icon
   },
   {
     id: "audit",
-    label: "Audit outcomes",
-    description: "Audit success ratio and audit fee revenue",
+    label: "Assessment outcomes",
+    description: "Document check success ratio and assessment fee revenue",
     icon: ShieldCheck,
   },
   {
@@ -192,6 +192,31 @@ function MetricCard({ label, value, hint }: { label: string; value: string; hint
     </div>
   );
 }
+
+function ChartBox({
+  title,
+  height = 280,
+  className = "",
+  children,
+}: {
+  title: string;
+  height?: number;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`rounded-[10px] border border-[#E5EAF0] bg-white p-3 overflow-hidden ${className}`}>
+      <p className="mb-2 truncate text-sm font-semibold text-[#102A43]">{title}</p>
+      <div className="relative w-full min-w-0" style={{ height }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const CHART_MARGIN = { top: 12, right: 16, left: 4, bottom: 8 };
+const TOOLTIP_STYLE = { background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" };
+const TICK_STYLE = { fill: "#486581", fontSize: 11 };
 
 export default function ReportsPage() {
   const router = useRouter();
@@ -590,6 +615,18 @@ export default function ReportsPage() {
 
   const activeReport = REPORT_OPTIONS.find((item) => item.id === reportType)!;
 
+  const statusChartData = statusBreakdown.map((row) => ({
+    ...row,
+    name: row.name.length > 16 ? `${row.name.slice(0, 14)}…` : row.name,
+    fullName: row.name,
+  }));
+
+  const servicePieData = serviceRevenueBreakdown.map((row) => ({
+    ...row,
+    name: row.name.length > 22 ? `${row.name.slice(0, 20)}…` : row.name,
+    fullName: row.name,
+  }));
+
   return (
     <div className="mx-auto max-w-[1500px] space-y-4 font-body">
       <section className="rounded-[12px] border border-[#D9E1EA] bg-white p-2">
@@ -609,30 +646,30 @@ export default function ReportsPage() {
                     : "border-[#D9E1EA] bg-[#F8FAFC] text-[#486581] hover:border-[#33A1FD]/40 hover:bg-white"
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
-                {option.label}
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="whitespace-nowrap">{option.label}</span>
               </button>
             );
           })}
         </div>
       </section>
 
-      <section className="min-h-[calc(100vh-210px)] rounded-[12px] border border-[#D9E1EA] bg-white p-4 flex flex-col">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-2 shrink-0">
-          <div>
+      <section className="rounded-[12px] border border-[#D9E1EA] bg-white p-4">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+          <div className="min-w-0">
             <h2 className="text-base font-heading font-semibold text-[#102A43]">{activeReport.label}</h2>
             <p className="text-xs text-[#627D98] mt-0.5">{activeReport.description}</p>
           </div>
           {loading ? <span className="text-xs text-[#627D98]">Loading…</span> : null}
         </div>
 
-        <div className="flex-1 space-y-4">
+        <div className="space-y-4">
         {reportType === "revenue" ? (
-          <div className="space-y-4 h-full">
+          <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <MetricCard label="Revenue today" value={formatInr(Number(kpiSnapshot?.revenue_today || 0))} />
               <MetricCard
-                label="Audit revenue today"
+                label="Assessment revenue today"
                 value={formatInr(Number(kpiSnapshot?.audit_revenue_today || 0))}
               />
               <MetricCard label="Avg ticket" value={formatInr(Number(kpiSnapshot?.avg_ticket_size || 0))} />
@@ -642,99 +679,108 @@ export default function ReportsPage() {
                 hint="From live snapshot"
               />
             </div>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 min-h-[360px]">
-              <div className="lg:col-span-2 rounded-[10px] border border-[#E5EAF0] p-3 flex flex-col min-h-[340px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Daily revenue trend</p>
-                <div className="flex-1 min-h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={dailyRevenue}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                      <XAxis dataKey="day" tick={{ fill: "#486581", fontSize: 12 }} />
-                      <YAxis tick={{ fill: "#486581", fontSize: 12 }} />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                      <Legend />
-                      <Line dataKey="actual" stroke="#009877" strokeWidth={3} name="Actual" />
-                      <Line dataKey="expected" stroke="#33A1FD" strokeWidth={2} name="Expected" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 flex flex-col min-h-[340px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Monthly revenue</p>
-                <div className="flex-1 min-h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyRevenue}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                      <XAxis dataKey="month" tick={{ fill: "#486581", fontSize: 11 }} />
-                      <YAxis tick={{ fill: "#486581", fontSize: 12 }} />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                      <Bar dataKey="revenue" fill="#009877" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <ChartBox title="Daily revenue trend" height={300} className="lg:col-span-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={dailyRevenue} margin={{ ...CHART_MARGIN, top: 28 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                    <XAxis dataKey="day" tick={TICK_STYLE} interval={0} />
+                    <YAxis tick={TICK_STYLE} width={48} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: 12 }} />
+                    <Line dataKey="actual" stroke="#009877" strokeWidth={3} name="Actual" dot={{ r: 3 }} />
+                    <Line dataKey="expected" stroke="#33A1FD" strokeWidth={2} name="3-day avg" dot={{ r: 3 }} strokeDasharray="4 4" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartBox>
+              <ChartBox title="Monthly revenue" height={300}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={monthlyRevenue} margin={CHART_MARGIN} barCategoryGap="28%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                    <XAxis dataKey="month" tick={TICK_STYLE} interval={0} />
+                    <YAxis tick={TICK_STYLE} width={48} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Bar dataKey="revenue" fill="#009877" radius={[6, 6, 0, 0]} name="Revenue" maxBarSize={42} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Service revenue mix</p>
-                <div className="h-[240px]">
+              <ChartBox title="Service revenue mix" height={300}>
+                {servicePieData.length === 0 ? (
+                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No service revenue yet.</p>
+                ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={90}>
-                        {serviceRevenueBreakdown.map((_, i) => (
+                    <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                      <Pie
+                        data={servicePieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="42%"
+                        outerRadius={78}
+                        paddingAngle={2}
+                      >
+                        {servicePieData.map((_, i) => (
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Legend />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Legend verticalAlign="bottom" height={56} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
                     </PieChart>
                   </ResponsiveContainer>
-                </div>
-              </div>
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Status mix (filtered apps)</p>
-                <div className="h-[240px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={statusBreakdown} layout="vertical" margin={{ left: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                      <XAxis type="number" tick={{ fill: "#486581", fontSize: 11 }} />
-                      <YAxis type="category" dataKey="name" width={110} tick={{ fill: "#486581", fontSize: 11 }} />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                      <Bar dataKey="value" fill="#33A1FD" radius={[0, 6, 6, 0]} name="Cases" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+                )}
+              </ChartBox>
+              <ChartBox title="Status mix (filtered apps)" height={300}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={statusChartData}
+                    layout="vertical"
+                    margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" horizontal={false} />
+                    <XAxis type="number" tick={TICK_STYLE} allowDecimals={false} />
+                    <YAxis type="category" dataKey="name" width={118} tick={TICK_STYLE} interval={0} />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(value: number) => [value, "Cases"]}
+                      labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullName || "")}
+                    />
+                    <Bar dataKey="value" fill="#33A1FD" radius={[0, 6, 6, 0]} name="Cases" maxBarSize={22} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
             </div>
           </div>
         ) : null}
 
         {reportType === "leads" ? (
-          <div className="space-y-4 h-full flex flex-col">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 shrink-0">
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <MetricCard label="Leads in period" value={String(leadsInPeriod)} />
               <MetricCard label="Converted" value={String(convertedInPeriod)} />
               <MetricCard label="Conversion" value={conversionRate} />
               <MetricCard label="Today's leads" value={String(kpiSnapshot?.todays_leads ?? 0)} />
             </div>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 flex-1 min-h-[420px]">
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Status breakdown</p>
-                <div className="h-[240px]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <ChartBox title="Status breakdown" height={280}>
+                {statusChartData.length === 0 ? (
+                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No status data.</p>
+                ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={statusBreakdown} dataKey="value" nameKey="name" outerRadius={85}>
-                        {statusBreakdown.map((_, i) => (
+                    <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                      <Pie data={statusChartData} dataKey="value" nameKey="name" cx="50%" cy="42%" outerRadius={72} paddingAngle={2}>
+                        {statusChartData.map((_, i) => (
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Legend />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Legend verticalAlign="bottom" height={56} wrapperStyle={{ fontSize: 11 }} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
                     </PieChart>
                   </ResponsiveContainer>
-                </div>
-              </div>
-              <div className="lg:col-span-2 overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[520px]">
+                )}
+              </ChartBox>
+              <div className="lg:col-span-2 overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[420px]">
                 <table className="w-full min-w-[720px] text-sm">
                   <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
                     <tr>
@@ -766,8 +812,8 @@ export default function ReportsPage() {
         ) : null}
 
         {reportType === "pending_payments" ? (
-          <div className="space-y-4 h-full flex flex-col">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 shrink-0">
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
               <MetricCard label="Pending cases" value={String(pendingApps.length)} />
               <MetricCard label="Amount due (filtered)" value={formatInr(pendingAmount)} />
               <MetricCard
@@ -775,35 +821,38 @@ export default function ReportsPage() {
                 value={formatInr(Number(kpiSnapshot?.pending_payments || 0))}
               />
             </div>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 flex-1 min-h-[420px]">
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[280px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Pending by service</p>
-                <div className="h-[240px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={Object.values(
-                        pendingApps.reduce(
-                          (acc, app) => {
-                            const name = app.service_name || "Other";
-                            acc[name] = acc[name] || { name, count: 0, due: 0 };
-                            acc[name].count += 1;
-                            acc[name].due += Number(app.amount_due_pence || 0) / 100;
-                            return acc;
-                          },
-                          {} as Record<string, { name: string; count: number; due: number }>,
-                        ),
-                      )}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                      <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 10 }} />
-                      <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                      <Bar dataKey="count" fill="#B87333" name="Cases" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-              <div className="lg:col-span-2 overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[520px]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <ChartBox title="Pending by service" height={280}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={Object.values(
+                      pendingApps.reduce(
+                        (acc, app) => {
+                          const name = app.service_name || "Other";
+                          const short = name.length > 14 ? `${name.slice(0, 12)}…` : name;
+                          acc[name] = acc[name] || { name: short, fullName: name, count: 0, due: 0 };
+                          acc[name].count += 1;
+                          acc[name].due += Number(app.amount_due_pence || 0) / 100;
+                          return acc;
+                        },
+                        {} as Record<string, { name: string; fullName: string; count: number; due: number }>,
+                      ),
+                    )}
+                    margin={{ ...CHART_MARGIN, bottom: 28 }}
+                    barCategoryGap="24%"
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                    <XAxis dataKey="name" tick={TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={48} />
+                    <YAxis tick={TICK_STYLE} width={36} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullName || "")}
+                    />
+                    <Bar dataKey="count" fill="#B87333" name="Cases" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
+              <div className="lg:col-span-2 overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[420px]">
                 <table className="w-full min-w-[760px] text-sm">
                   <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
                     <tr>
@@ -837,8 +886,8 @@ export default function ReportsPage() {
         ) : null}
 
         {reportType === "staff_performance" ? (
-          <div className="space-y-4 h-full flex flex-col">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 shrink-0">
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <MetricCard label="Staff in report" value={String(staffRows.length)} />
               <MetricCard
                 label="Avg accuracy"
@@ -857,22 +906,26 @@ export default function ReportsPage() {
                 value={String(staffRows.reduce((s, r) => s + r.completed, 0))}
               />
             </div>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 flex-1 min-h-[420px]">
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[300px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Accuracy by staff</p>
-                <div className="h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={staffRows.slice(0, 10).map((r) => ({ name: r.name.split(" ")[0], accuracy: r.accuracy }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                      <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 11 }} />
-                      <YAxis domain={[0, 100]} tick={{ fill: "#486581", fontSize: 11 }} />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                      <Bar dataKey="accuracy" fill="#009877" radius={[6, 6, 0, 0]} name="Accuracy %" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-              <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[420px]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <ChartBox title="Accuracy by staff" height={300}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={staffRows.slice(0, 10).map((r) => ({ name: r.name.split(" ")[0], accuracy: r.accuracy, fullName: r.name }))}
+                    margin={CHART_MARGIN}
+                    barCategoryGap="24%"
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                    <XAxis dataKey="name" tick={TICK_STYLE} interval={0} />
+                    <YAxis domain={[0, 100]} tick={TICK_STYLE} width={36} />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullName || "")}
+                    />
+                    <Bar dataKey="accuracy" fill="#009877" radius={[6, 6, 0, 0]} name="Accuracy %" maxBarSize={36} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
+              <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[360px]">
                 <table className="w-full min-w-[640px] text-sm">
                   <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
                     <tr>
@@ -916,35 +969,35 @@ export default function ReportsPage() {
                 value={String(pipelineOverview.reduce((sum, row) => sum + Number(row.openCases || 0), 0))}
               />
             </div>
-            <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[320px]">
-              <p className="mb-2 text-sm font-semibold text-[#102A43]">Open cases vs SLA breaches by stage</p>
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={pipelineChartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                    <XAxis dataKey="stage" tick={{ fill: "#486581", fontSize: 11 }} />
-                    <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
-                    <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                    <Legend />
-                    <Bar dataKey="open" fill="#33A1FD" name="Open" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="breached" fill="#B42318" name="SLA breach" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+            <ChartBox title="Open cases vs SLA breaches by stage" height={300}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={pipelineChartData} margin={{ ...CHART_MARGIN, top: 28 }} barCategoryGap="22%" barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                  <XAxis dataKey="stage" tick={TICK_STYLE} interval={0} />
+                  <YAxis tick={TICK_STYLE} width={40} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={TOOLTIP_STYLE}
+                    labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullStage || "")}
+                  />
+                  <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="open" fill="#33A1FD" name="Open" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                  <Bar dataKey="breached" fill="#B42318" name="SLA breach" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartBox>
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
               {pipelineOverview.map((row) => (
                 <div key={row.stage} className="rounded-[10px] border border-[#E5EAF0] bg-[#F8FAFC] p-3">
                   <p className="text-sm font-semibold text-[#102A43]">{row.stage}</p>
-                  <p className="mt-2 text-xs text-[#486581] flex justify-between">
+                  <p className="mt-2 text-xs text-[#486581] flex justify-between gap-2">
                     <span>Open</span>
                     <span className="font-semibold text-[#102A43]">{row.openCases}</span>
                   </p>
-                  <p className="mt-1 text-xs text-[#486581] flex justify-between">
+                  <p className="mt-1 text-xs text-[#486581] flex justify-between gap-2">
                     <span>Avg age</span>
                     <span className="font-semibold text-[#102A43]">{row.avgAge}</span>
                   </p>
-                  <p className="mt-1 text-xs text-[#486581] flex justify-between">
+                  <p className="mt-1 text-xs text-[#486581] flex justify-between gap-2">
                     <span>SLA breach</span>
                     <span className={`font-semibold ${Number(row.breached) > 0 ? "text-[#B42318]" : "text-[#006F57]"}`}>
                       {row.breached}
@@ -957,18 +1010,18 @@ export default function ReportsPage() {
         ) : null}
 
         {reportType === "audit" ? (
-          <div className="space-y-4 h-full flex flex-col">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 shrink-0">
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <MetricCard
-                label="Audits requested"
+                label="Checks requested"
                 value={String(healthMetrics?.audits_requested ?? auditApps.length)}
               />
               <MetricCard
-                label="Audit success ratio"
+                label="Check success ratio"
                 value={String(healthMetrics?.audit_success_ratio ?? "0%")}
               />
               <MetricCard
-                label="Audit revenue today"
+                label="Assessment revenue today"
                 value={formatInr(Number(kpiSnapshot?.audit_revenue_today || 0))}
               />
               <MetricCard
@@ -976,57 +1029,62 @@ export default function ReportsPage() {
                 value={String(healthMetrics?.avg_processing_time ?? "0h")}
               />
             </div>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 min-h-[320px]">
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[300px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Audit outcomes (filtered apps)</p>
-                <div className="h-[260px]">
-                  {auditOutcomeBreakdown.length === 0 ? (
-                    <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No audit outcomes in filter.</p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={auditOutcomeBreakdown} dataKey="value" nameKey="name" outerRadius={95}>
-                          {auditOutcomeBreakdown.map((row, i) => (
-                            <Cell key={row.name} fill={row.fill || CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Legend />
-                        <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-              </div>
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[300px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Staff audits passed vs failed</p>
-                <div className="h-[260px]">
-                  {staffAuditChart.length === 0 ? (
-                    <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No staff audit totals yet.</p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={staffAuditChart}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                        <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 11 }} />
-                        <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
-                        <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                        <Legend />
-                        <Bar dataKey="passed" fill="#009877" name="Passed" radius={[6, 6, 0, 0]} />
-                        <Bar dataKey="failed" fill="#B42318" name="Failed" radius={[6, 6, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-              </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <ChartBox title="Document check outcomes" height={300}>
+                {auditOutcomeBreakdown.length === 0 ? (
+                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No outcomes in filter.</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                      <Pie
+                        data={auditOutcomeBreakdown}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="42%"
+                        outerRadius={78}
+                        paddingAngle={2}
+                      >
+                        {auditOutcomeBreakdown.map((row, i) => (
+                          <Cell key={row.name} fill={row.fill || CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Legend verticalAlign="bottom" height={56} wrapperStyle={{ fontSize: 11 }} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </ChartBox>
+              <ChartBox title="Staff checks passed vs failed" height={300}>
+                {staffAuditChart.length === 0 ? (
+                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No staff check totals yet.</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={staffAuditChart} margin={{ ...CHART_MARGIN, top: 28 }} barCategoryGap="22%" barGap={4}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                      <XAxis dataKey="name" tick={TICK_STYLE} interval={0} />
+                      <YAxis tick={TICK_STYLE} width={36} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullName || "")}
+                      />
+                      <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="passed" fill="#009877" name="Passed" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                      <Bar dataKey="failed" fill="#B42318" name="Failed" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </ChartBox>
             </div>
-            <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] flex-1 max-h-[380px]">
+            <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[380px]">
               <table className="w-full min-w-[800px] text-sm">
                 <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">Reference</th>
                     <th className="px-3 py-2 text-left font-semibold">Customer</th>
                     <th className="px-3 py-2 text-left font-semibold">Service</th>
-                    <th className="px-3 py-2 text-left font-semibold">Audit result</th>
-                    <th className="px-3 py-2 text-left font-semibold">Audit payment</th>
+                    <th className="px-3 py-2 text-left font-semibold">Check result</th>
+                    <th className="px-3 py-2 text-left font-semibold">Assessment payment</th>
                     <th className="px-3 py-2 text-left font-semibold">Status</th>
                   </tr>
                 </thead>
@@ -1078,39 +1136,56 @@ export default function ReportsPage() {
               <MetricCard label="Cases in period" value={String(leadsInPeriod)} />
               <MetricCard label="Paid cases" value={String(convertedInPeriod)} />
             </div>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 min-h-[420px]">
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[340px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Revenue by service (snapshot)</p>
-                <div className="h-[300px]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <ChartBox title="Revenue by service (snapshot)" height={300}>
+                {servicePieData.length === 0 ? (
+                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No revenue mix yet.</p>
+                ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={serviceRevenueBreakdown} dataKey="value" nameKey="name" outerRadius={110}>
-                        {serviceRevenueBreakdown.map((_, i) => (
+                    <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                      <Pie
+                        data={servicePieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="42%"
+                        outerRadius={78}
+                        paddingAngle={2}
+                      >
+                        {servicePieData.map((_, i) => (
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Legend />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
+                      <Legend verticalAlign="bottom" height={56} wrapperStyle={{ fontSize: 11 }} />
+                      <Tooltip contentStyle={TOOLTIP_STYLE} />
                     </PieChart>
                   </ResponsiveContainer>
-                </div>
-              </div>
-              <div className="rounded-[10px] border border-[#E5EAF0] p-3 min-h-[340px]">
-                <p className="mb-2 text-sm font-semibold text-[#102A43]">Cases by service (filtered)</p>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={serviceMixFromApps}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                      <XAxis dataKey="name" tick={{ fill: "#486581", fontSize: 10 }} />
-                      <YAxis tick={{ fill: "#486581", fontSize: 11 }} />
-                      <Tooltip contentStyle={{ background: "#FFFFFF", border: "0.5px solid #D9E1EA", borderRadius: "12px" }} />
-                      <Legend />
-                      <Bar dataKey="cases" fill="#33A1FD" name="Cases" radius={[6, 6, 0, 0]} />
-                      <Bar dataKey="paid" fill="#009877" name="Paid" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+                )}
+              </ChartBox>
+              <ChartBox title="Cases by service (filtered)" height={300}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={serviceMixFromApps.map((row) => ({
+                      ...row,
+                      label: row.name.length > 12 ? `${row.name.slice(0, 10)}…` : row.name,
+                    }))}
+                    margin={{ ...CHART_MARGIN, top: 28, bottom: 28 }}
+                    barCategoryGap="22%"
+                    barGap={4}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
+                    <XAxis dataKey="label" tick={TICK_STYLE} interval={0} angle={-15} textAnchor="end" height={48} />
+                    <YAxis tick={TICK_STYLE} width={36} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      labelFormatter={(_, payload) => String(payload?.[0]?.payload?.name || "")}
+                    />
+                    <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="cases" fill="#33A1FD" name="Cases" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                    <Bar dataKey="paid" fill="#009877" name="Paid" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
             </div>
             <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[280px]">
               <table className="w-full text-sm">

@@ -15,7 +15,7 @@ export async function POST(req: Request) {
 
     // The base URL for the application
     const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
-    const originUrl = returnUrl || `${baseUrl}/document-audit`;
+    const originUrl = returnUrl || `${baseUrl}/services`;
     const unitAmount =
       typeof amountPence === "number" && Number.isFinite(amountPence) && amountPence > 0
         ? Math.round(amountPence)

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { getPostLoginPath, requestStaffForgotPassword } from "@/lib/admin-auth";
+import { RecaptchaField, requireCaptchaToken } from "@/components/RecaptchaField";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -15,12 +16,22 @@ export default function AdminLoginPage() {
   const [resetEmail, setResetEmail] = useState("");
   const [requestingReset, setRequestingReset] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loginCaptchaToken, setLoginCaptchaToken] = useState("");
+  const [loginCaptchaError, setLoginCaptchaError] = useState("");
+  const [resetCaptchaToken, setResetCaptchaToken] = useState("");
+  const [resetCaptchaError, setResetCaptchaError] = useState("");
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const captchaMsg = requireCaptchaToken(loginCaptchaToken);
+    if (captchaMsg) {
+      setLoginCaptchaError(captchaMsg);
+      return;
+    }
+    setLoginCaptchaError("");
     setLoading(true);
     try {
-      const user = await login(username.trim().toLowerCase(), password);
+      const user = await login(username.trim().toLowerCase(), password, loginCaptchaToken);
       toast.success("Admin login successful.");
       router.replace(getPostLoginPath(user.role, user.access_scope));
     } catch (error) {
@@ -36,12 +47,19 @@ export default function AdminLoginPage() {
       toast.error("Email is required.");
       return;
     }
+    const captchaMsg = requireCaptchaToken(resetCaptchaToken);
+    if (captchaMsg) {
+      setResetCaptchaError(captchaMsg);
+      return;
+    }
+    setResetCaptchaError("");
 
     setRequestingReset(true);
     try {
-      await requestStaffForgotPassword(resetEmail.trim().toLowerCase());
+      await requestStaffForgotPassword(resetEmail.trim().toLowerCase(), resetCaptchaToken);
       toast.success("If your account exists, reset link has been sent.");
       setResetEmail("");
+      setResetCaptchaToken("");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to request reset link.");
     } finally {
@@ -50,9 +68,9 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] flex items-center justify-center px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center bg-[#F5F7FA] px-4 py-10">
       <div className="w-full max-w-md rounded-[16px] border border-[#D9E1EA] bg-white p-6 shadow-[0_18px_36px_rgba(15,42,67,0.12)]">
-        <h1 className="text-[24px] font-heading font-semibold text-[#102A43]">FlyOCI Admin Login</h1>
+        <h1 className="font-heading text-[24px] font-semibold text-[#102A43]">FlyOCI Admin Login</h1>
         <p className="mt-1 text-sm text-[#486581]">Staff access only. Customer login is separate.</p>
 
         <form className="mt-6 space-y-4" onSubmit={handleLogin}>
@@ -78,6 +96,14 @@ export default function AdminLoginPage() {
             />
           </div>
 
+          <RecaptchaField
+            onChange={(token) => {
+              setLoginCaptchaToken(token);
+              if (token) setLoginCaptchaError("");
+            }}
+            error={loginCaptchaError}
+          />
+
           <button
             type="submit"
             disabled={loading}
@@ -96,6 +122,13 @@ export default function AdminLoginPage() {
               onChange={(e) => setResetEmail(e.target.value)}
               placeholder="Staff email"
               className="w-full rounded-[12px] border border-[#D9E1EA] px-3 py-2.5 text-sm focus:border-[#009877] focus:outline-none"
+            />
+            <RecaptchaField
+              onChange={(token) => {
+                setResetCaptchaToken(token);
+                if (token) setResetCaptchaError("");
+              }}
+              error={resetCaptchaError}
             />
             <button
               type="submit"

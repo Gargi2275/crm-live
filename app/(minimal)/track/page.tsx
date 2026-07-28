@@ -13,6 +13,8 @@ import {
   TrackTimelineStep,
 } from "@/lib/api-client";
 import { authService } from "@/lib/auth";
+import { SUPPORT_EMAIL, SUPPORT_PHONE_E164 } from "@/lib/contact";
+import { RecaptchaField, requireCaptchaToken } from "@/components/RecaptchaField";
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) {
@@ -69,6 +71,8 @@ export default function TrackPage() {
   const [caseNumber, setCaseNumber] = useState(initialCase);
   const [registeredEmail, setRegisteredEmail] = useState("");
   const [registeredPhone, setRegisteredPhone] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaError, setCaptchaError] = useState("");
 
   const [isLoading, setIsLoading] = useState(false);
   const [isMagicVerifying, setIsMagicVerifying] = useState(false);
@@ -113,7 +117,7 @@ export default function TrackPage() {
       EMAIL_CONFIRMED: "PAYMENT_PENDING",
       PAYMENT_PENDING: "PAYMENT_PENDING",
       PAID: "DOCUMENT_UPLOAD_PENDING",
-      DOCS_RECEIVED: "AUDIT_PENDING",
+      DOCS_RECEIVED: "ASSESSMENT_PENDING",
       CORRECTION_REQUESTED: "DOCUMENTS_REQUIRED",
       IN_PREPARATION: "FORM_FILLING",
       SUBMITTED: "SUBMITTED",
@@ -291,7 +295,10 @@ export default function TrackPage() {
         return;
       }
 
-      const caseFromResponse = verifyRes.data.case_number || caseNumber;
+      const caseFromResponse =
+        verifyRes.data.reference_number ||
+        verifyRes.data.case_number ||
+        caseNumber;
       const otpFromResponse = verifyRes.data.tracking_otp || "";
 
       if (!caseFromResponse || !otpFromResponse) {
@@ -300,7 +307,11 @@ export default function TrackPage() {
 
       setCaseNumber(caseFromResponse);
       setTrackingOtp(otpFromResponse);
-      const resumePath = resumeUrl || `/indian-e-visa?case=${encodeURIComponent(caseFromResponse)}`;
+      const resumePath =
+        resumeUrl ||
+        (caseFromResponse.toUpperCase().startsWith("FO-EV-")
+          ? `/indian-e-visa?case=${encodeURIComponent(caseFromResponse)}`
+          : `/dashboard/document-audit?reference=${encodeURIComponent(caseFromResponse)}&resume=1`);
       setResumeUrl(resumePath);
 
       const expiresInMs = (Number(verifyRes.data.tracking_otp_expires_in_minutes) || 10) * 60 * 1000;
@@ -356,6 +367,13 @@ export default function TrackPage() {
       return;
     }
 
+    const captchaMsg = requireCaptchaToken(captchaToken);
+    if (captchaMsg) {
+      setCaptchaError(captchaMsg);
+      return;
+    }
+    setCaptchaError("");
+
     setIsLoading(true);
     setError("");
     setMessage("");
@@ -364,6 +382,7 @@ export default function TrackPage() {
       const response = await eVisaApi.trackRequestOtp(trimmedCase, {
         email: trimmedEmail,
         phone: trimmedPhone,
+        captchaToken,
       });
 
       setCaseNumber(trimmedCase);
@@ -391,10 +410,22 @@ export default function TrackPage() {
     try {
       const verifyRes = await eVisaApi.trackVerifyOtp(caseNumber, code);
       const otp = verifyRes.data.otp;
+      const resolvedCase =
+        verifyRes.data.reference_number ||
+        verifyRes.data.case_number ||
+        verifyRes.data.file_number ||
+        caseNumber;
       setTrackingOtp(otp);
-      const resumePath = resumeUrl || `/indian-e-visa?case=${encodeURIComponent(caseNumber)}`;
-      saveTrackingSession(caseNumber, otp, Date.now() + (10 * 60 * 1000), resumePath);
-      await fetchTrackingDashboard(caseNumber, otp);
+      setCaseNumber(resolvedCase);
+      const serviceHint = (resolvedCase || "").toUpperCase();
+      const isLikelyEvisa = serviceHint.startsWith("FO-EV-");
+      const resumePath =
+        resumeUrl ||
+        (isLikelyEvisa
+          ? `/indian-e-visa?case=${encodeURIComponent(resolvedCase)}`
+          : `/dashboard/document-audit?reference=${encodeURIComponent(resolvedCase)}&resume=1`);
+      saveTrackingSession(resolvedCase, otp, Date.now() + (10 * 60 * 1000), resumePath);
+      await fetchTrackingDashboard(resolvedCase, otp);
       setMessage("OTP verified. Dashboard loaded.");
     } catch (verifyErr) {
       setOtpStatus("error");
@@ -407,7 +438,7 @@ export default function TrackPage() {
   const handleMagicLinkRequest = async () => {
     const email = magicEmail.trim();
     const normalizedCase = caseNumber.trim().toUpperCase();
-    const caseForRequest = normalizedCase.startsWith("FO-EV-") ? normalizedCase : "";
+    const caseForRequest = normalizedCase || "";
     if (!email) {
       setError("Enter your registered email to receive magic link.");
       return;
@@ -417,11 +448,19 @@ export default function TrackPage() {
       return;
     }
 
+    const captchaMsg = requireCaptchaToken(captchaToken);
+    if (captchaMsg) {
+      setCaptchaError(captchaMsg);
+      setError(captchaMsg);
+      return;
+    }
+    setCaptchaError("");
+
     setIsMagicSending(true);
     setError("");
     setMessage("");
     try {
-      const response = await eVisaApi.requestMagicLink(caseForRequest, email);
+      const response = await eVisaApi.requestMagicLink(caseForRequest, email, captchaToken);
       setMessage(response.message || "Magic link sent. Please check your inbox.");
       if (response.data?.case_number) {
         setCaseNumber(response.data.case_number);
@@ -460,25 +499,37 @@ export default function TrackPage() {
   };
 
   const handleContactWhatsApp = () => {
-    const raw = summary?.actions?.support_whatsapp || "+442078086162";
+    const raw = summary?.actions?.support_whatsapp || SUPPORT_PHONE_E164;
     const cleaned = raw.replace(/\D+/g, "");
     window.open(`https://wa.me/${cleaned}`, "_blank", "noopener,noreferrer");
   };
 
   const handleContactEmail = () => {
-    const email = summary?.actions?.support_email || "support@flyoci.com";
+    const email = summary?.actions?.support_email || SUPPORT_EMAIL;
     window.location.href = `mailto:${email}?subject=Tracking%20Support%20(${encodeURIComponent(caseNumber)})`;
   };
 
   const handleResumeApplication = () => {
-    const fallback = caseNumber ? `/indian-e-visa?case=${encodeURIComponent(caseNumber)}` : "/indian-e-visa";
+    const ref = summary?.reference_number || caseNumber;
+    const serviceName = (summary?.service || "").toLowerCase();
+    const isEvisa =
+      (caseNumber || "").toUpperCase().startsWith("FO-EV-") ||
+      serviceName.includes("e-visa") ||
+      serviceName.includes("evisa");
+    const fallback = isEvisa
+      ? caseNumber
+        ? `/indian-e-visa?case=${encodeURIComponent(caseNumber)}`
+        : "/indian-e-visa"
+      : ref
+        ? `/dashboard/document-audit?reference=${encodeURIComponent(ref)}&resume=1`
+        : "/dashboard";
+
     if (summary?.actions?.can_upload_missing_documents) {
       router.push(summary.actions.upload_url || resumeUrl || fallback);
       return;
     }
 
-    // Avoid stale resume URLs saved from older stage state (e.g. before upload completed).
-    router.push(fallback);
+    router.push(resumeUrl || summary?.actions?.upload_url || fallback);
   };
 
   const handlePayNow = () => {
@@ -509,7 +560,7 @@ export default function TrackPage() {
           <h1 className="font-heading font-extrabold text-[#0f1f3d] text-[40px] sm:text-[42px] text-center">
             Track your <span className="italic text-[#1a56db]">application</span>
           </h1>
-          <p className="font-body text-center text-[#627a96] text-[14px] mt-2">Use your file number + registered email + registered mobile, or open your magic link.</p>
+          <p className="font-body text-center text-[#627a96] text-[14px] mt-2">Use your file / reference number + registered email + registered mobile, or open your magic link.</p>
 
           {isMagicVerifying && (
             <p className="font-body text-center text-[#2d66dc] text-[13px] mt-2">Verifying magic link...</p>
@@ -520,10 +571,10 @@ export default function TrackPage() {
               <p className="font-body text-[10px] font-semibold text-[#9ab0c8] uppercase tracking-[0.06em]">Manual access</p>
 
               <form onSubmit={handleRequestOtp} className="mt-3">
-                <label className="font-body text-[12px] text-[#17345d] font-semibold">File number</label>
+                <label className="font-body text-[12px] text-[#17345d] font-semibold">File / reference number</label>
                 <input
                   type="text"
-                  placeholder="FO-EV-2026-000123"
+                  placeholder="FO-202607-00061 or FO-EV-2026-000123"
                   value={caseNumber}
                   onChange={(e) => setCaseNumber(e.target.value.toUpperCase())}
                   className="mt-1 w-full rounded-[8px] border border-[#d8e4f3] bg-[#f8fbff] px-3 py-2.5 font-mono text-[14px] outline-none"
@@ -579,7 +630,7 @@ export default function TrackPage() {
                 onChange={(e) => setMagicEmail(e.target.value)}
                 className="mt-1 w-full rounded-[8px] border border-[#d8e4f3] bg-[#f8fbff] px-3 py-2.5 font-body text-[14px] outline-none"
               />
-              <p className="mt-2 font-body text-[10px] text-[#6584ac]">Use the same email used during registration.</p>
+              <p className="mt-2 font-body text-[10px] text-[#6584ac]">Use the same email used during registration. Optional: enter your case number above.</p>
               <button
                 type="button"
                 onClick={handleMagicLinkRequest}
@@ -590,6 +641,18 @@ export default function TrackPage() {
               </button>
             </div>
           </div>
+
+          {!otpStep ? (
+            <div className="mt-4 flex justify-center">
+              <RecaptchaField
+                onChange={(token) => {
+                  setCaptchaToken(token);
+                  if (token) setCaptchaError("");
+                }}
+                error={captchaError}
+              />
+            </div>
+          ) : null}
 
           {message && <p className="mt-4 text-center font-body text-[12px] text-[#2d66dc]">{message}</p>}
           {error && <p className="mt-2 text-center font-body text-[12px] text-red-600">{error}</p>}
@@ -609,7 +672,7 @@ export default function TrackPage() {
                 <div>
                   <p className="font-body text-[14px] font-semibold text-[#17345d]">{summary?.applicant_name || "Applicant"}</p>
                   <span className="mt-1 inline-flex items-center rounded-[8px] border border-[#cfe0f7] bg-[#f5f9ff] px-2 py-1 font-mono text-[10px] font-semibold text-[#2f6fe8]">
-                    {summary?.file_number || caseNumber}
+                    {summary?.file_number || summary?.reference_number || caseNumber}
                   </span>
                 </div>
                 <span className="inline-flex items-center rounded-full border border-[#f2d8ac] bg-[#fff6e8] px-3 py-1 text-[10px] font-semibold text-[#a86500]">
@@ -621,7 +684,7 @@ export default function TrackPage() {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-3 p-3">
               <div className="rounded-[12px] border border-[#d8e4f3] bg-white p-3">
                 <div className="mb-3 rounded-[10px] border border-[#d8e4f3] bg-[#f8fbff] p-3">
-                  {resolvedKanbanStage === "AUDIT_PENDING" && !canPayNow && (
+                  {resolvedKanbanStage === "ASSESSMENT_PENDING" && !canPayNow && (
                     <div className="space-y-1.5">
                       <p className="font-body text-[13px] font-semibold text-[#17345d] inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Your documents are being reviewed</p>
                       <p className="font-body text-[12px] text-[#486581]">We will update you within 4 hours.</p>
@@ -668,7 +731,7 @@ export default function TrackPage() {
                     </div>
                   )}
 
-                  {(resolvedKanbanStage === "AUDIT_COMPLETED" || resolvedKanbanStage === "PAYMENT_PENDING" || (resolvedKanbanStage === "AUDIT_PENDING" && canPayNow)) && (
+                  {(resolvedKanbanStage === "ASSESSMENT_COMPLETED" || resolvedKanbanStage === "PAYMENT_PENDING" || (resolvedKanbanStage === "ASSESSMENT_PENDING" && canPayNow)) && (
                     <div className="space-y-2">
                       <p className="font-body text-[13px] font-semibold text-[#17345d]">
                         {isAuditSkipped ? "Audit skipped. Complete Your Payment" : "Complete Your Payment"}
@@ -708,7 +771,9 @@ export default function TrackPage() {
                   {resolvedKanbanStage === "DELIVERED" && (
                     <div className="space-y-1.5">
                       <p className="font-body text-[13px] font-semibold text-[#17345d]">Application Complete!</p>
-                      <p className="font-body text-[12px] text-[#486581]">Your OCI card has been approved. Check your email for next steps.</p>
+                      <p className="font-body text-[12px] text-[#486581]">
+                        Your {(summary?.service || "application").trim()} has been completed. Check your email for next steps.
+                      </p>
                       <p className="font-body text-[11px] text-[#8ea4bf]">Completion date: {formatDateTime(summary?.updated_at)}</p>
                     </div>
                   )}

@@ -14,7 +14,7 @@ type ApplicationTrackerProps = {
 };
 
 const FIXED_LABELS: Record<1 | 2 | 3 | 4 | 5, string> = {
-  1: "Documents audited",
+  1: "Documents checked",
   2: "Form filling in progress",
   3: "Submitted to Embassy / VFS",
   4: "Under process",

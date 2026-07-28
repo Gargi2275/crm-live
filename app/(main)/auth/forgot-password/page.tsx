@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { API_BASE_URL } from "@/lib/config";
+import { RecaptchaField, requireCaptchaToken } from "@/components/RecaptchaField";
 
 type PasswordResetStep = "email" | "otp" | "newPassword";
 
@@ -22,6 +23,8 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState("");
   const [otpInfo, setOtpInfo] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaError, setCaptchaError] = useState("");
 
   useEffect(() => {
     try {
@@ -54,9 +57,15 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setError("");
     setOtpInfo("");
+    setCaptchaError("");
 
     if (!email.trim()) {
       setError("Enter your registered email.");
+      return;
+    }
+    const captchaMsg = requireCaptchaToken(captchaToken);
+    if (captchaMsg) {
+      setCaptchaError(captchaMsg);
       return;
     }
 
@@ -67,7 +76,7 @@ export default function ForgotPasswordPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: email.trim() }),
+          body: JSON.stringify({ email: email.trim(), captcha_token: captchaToken }),
         }
       );
 
@@ -263,6 +272,14 @@ export default function ForgotPasswordPage() {
                     placeholder="you@example.com"
                   />
                 </div>
+
+                <RecaptchaField
+                  onChange={(token) => {
+                    setCaptchaToken(token);
+                    if (token) setCaptchaError("");
+                  }}
+                  error={captchaError}
+                />
 
                 {error && (
                   <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">

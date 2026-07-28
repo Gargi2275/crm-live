@@ -21,7 +21,7 @@ export function CheckoutButton() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          returnUrl: window.location.origin + "/document-audit",
+          returnUrl: window.location.origin + "/services",
           amountPence: Math.round(assessmentFee * 100),
         }),
       });

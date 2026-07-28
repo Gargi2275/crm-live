@@ -24,18 +24,18 @@ export default function ApostilleFaqPage() {
               </p>
               <h1 className="mt-4 font-heading text-4xl font-bold text-primary md:text-5xl">Apostille Services FAQ</h1>
               <p className="mt-4 max-w-2xl text-lg text-textMuted">
-                Quick answers about document Apostille, the FlyOCI pre-check, payment, and tracking your case online.
+                Quick answers about document Apostille, assessment, payment, and tracking your case from the dashboard.
               </p>
             </FadeInUp>
 
             <FadeInUp delay={0.05} className="rounded-2xl border border-[#d7e5f9] bg-white p-5 shadow-[0_10px_28px_rgba(20,60,106,0.08)] h-fit">
               <p className="text-sm font-bold text-[#0d1f3c]">Quick actions</p>
               <div className="mt-3 space-y-2">
-                <Link href="/apostille-pre-check" className="flex items-center justify-between rounded-xl border border-[#dce8fa] bg-[#f8fbff] px-3 py-2.5 text-sm font-semibold text-[#1d4d81] hover:bg-[#eef5ff]">
-                  <span className="inline-flex items-center gap-2"><Upload className="h-4 w-4" /> Start pre-check</span>
+                <Link href="/dashboard/document-audit?start=1&service=apostille" className="flex items-center justify-between rounded-xl border border-[#dce8fa] bg-[#f8fbff] px-3 py-2.5 text-sm font-semibold text-[#1d4d81] hover:bg-[#eef5ff]">
+                  <span className="inline-flex items-center gap-2"><Upload className="h-4 w-4" /> Start application</span>
                   <ArrowRight className="h-4 w-4" />
                 </Link>
-                <Link href="/track-apostille" className="flex items-center justify-between rounded-xl border border-[#dce8fa] bg-[#f8fbff] px-3 py-2.5 text-sm font-semibold text-[#1d4d81] hover:bg-[#eef5ff]">
+                <Link href="/dashboard/applications" className="flex items-center justify-between rounded-xl border border-[#dce8fa] bg-[#f8fbff] px-3 py-2.5 text-sm font-semibold text-[#1d4d81] hover:bg-[#eef5ff]">
                   <span>Track application</span>
                   <ArrowRight className="h-4 w-4" />
                 </Link>
@@ -71,10 +71,10 @@ export default function ApostilleFaqPage() {
             </div>
             <div className="rounded-2xl border border-[#d6e6ff] bg-white p-5 text-center">
               <h2 className="font-heading text-xl font-bold text-primary">Ready to start?</h2>
-              <p className="mt-2 text-sm text-[#627d98]">Free document review before any payment.</p>
+              <p className="mt-2 text-sm text-[#627d98]">Same guided journey as OCI and passport — catalog fees at checkout.</p>
               <div className="mt-4">
-                <Link href="/apostille-pre-check">
-                  <Button>Start Free Pre-Check</Button>
+                <Link href="/dashboard/document-audit?start=1&service=apostille">
+                  <Button>Start application</Button>
                 </Link>
               </div>
             </div>

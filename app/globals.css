@@ -28,17 +28,14 @@
 html {
 	scroll-behavior: smooth;
 	overflow-x: clip;
-	overscroll-behavior-y: none;
-	-ms-overflow-style: none;
-	scrollbar-width: none;
+	scrollbar-gutter: stable;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(28, 105, 221, 0.4) transparent;
 }
 
 body {
 	width: 100%;
 	overflow-x: clip;
-	overscroll-behavior-y: none;
-	-ms-overflow-style: none;
-	scrollbar-width: none;
 	color: var(--text-body);
 	font-size: 1.0625rem; /* ~17px public body */
 	line-height: 1.65;
@@ -93,11 +90,25 @@ section {
 	color: #062747;
 }
 
-html::-webkit-scrollbar,
-body::-webkit-scrollbar {
-	display: none;
-	width: 0;
-	height: 0;
+/* Stable thin scrollbar — always reserved so it does not flicker in/out. */
+html::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+html::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+html::-webkit-scrollbar-thumb {
+	background-color: rgba(28, 105, 221, 0.35);
+	border-radius: 999px;
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+	background-color: rgba(28, 105, 221, 0.55);
 }
 
 @layer components {

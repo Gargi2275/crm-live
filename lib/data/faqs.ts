@@ -10,14 +10,19 @@ export const FAQ_ITEMS: FaqItem[] = [
       "FlyOCI is an independent documentation and application support service for UK and US residents. We are not affiliated with any government, embassy, consulate, or VFS Global.",
   },
   {
-    question: "What is a Document Audit and do I need one?",
+    question: "How do I start an application?",
     answer:
-      "A Document Audit is a £15 pre-check of your documents before you apply. We recommend it if names differ across documents, you have marriage or address changes, or you want to avoid rejections and delays. The £15 is credited toward OCI services if you proceed within 30 days.",
+      "Choose your service (New OCI, OCI Renewal, OCI Update, passport renewal, e-Visa, or apostille), then start from the services page or your dashboard. You will answer a few questions, upload documents, and follow guided next steps.",
   },
   {
-    question: "How long does the Document Audit take?",
+    question: "What is the early assessment fee?",
     answer:
-      "Most audits are completed within 24–48 hours after you upload documents and pay the audit fee. You receive a written report by email and WhatsApp.",
+      "For eligible OCI applications, an optional expert document pre-check helps catch issues before filing. The fee is shown from our live pricing catalog and is credited toward New OCI, OCI Renewal, or OCI Update if you proceed within 30 days.",
+  },
+  {
+    question: "How long does the document check take?",
+    answer:
+      "Most assessments are completed within 24–48 hours after you upload documents and pay the assessment fee. You receive a written report by email and WhatsApp.",
   },
   {
     question: "What OCI services do you offer?",
@@ -27,7 +32,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "How much does a New OCI application cost?",
     answer:
-      "Our service fee is £88 per applicant. If you complete a Document Audit first, £15 is deducted — you pay £73 for the full service later. Government and VFS fees are paid separately as per current rules.",
+      "Service fees are shown on the pricing page from our live catalog. If you complete early assessment first, that amount is credited toward New OCI, OCI Renewal, or OCI Update within 30 days. Government and VFS fees are paid separately as per current rules.",
   },
   {
     question: "Do you help with Indian e-Visa?",
@@ -37,7 +42,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "Can you renew my Indian passport from the UK or US?",
     answer:
-      "Yes. Passport renewal support is quote-based because fees depend on category, age, and courier options. Contact us or start with a Document Audit and we will confirm the exact route and fee.",
+      "Yes. Passport renewal uses our published catalog fee, with category and courier options confirmed at checkout. Start a passport renewal application to see the fee and continue to payment.",
   },
   {
     question: "How do I track my application?",
@@ -47,11 +52,11 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "What payment methods do you accept?",
     answer:
-      "Fees are paid securely online during checkout for audits and services. We confirm all amounts before you pay for quote-based services such as passport renewal.",
+      "Fees are paid securely online during checkout for assessments and services. Passport renewal uses the catalog fee shown before you pay.",
   },
   {
     question: "What if my documents are rejected or need correction?",
     answer:
-      "Our audit is designed to catch issues early. If something still needs fixing after submission, we guide you on corrections, affidavits, apostille, or re-uploads where applicable.",
+      "Our document check is designed to catch issues early. If something still needs fixing after submission, we guide you on corrections, affidavits, apostille, or re-uploads where applicable.",
   },
 ];

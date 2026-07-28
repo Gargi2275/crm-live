@@ -14,7 +14,7 @@ interface AdminAuthContextType {
   adminUser: AdminStaffUser | null;
   isAuthenticated: boolean;
   isBootstrapped: boolean;
-  login: (username: string, password: string) => Promise<AdminStaffUser>;
+  login: (username: string, password: string, captchaToken: string) => Promise<AdminStaffUser>;
   logout: () => void;
 }
 
@@ -33,8 +33,12 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     setIsBootstrapped(true);
   }, []);
 
-  const login = async (username: string, password: string): Promise<AdminStaffUser> => {
-    const user = await loginAdmin(username, password);
+  const login = async (
+    username: string,
+    password: string,
+    captchaToken: string,
+  ): Promise<AdminStaffUser> => {
+    const user = await loginAdmin(username, password, captchaToken);
     const normalized = normalizeAdminStaffUser(user);
     setAdminUser(normalized);
     return normalized;

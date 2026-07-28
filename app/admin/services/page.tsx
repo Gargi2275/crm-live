@@ -45,7 +45,7 @@ export default function AdminServicesPage() {
   const [inlineSavingId, setInlineSavingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("true");
   const [deleteTarget, setDeleteTarget] = useState<AdminService | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -86,9 +86,9 @@ export default function AdminServicesPage() {
     setInlineSavingId(deleteTarget.id);
     try {
       await deleteAdminService(deleteTarget.id);
-      setServices((prev) => prev.filter((row) => row.id !== deleteTarget.id));
       clearDocumentRequirementsCache();
       clearPublicPricingCache();
+      setServices((prev) => prev.filter((row) => row.id !== deleteTarget.id));
       toast.success("Service deleted.");
       setDeleteTarget(null);
       await load();
@@ -343,7 +343,7 @@ export default function AdminServicesPage() {
         title="Delete service?"
         description={
           deleteTarget
-            ? `Remove “${deleteTarget.service_name}” from the catalog. Services with applications cannot be deleted.`
+            ? `Permanently remove “${deleteTarget.service_name}” from the catalog. Existing applications stay in the pipeline but will no longer link to this catalog row.`
             : ""
         }
         confirmLabel="Delete"

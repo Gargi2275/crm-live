@@ -11,9 +11,11 @@ export const ADMIN_ROUTE_MODULE_KEY: Record<string, string> = {
   "/admin/service-hubs": "hub_countries",
   "/admin/blog": "blog",
   "/admin/homepage": "homepage",
+  "/admin/docs": "docs",
   "/admin/roles": "roles",
   "/admin/permissions": "permissions",
   "/admin/kanban": "kanban",
+  "/admin/apostille": "kanban",
   "/admin/reports": "reports",
   "/admin/easyfly": "easyfly",
   "/admin/logs": "logs",
@@ -24,6 +26,8 @@ export const ADMIN_ROUTE_MODULE_KEY: Record<string, string> = {
   "/admin/revenue": "revenue",
   "/admin/billing": "billing",
   "/admin/settings": "settings",
+  "/admin/security": "settings",
+  "/admin/customers": "dashboard",
 };
 
 export function resolveAdminRouteModuleKey(pathname: string): string | null {
@@ -48,7 +52,7 @@ export function canAccessAdminRoute(
 ): boolean {
   if ((role || "").toLowerCase() === "admin") return true;
   const moduleKey = resolveAdminRouteModuleKey(href);
-  if (!moduleKey) return true;
+  if (!moduleKey) return false;
   if (!permissions) return false;
   return Boolean(permissions[moduleKey]);
 }
@@ -59,9 +63,11 @@ export function canAccessAdminPathname(
   role?: string | null,
 ): boolean {
   if ((role || "").toLowerCase() === "admin") return true;
-  if (pathname === "/admin") return true;
+  if (pathname === "/admin" || pathname.startsWith("/admin/login") || pathname.startsWith("/admin/reset-password")) {
+    return true;
+  }
   const moduleKey = resolveAdminRouteModuleKey(pathname);
-  if (!moduleKey) return true;
+  if (!moduleKey) return false;
   if (!permissions) return false;
   return Boolean(permissions[moduleKey]);
 }

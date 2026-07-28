@@ -1,8 +1,7 @@
 export type KanbanStage =
   | "NEW_LEAD"
-  | "PASSPORT_QUOTE_PENDING"
-  | "AUDIT_PENDING"
-  | "AUDIT_COMPLETED"
+  | "ASSESSMENT_PENDING"
+  | "ASSESSMENT_COMPLETED"
   | "DOCUMENTS_REQUIRED"
   | "PAYMENT_PENDING"
   | "DOCUMENT_UPLOAD_PENDING"
@@ -28,6 +27,8 @@ export interface PipelineCase {
   assignedTo: string | null;
   slaTimer: string;
   slaBreached: boolean;
+  /** Customer paid Express fee plan — treat as urgent. */
+  isExpress?: boolean;
 }
 
 export interface KanbanColumnDefinition {
@@ -39,12 +40,15 @@ export interface KanbanColumnDefinition {
 export const KANBAN_COLUMNS: KanbanColumnDefinition[] = [
   { id: "NEW_LEAD", title: "NEW LEAD", color: "bg-sky-100 text-sky-700 border-sky-200" },
   {
-    id: "PASSPORT_QUOTE_PENDING",
-    title: "PASSPORT QUOTE PENDING",
-    color: "bg-indigo-100 text-indigo-700 border-indigo-200",
+    id: "ASSESSMENT_PENDING",
+    title: "ASSESSMENT PENDING",
+    color: "bg-yellow-100 text-yellow-700 border-yellow-200",
   },
-  { id: "AUDIT_PENDING", title: "AUDIT PENDING", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
-  { id: "AUDIT_COMPLETED", title: "AUDIT COMPLETED", color: "bg-green-100 text-green-700 border-green-200" },
+  {
+    id: "ASSESSMENT_COMPLETED",
+    title: "ASSESSMENT COMPLETED",
+    color: "bg-green-100 text-green-700 border-green-200",
+  },
   { id: "DOCUMENTS_REQUIRED", title: "DOCUMENTS REQUIRED", color: "bg-orange-100 text-orange-700 border-orange-200" },
   { id: "PAYMENT_PENDING", title: "PAYMENT PENDING", color: "bg-red-100 text-red-700 border-red-200" },
   {
@@ -62,3 +66,17 @@ export const KANBAN_COLUMNS: KanbanColumnDefinition[] = [
   { id: "SUBMITTED", title: "SUBMITTED", color: "bg-blue-100 text-blue-700 border-blue-200" },
   { id: "DELIVERED", title: "DELIVERED", color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
 ];
+
+/** Map legacy / alias stage ids onto live kanban columns. */
+export function aliasKanbanStage(stage: string): KanbanStage {
+  const normalized = (stage || "").trim().toUpperCase().replace(/\s+/g, "_");
+  if (normalized === "PASSPORT_QUOTE_PENDING") return "PAYMENT_PENDING";
+  if (normalized === "UPLOAD_PENDING") return "DOCUMENT_UPLOAD_PENDING";
+  // Legacy audit column names → assessment
+  if (normalized === "AUDIT_PENDING") return "ASSESSMENT_PENDING";
+  if (normalized === "AUDIT_COMPLETED") return "ASSESSMENT_COMPLETED";
+  if (KANBAN_COLUMNS.some((col) => col.id === normalized)) {
+    return normalized as KanbanStage;
+  }
+  return "NEW_LEAD";
+}

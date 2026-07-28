@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import {
   CheckoutShell,
@@ -20,6 +20,8 @@ export type StartOrderServiceOption = {
   categoryName?: string;
   /** Journey/backend mapping id (e.g. new-oci). Selection UI uses unique `id` so all catalog rows show. */
   journeyId?: string | null;
+  /** Live catalog Service.pk — preferred when creating applications. */
+  catalogId?: number | string | null;
 };
 
 export type StartOrderApplicant = {
@@ -90,7 +92,17 @@ export function StartOrderPanel({
   const [touched, setTouched] = useState({ name: false, email: false });
 
   const serviceGroups = useMemo(() => {
-    const map = new Map<string, { key: string; label: string; services: StartOrderServiceOption[] }>();
+    const map = new Map<string, { key: string; label: string; services: StartOrderServiceOption[]; rank: number }>();
+    const rankFor = (key: string) => {
+      const k = key.toLowerCase();
+      if (k === "oci") return 0;
+      if (k === "passport" || k.includes("passport")) return 1;
+      if (k === "evisa" || k.includes("visa")) return 2;
+      if (k === "apostille") return 3;
+      if (k === "other" || k === "others") return 4;
+      if (k === "pan_card" || k === "uncategorized") return 5;
+      return 9;
+    };
     for (const service of services) {
       if (service.id === "undecided") continue;
       const key = service.category || "other";
@@ -99,9 +111,12 @@ export function StartOrderPanel({
         key.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       const existing = map.get(key);
       if (existing) existing.services.push(service);
-      else map.set(key, { key, label, services: [service] });
+      else map.set(key, { key, label, services: [service], rank: rankFor(key) });
     }
-    return Array.from(map.values());
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return a.label.localeCompare(b.label);
+    });
   }, [services]);
 
   const resolveOptionId = (serviceKey: string | null | undefined): string | null => {
@@ -113,14 +128,13 @@ export function StartOrderPanel({
     return serviceKey;
   };
 
-  // Keep URL/preselected service checked for primary applicant — never hide other services
+  // Prefill URL/preselected service for primary — still keep all options visible.
   useEffect(() => {
     const optionId = resolveOptionId(selectedServiceId);
     if (!optionId || optionId === "undecided") return;
     setApplicantServices((current) => {
       const prev = current[primaryApplicant.id] || [];
       if (prev.includes(optionId)) return current;
-      // Prefer journey match: if prev has raw journey id, replace with option id
       const withoutAlias = prev.filter((id) => id !== selectedServiceId);
       return {
         ...current,
@@ -147,19 +161,23 @@ export function StartOrderPanel({
   }, [allApplicants, activeApplicantId, primaryApplicant.id]);
 
   useEffect(() => {
+    // Keep category tabs closed by default; only clean up stale keys when applicants/groups change.
     if (!serviceGroups.length) return;
-    // Expand every category for every applicant so all services stay visible
     setExpandedCategories((current) => {
-      const next = { ...current };
-      let changed = false;
+      const valid = new Set<string>();
       for (const applicant of allApplicants) {
         for (const group of serviceGroups) {
-          const key = `${applicant.id}:${group.key}`;
-          if (!next[key]) {
-            next[key] = true;
-            changed = true;
-          }
+          valid.add(`${applicant.id}:${group.key}`);
         }
+      }
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const [key, value] of Object.entries(current)) {
+        if (!valid.has(key)) {
+          changed = true;
+          continue;
+        }
+        next[key] = value;
       }
       return changed ? next : current;
     });
@@ -167,14 +185,19 @@ export function StartOrderPanel({
 
   const primarySelectedServices = applicantServices[primaryApplicant.id] || [];
   const currentServiceId = primarySelectedServices[0] || selectedServiceId || services[0]?.id || "";
+  const onSelectServiceRef = useRef(onSelectService);
+  onSelectServiceRef.current = onSelectService;
 
+  // Sync parent journey selection once when the primary cart service changes — do not
+  // depend on onSelectService identity (parent often passes an inline function).
   useEffect(() => {
     if (!currentServiceId || currentServiceId === "undecided") return;
     const row = services.find((s) => s.id === currentServiceId);
-    const journeyKey = row?.journeyId || currentServiceId;
+    const journeyKey = String(row?.journeyId || currentServiceId).trim();
+    if (!journeyKey) return;
     if (selectedServiceId === journeyKey || selectedServiceId === currentServiceId) return;
-    onSelectService(journeyKey);
-  }, [currentServiceId, onSelectService, selectedServiceId, services]);
+    onSelectServiceRef.current(journeyKey);
+  }, [currentServiceId, selectedServiceId, services]);
 
   const serviceById = useMemo(() => {
     const map = new Map<string, StartOrderServiceOption>();
@@ -339,7 +362,6 @@ export function StartOrderPanel({
             const open = Boolean(expandedCategories[expandKey]);
             const isSingle = group.services.length === 1;
 
-            // Visament: single service = flat selectable row
             if (isSingle) {
               const service = group.services[0];
               const checked = selected.includes(service.id);
@@ -370,7 +392,6 @@ export function StartOrderPanel({
               );
             }
 
-            // Visament: multi service category = accordion with checkbox grid
             const groupSelectedCount = group.services.filter((s) => selected.includes(s.id)).length;
             return (
               <div
@@ -394,9 +415,7 @@ export function StartOrderPanel({
                   <div className="min-w-0">
                     <p className="text-[13px] font-semibold text-[#0F1F3D]">{group.label}</p>
                     {groupSelectedCount ? (
-                      <p className="text-[11px] text-[#1A56DB]">
-                        {groupSelectedCount} selected
-                      </p>
+                      <p className="text-[11px] text-[#1A56DB]">{groupSelectedCount} selected</p>
                     ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">

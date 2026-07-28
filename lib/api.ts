@@ -585,15 +585,34 @@ export type SubmitTestimonialResponse = {
 };
 
 
+const flattenApiMessage = (value: unknown): string | null => {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => flattenApiMessage(item)).filter(Boolean) as string[];
+    return parts.length ? parts.join(' ') : null;
+  }
+  if (typeof value === 'object') {
+    const parts = Object.values(value as Record<string, unknown>)
+      .map((item) => flattenApiMessage(item))
+      .filter(Boolean) as string[];
+    return parts.length ? parts.join(' ') : null;
+  }
+  return String(value);
+};
+
 export const extractErrorMessage = async (response: Response): Promise<string> => {
   const fallback = 'Request failed';
   try {
     const data = await response.json();
     return (
-      data?.message ||
-      data?.error ||
-      data?.detail ||
-      data?.data?.message ||
+      flattenApiMessage(data?.message) ||
+      flattenApiMessage(data?.error) ||
+      flattenApiMessage(data?.detail) ||
+      flattenApiMessage(data?.data?.message) ||
       fallback
     );
   } catch {
@@ -612,13 +631,33 @@ export const getAuthHeaders = (): AuthHeaders => {
   };
 };
 
-export const createApplication = async (serviceType: string): Promise<CreateApplicationResponse> => {
+export const createApplication = async (
+  serviceType: string,
+  options?: {
+    serviceId?: number | string | null;
+    applicantName?: string;
+    applicantEmail?: string;
+    applicantMobile?: string;
+    applyingFrom?: string;
+  },
+): Promise<CreateApplicationResponse> => {
   try {
+    const body: Record<string, unknown> = {
+      service_type: serviceType,
+    };
+    const serviceIdRaw = options?.serviceId;
+    if (serviceIdRaw != null && String(serviceIdRaw).trim() !== '') {
+      const asNumber = Number(serviceIdRaw);
+      body.service = Number.isFinite(asNumber) && asNumber > 0 ? asNumber : serviceIdRaw;
+    }
+    if (options?.applicantName) body.applicant_name = options.applicantName;
+    if (options?.applicantEmail) body.applicant_email = options.applicantEmail;
+    if (options?.applicantMobile) body.applicant_mobile = options.applicantMobile;
+    if (options?.applyingFrom) body.applying_from = options.applyingFrom;
+
     const response = await authenticatedFetch(`${API_BASE_URL}/applications/create/`, {
       method: 'POST',
-      body: JSON.stringify({
-        service_type: serviceType,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -969,6 +1008,12 @@ export type PublicHomepageModule = {
   is_active: boolean;
 };
 
+export type PublicHomepageSettings = {
+  pricing_preview_count: number;
+  pricing_title: string;
+  pricing_subtitle: string;
+};
+
 export const getPublicHomepageModules = async (): Promise<PublicHomepageModule[]> => {
   try {
     const response = await apiCall(`${API_BASE_URL}/public/homepage-modules/`, {
@@ -983,6 +1028,54 @@ export const getPublicHomepageModules = async (): Promise<PublicHomepageModule[]
     return Array.isArray(modules) ? modules : [];
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "Failed to load homepage modules");
+  }
+};
+
+export const getPublicHomepageSettings = async (): Promise<PublicHomepageSettings> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/public/homepage-settings/`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+    const raw = await response.json();
+    const settings = (raw?.data?.settings || {}) as Partial<PublicHomepageSettings>;
+    return {
+      pricing_preview_count: Math.max(1, Math.min(24, Number(settings.pricing_preview_count) || 6)),
+      pricing_title: String(settings.pricing_title || "Our services & fees").trim() || "Our services & fees",
+      pricing_subtitle:
+        String(
+          settings.pricing_subtitle ||
+            "Transparent pricing, clearly separated from government fees where they apply.",
+        ).trim() || "Transparent pricing, clearly separated from government fees where they apply.",
+    };
+  } catch {
+    return {
+      pricing_preview_count: 6,
+      pricing_title: "Our services & fees",
+      pricing_subtitle: "Transparent pricing, clearly separated from government fees where they apply.",
+    };
+  }
+};
+
+const DEFAULT_SUPPORT_EMAIL = "support@flyoci.com";
+
+export const getPublicSupportEmail = async (): Promise<string> => {
+  try {
+    const response = await apiCall(`${API_BASE_URL}/public/support-email/`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return DEFAULT_SUPPORT_EMAIL;
+    }
+    const raw = await response.json();
+    const email = String(raw?.data?.email || "").trim();
+    return email || DEFAULT_SUPPORT_EMAIL;
+  } catch {
+    return DEFAULT_SUPPORT_EMAIL;
   }
 };
 
@@ -1466,6 +1559,70 @@ export const createFullPaymentOrder = async (
   }
 };
 
+export type CartFullPaymentLineItem = {
+  reference_number: string;
+  label: string;
+  amount_pence: number;
+};
+
+export type CreateCartFullPaymentOrderResponse = {
+  order_id: string;
+  stripe_session_id?: string;
+  checkout_url?: string;
+  amount_pence: number;
+  amount_major?: string;
+  currency: string;
+  reference_numbers: string[];
+  line_items: CartFullPaymentLineItem[];
+  key_id?: string;
+};
+
+export const createCartFullPaymentOrder = async (
+  referenceNumbers: string[],
+): Promise<CreateCartFullPaymentOrderResponse> => {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/payment/cart/create-order/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reference_numbers: referenceNumbers,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as CreateCartFullPaymentOrderResponse;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to create cart payment order');
+  }
+};
+
+export const verifyCartFullPayment = async (
+  referenceNumbers: string[],
+  stripeSessionId: string,
+): Promise<{ applications: unknown[] }> => {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/payment/cart/verify/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reference_numbers: referenceNumbers,
+        stripe_session_id: stripeSessionId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+
+    const raw = await response.json();
+    return (raw?.data || raw) as { applications: unknown[] };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to verify cart payment');
+  }
+};
+
 export type SelectFullPaymentPlanResponse = {
   reference_number: string;
   fee_plan_code: string;
@@ -1631,5 +1788,101 @@ export const getPassportCaseQuoteDetail = async (
     return (raw?.data || raw) as PassportCaseQuoteDetailResponse;
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Failed to load case quote details');
+  }
+};
+
+export type DocumentDeletionRequest = {
+  id: number;
+  application_id: number;
+  status: "pending" | "approved" | "rejected" | "executed" | "cancelled" | string;
+  reason: string;
+  reference_number: string;
+  file_number: string;
+  customer_email: string;
+  service_name: string;
+  service_type: string;
+  requested_at: string | null;
+  reviewed_by_name: string;
+  reviewed_at: string | null;
+  review_notes: string;
+  executed_at: string | null;
+  executed_by: string;
+  documents_deleted: boolean;
+  updated_at: string | null;
+};
+
+export type DocumentDeletionRequestsPayload = {
+  eligible: boolean;
+  documents_deleted: boolean;
+  documents_deleted_at: string | null;
+  open_request: DocumentDeletionRequest | null;
+  requests: DocumentDeletionRequest[];
+};
+
+export const getDocumentDeletionRequests = async (
+  referenceNumber: string,
+): Promise<DocumentDeletionRequestsPayload> => {
+  try {
+    const response = await authenticatedFetch(
+      `${API_BASE_URL}/applications/${encodeURIComponent(referenceNumber)}/document-deletion-requests/`,
+      { method: "GET" },
+    );
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+    const raw = await response.json();
+    return (raw?.data || raw) as DocumentDeletionRequestsPayload;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to load document deletion requests");
+  }
+};
+
+export const createDocumentDeletionRequest = async (
+  referenceNumber: string,
+  reason = "",
+): Promise<DocumentDeletionRequest> => {
+  try {
+    const response = await authenticatedFetch(
+      `${API_BASE_URL}/applications/${encodeURIComponent(referenceNumber)}/document-deletion-requests/`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+    const raw = await response.json();
+    const data = (raw?.data || raw) as { request?: DocumentDeletionRequest };
+    if (!data?.request) {
+      throw new Error("Missing deletion request in response");
+    }
+    return data.request;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to submit deletion request");
+  }
+};
+
+export const executeDocumentDeletionRequest = async (
+  referenceNumber: string,
+  requestId: number,
+): Promise<DocumentDeletionRequest> => {
+  try {
+    const response = await authenticatedFetch(
+      `${API_BASE_URL}/applications/${encodeURIComponent(referenceNumber)}/document-deletion-requests/${requestId}/execute/`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response));
+    }
+    const raw = await response.json();
+    const data = (raw?.data || raw) as { request?: DocumentDeletionRequest };
+    if (!data?.request) {
+      throw new Error("Missing deletion request in response");
+    }
+    return data.request;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to delete documents");
   }
 };

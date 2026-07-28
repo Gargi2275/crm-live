@@ -14,7 +14,6 @@ import {
   patchAdminApplication,
   reopenAdminApplication,
   sendAdminApplicationReminder,
-  setAdminPassportRenewalQuote,
   sendAdminCustomerMessage,
   getAdminApplicationInternalMessages,
   sendAdminApplicationInternalMessage,
@@ -47,9 +46,8 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
 
 const KANBAN_STAGE_OPTIONS: PipelineCase["stage"][] = [
   "NEW_LEAD",
-  "PASSPORT_QUOTE_PENDING",
-  "AUDIT_PENDING",
-  "AUDIT_COMPLETED",
+  "ASSESSMENT_PENDING",
+  "ASSESSMENT_COMPLETED",
   "DOCUMENTS_REQUIRED",
   "PAYMENT_PENDING",
   "DOCUMENT_UPLOAD_PENDING",
@@ -122,9 +120,8 @@ const toStageLabel = (stage: PipelineCase["stage"] | string) =>
 const getNextActionLabel = (stage: PipelineCase["stage"]): string => {
   const map: Partial<Record<PipelineCase["stage"], string>> = {
     NEW_LEAD: "Open lead and assign service",
-    PASSPORT_QUOTE_PENDING: "Send passport quote to customer",
-    AUDIT_PENDING: "Review uploaded documents",
-    AUDIT_COMPLETED: "Send payment link to customer",
+    ASSESSMENT_PENDING: "Review uploaded documents",
+    ASSESSMENT_COMPLETED: "Send payment link to customer",
     DOCUMENTS_REQUIRED: "Request missing documents from customer",
     PAYMENT_PENDING: "Follow up on payment confirmation",
     DOCUMENT_UPLOAD_PENDING: "Wait for customer document upload",
@@ -140,9 +137,8 @@ const getNextActionLabel = (stage: PipelineCase["stage"]): string => {
 const getAllowedActions = (stage: PipelineCase["stage"]): string[] => {
   const map: Partial<Record<PipelineCase["stage"], string[]>> = {
     NEW_LEAD: ["Open lead", "Assign service", "Send quote", "Reject duplicate"],
-    PASSPORT_QUOTE_PENDING: ["Set passport quote", "Send to customer"],
-    AUDIT_PENDING: ["Review documents", "Accept / reject each document", "Request missing document", "Escalate document issue"],
-    AUDIT_COMPLETED: ["Send payment link", "Move to form filling after payment confirmed"],
+    ASSESSMENT_PENDING: ["Review documents", "Accept / reject each document", "Request missing document", "Escalate document issue"],
+    ASSESSMENT_COMPLETED: ["Send payment link", "Move to form filling after payment confirmed"],
     DOCUMENTS_REQUIRED: ["Request missing documents", "Review corrected uploads", "Escalate to admin"],
     PAYMENT_PENDING: ["Send payment reminder", "Confirm payment received"],
     DOCUMENT_UPLOAD_PENDING: ["Send upload reminder", "Wait for customer upload"],
@@ -252,10 +248,10 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
     if (applicationStatus === "rejected" || rawStage === "CORRECTION_REQUESTED") {
       return "DOCUMENTS_REQUIRED";
     }
-    if (applicationStatus === "under_review" || rawStage === "INITIAL_REVIEW" || rawStage === "AUDIT_PENDING") {
-      return "AUDIT_PENDING";
+    if (applicationStatus === "under_review" || rawStage === "INITIAL_REVIEW" || rawStage === "ASSESSMENT_PENDING") {
+      return "ASSESSMENT_PENDING";
     }
-    return (rawStage as PipelineCase["stage"]) || "AUDIT_PENDING";
+    return (rawStage as PipelineCase["stage"]) || "ASSESSMENT_PENDING";
   }
 
   if (rawStage === "CORRECTION_REQUESTED" || applicationStatus === "correction_requested" || applicationStatus === "reuploaded_pending_review") {
@@ -270,11 +266,12 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
     isPassportCase &&
     (
       rawStage === "INITIAL_REVIEW" ||
+      rawStage === "PASSPORT_QUOTE_PENDING" ||
       applicationStatus === "pending_quote" ||
       quoteStatus === "PENDING_QUOTE"
     )
   ) {
-    return "PASSPORT_QUOTE_PENDING";
+    return hasDocuments ? "PAYMENT_PENDING" : "NEW_LEAD";
   }
 
   if (
@@ -308,7 +305,7 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
       return "REVIEW_PENDING";
     }
 
-    if (rawStage === "DOCS_RECEIVED" || rawStage === "AUDIT_PENDING") {
+    if (rawStage === "DOCS_RECEIVED" || rawStage === "ASSESSMENT_PENDING") {
       return "REVIEW_PENDING";
     }
 
@@ -367,12 +364,16 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
     return "DOCUMENTS_REQUIRED";
   }
 
-  if (auditResult === "pending" || rawStage === "AUDIT_PENDING" || rawStage === "DOCS_RECEIVED") {
-    return "AUDIT_PENDING";
+  if (auditResult === "pending" || rawStage === "ASSESSMENT_PENDING" || rawStage === "DOCS_RECEIVED") {
+    return "ASSESSMENT_PENDING";
   }
 
-  if (rawStage === "AUDIT_COMPLETED") {
-    return auditResult === "green" ? "PAYMENT_PENDING" : "AUDIT_COMPLETED";
+  if (rawStage === "ASSESSMENT_COMPLETED") {
+    return auditResult === "green" ? "PAYMENT_PENDING" : "ASSESSMENT_COMPLETED";
+  }
+
+  if (rawStage === "PASSPORT_QUOTE_PENDING") {
+    return "PAYMENT_PENDING";
   }
 
   return (rawStage as PipelineCase["stage"]) || "NEW_LEAD";
@@ -547,7 +548,6 @@ export function SlideOverPanel({
   const [showRequestDocs, setShowRequestDocs] = useState(false);
   const [showSendMessage, setShowSendMessage] = useState(false);
   const [showMoveStage, setShowMoveStage] = useState(false);
-  const [showSetQuote, setShowSetQuote] = useState(false);
   const [isRequestingDocs, setIsRequestingDocs] = useState(false);
   const [isSendingCustomerMessage, setIsSendingCustomerMessage] = useState(false);
   const [threadMessages, setThreadMessages] = useState<Array<{ sender: "team" | "customer"; message_body: string; created_at: string }>>([]);
@@ -555,10 +555,6 @@ export function SlideOverPanel({
   const [requestDocType, setRequestDocType] = useState("passport");
   const [requestDocDescription, setRequestDocDescription] = useState("");
   const [pendingDocRequests, setPendingDocRequests] = useState<Array<{ doc_type: string; description: string }>>([]);
-  const [quoteAmountGbp, setQuoteAmountGbp] = useState("");
-  const [quoteValidDays, setQuoteValidDays] = useState("7");
-  const [quoteNotes, setQuoteNotes] = useState("");
-  const [isSettingQuote, setIsSettingQuote] = useState(false);
 
   const [staffMessage, setStaffMessage] = useState("");
   const [internalMessages, setInternalMessages] = useState<AdminStaffInternalMessage[]>([]);
@@ -610,11 +606,6 @@ export function SlideOverPanel({
     setShowRequestDocs(false);
     setShowSendMessage(false);
     setShowMoveStage(false);
-    setShowSetQuote(false);
-    setQuoteAmountGbp("");
-    setQuoteValidDays("7");
-    setQuoteNotes("");
-    setIsSettingQuote(false);
     setInternalMessages([]);
     setInternalNoteDraft("");
     setInternalNoteRecipientId("");
@@ -693,11 +684,9 @@ export function SlideOverPanel({
   const isEVisaCase = serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
   const paymentStatusLabel = resolveDisplayPaymentStatus(details, effectiveStage, isEVisaCase);
   const processStatusLabel = toStageLabel(effectiveStage);
-  const isAuditPending = effectiveStage === "AUDIT_PENDING";
+  const isAuditPending = effectiveStage === "ASSESSMENT_PENDING";
   const isDocumentsRequired = effectiveStage === "DOCUMENTS_REQUIRED";
   const isRejected = isDocumentsRequired && details?.audit_result === "red" && details?.application_status === "rejected";
-  const quoteStatusUpper = String(details?.quote_status || "").trim().toUpperCase();
-  const canSetPassportQuote = effectiveStage === "PASSPORT_QUOTE_PENDING" && (quoteStatusUpper === "" || quoteStatusUpper === "PENDING_QUOTE");
 
   const flaggedDocuments = useMemo(() => {
     const fromDetails = Array.isArray(details?.flagged_documents) ? details.flagged_documents : [];
@@ -1119,13 +1108,13 @@ export function SlideOverPanel({
 
     const autoMoveToAuditReview = async () => {
       try {
-        await updateAdminApplicationStage(details.id, "AUDIT_PENDING");
-        onStageResolved?.("AUDIT_PENDING");
-        setActionBanner("All corrected documents uploaded. Moved to Audit Review.");
-        toast.success("All corrected documents uploaded. Case moved to Audit Review.");
+        await updateAdminApplicationStage(details.id, "ASSESSMENT_PENDING");
+        onStageResolved?.("ASSESSMENT_PENDING");
+        setActionBanner("All corrected documents uploaded. Moved to Assessment Review.");
+        toast.success("All corrected documents uploaded. Case moved to Assessment Review.");
       } catch (error) {
         autoMovedCorrectionRef.current = null;
-        toast.error(error instanceof Error ? error.message : "Failed to move case to audit review.");
+        toast.error(error instanceof Error ? error.message : "Failed to move case to assessment review.");
       }
     };
 
@@ -1246,7 +1235,7 @@ export function SlideOverPanel({
 
     if (selectedResult === "red") {
       if (!auditorNotes.trim()) {
-        toast.error("Rejection requires auditor notes.");
+        toast.error("Rejection requires Assessment notes.");
         return;
       }
       const confirmed = window.confirm("This will reject the application. Continue?");
@@ -1265,22 +1254,22 @@ export function SlideOverPanel({
         findings: cleanedFindings,
       });
 
-      const nextStage: PipelineCase["stage"] = selectedResult === "green" ? "AUDIT_COMPLETED" : "DOCUMENTS_REQUIRED";
+      const nextStage: PipelineCase["stage"] = selectedResult === "green" ? "PAYMENT_PENDING" : "DOCUMENTS_REQUIRED";
       onStageResolved?.(nextStage);
       await reloadDocuments();
 
       if (selectedResult === "green") {
-        setActionBanner("✓ Audit passed. Card moved to Audit Completed.");
+        setActionBanner("✓ Assessment passed. Case moved to Payment Pending.");
       } else if (selectedResult === "amber") {
         setActionBanner("⚠ Corrections requested. Email sent to customer.");
       } else {
         setActionBanner("✗ Application rejected. Email sent to customer.");
       }
 
-      toast.success("Audit result submitted.");
+      toast.success("Assessment result submitted.");
       setActiveTab("overview");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to submit audit result.");
+      toast.error(error instanceof Error ? error.message : "Failed to submit assessment result.");
     } finally {
       setIsSubmittingAudit(false);
     }
@@ -1384,7 +1373,7 @@ export function SlideOverPanel({
           flagged_documents: flaggedDocs,
         });
 
-        setActionBanner("Correction requested. Customer can re-upload from track-apostille.");
+        setActionBanner("Correction requested. Customer can re-upload from their application journey.");
         onStageResolved?.("DOCUMENTS_REQUIRED");
         toast.success(`Document request sent for ${allRequests.length} item(s).`);
         setShowRequestDocs(false);
@@ -1471,9 +1460,9 @@ export function SlideOverPanel({
 
     try {
       await reopenAdminApplication(details.id);
-      onStageResolved?.("AUDIT_PENDING");
-      setActionBanner("Case reopened and moved to Audit Pending.");
-      toast.success("Case reopened for audit review.");
+      onStageResolved?.("ASSESSMENT_PENDING");
+      setActionBanner("Case reopened and moved to Document Check Pending.");
+      toast.success("Case reopened for Assessment Review.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to reopen case.");
     }
@@ -1491,43 +1480,6 @@ export function SlideOverPanel({
       toast.success(type === "payment" ? "Payment reminder sent." : "Upload reminder sent.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to send reminder.");
-    }
-  };
-
-  const handleSetPassportQuote = async () => {
-    if (!details?.id) {
-      toast.error("Application id missing.");
-      return;
-    }
-
-    const parsedAmount = Number.parseFloat(quoteAmountGbp);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      toast.error("Enter a valid quote amount in GBP.");
-      return;
-    }
-
-    const parsedDays = Number.parseInt(quoteValidDays, 10);
-    if (!Number.isFinite(parsedDays) || parsedDays < 1) {
-      toast.error("Validity days must be at least 1.");
-      return;
-    }
-
-    const quote_amount_pence = Math.round(parsedAmount * 100);
-    setIsSettingQuote(true);
-    try {
-      await setAdminPassportRenewalQuote(details.id, {
-        quote_amount_pence,
-        valid_days: parsedDays,
-        quote_notes: quoteNotes.trim(),
-      });
-      onStageResolved?.("PAYMENT_PENDING");
-      setActionBanner(`Passport quote set: GBP ${(quote_amount_pence / 100).toFixed(2)} (${parsedDays} days validity). Moved to Payment Pending.`);
-      toast.success("Passport quote set successfully.");
-      setShowSetQuote(false);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to set passport quote.");
-    } finally {
-      setIsSettingQuote(false);
     }
   };
 
@@ -1610,9 +1562,9 @@ export function SlideOverPanel({
   const handleMoveToAuditReview = async () => {
     if (!details?.id) return;
     try {
-      await updateAdminApplicationStage(details.id, "AUDIT_PENDING");
-      onStageResolved?.("AUDIT_PENDING");
-      setActionBanner("Moved to Audit Review.");
+      await updateAdminApplicationStage(details.id, "ASSESSMENT_PENDING");
+      onStageResolved?.("ASSESSMENT_PENDING");
+      setActionBanner("Moved to Assessment Review.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to move stage.");
     }
@@ -1740,6 +1692,14 @@ export function SlideOverPanel({
             <p className="text-sm text-[#486581] truncate">{caseData?.customer || "—"}</p>
             <span className="text-[#D9E1EA]">·</span>
             <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#33A1FD]/10 text-[#0B69B7] shrink-0">{caseData?.serviceType || "—"}</span>
+            {(caseData?.isExpress || details?.is_express || String(details?.fee_plan_code || "").toLowerCase() === "express") ? (
+              <>
+                <span className="text-[#D9E1EA]">·</span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#FFF7ED] text-[#C2410C] border border-[#C2410C]/30 shrink-0">
+                  Express / Urgent
+                </span>
+              </>
+            ) : null}
             <span className="text-[#D9E1EA]">·</span>
             <span className="text-xs font-semibold text-[#486581] shrink-0">{toStageLabel(effectiveStage)}</span>
             <span className={cn("text-xs font-semibold shrink-0", caseData.slaBreached ? "text-[#B42318]" : "text-[#006F57]")}>
@@ -1759,7 +1719,7 @@ export function SlideOverPanel({
                   activeTab === tab ? "bg-white text-[#102A43] shadow-sm" : "text-[#627D98] hover:text-[#334E68]"
                 )}
               >
-                {tab}
+                {tab === "audit" ? "assessment" : tab}
               </button>
             ))}
           </div>
@@ -1930,7 +1890,7 @@ export function SlideOverPanel({
               {activeTab === "audit" && (isAuditPending || (isDocumentsRequired && isAmberCorrection)) && (
             <div className="space-y-4">
               <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Audit Review</h3>
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Assessment Review</h3>
                 {auditTabDocuments.map((document) => (
                   <div key={document.id} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3">
                     <div className="flex items-start justify-between gap-2">
@@ -2021,7 +1981,7 @@ export function SlideOverPanel({
                 <textarea
                   value={auditorNotes}
                   onChange={(event) => setAuditorNotes(event.target.value)}
-                  placeholder="Auditor notes"
+                  placeholder="Assessment notes"
                   className="w-full min-h-[96px] rounded-lg border border-[#D9E1EA] px-3 py-2 text-sm text-[#102A43]"
                 />
 
@@ -2305,7 +2265,7 @@ export function SlideOverPanel({
                       onClick={() => { void handleMoveToAuditReview(); }}
                       className="inline-flex items-center rounded-lg border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#334E68]"
                     >
-                      Move to Audit Review
+                      Move to Assessment Review
                     </button>
                   )}
 
@@ -2412,11 +2372,11 @@ export function SlideOverPanel({
                 </div>
               )}
 
-              {effectiveStage === "AUDIT_COMPLETED" && (
+              {effectiveStage === "ASSESSMENT_COMPLETED" && (
                 <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-2">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Payment Status</h3>
                   <p className="text-sm text-[#334E68]">Amount due: GBP {toPounds(details?.amount_due_pence)}</p>
-                  <p className="text-sm text-[#334E68]">Audit credit applied: GBP {toPounds(details?.audit_credit_pence)}</p>
+                  <p className="text-sm text-[#334E68]">Assessment credit applied: GBP {toPounds(details?.audit_credit_pence)}</p>
                   <p className="text-sm text-[#334E68]">Full service fee: GBP {toPounds(details?.service_total_pence)}</p>
                   <span className="inline-flex rounded-full bg-[#EEF4FF] px-2.5 py-1 text-xs font-semibold text-[#0B69B7] border border-[#B7D7F7]">Awaiting customer payment</span>
                   <p className="text-xs text-[#627D98]">Email sent to customer to complete payment.</p>
@@ -2777,52 +2737,7 @@ export function SlideOverPanel({
                   <button onClick={() => setActiveTab("documents")} className="flex items-center justify-center gap-2 bg-white border border-blue-200 text-slate-700 py-2 px-3 rounded-lg text-xs font-medium">
                     <FileText className="w-4 h-4 text-[#009877]" /> View Documents
                   </button>
-                  {effectiveStage === "PASSPORT_QUOTE_PENDING" ? (
-                    <button onClick={() => setShowSetQuote((prev) => !prev)} className="flex items-center justify-center gap-2 bg-white border border-blue-200 text-slate-700 py-2 px-3 rounded-lg text-xs font-medium col-span-2">
-                      <Send className="w-4 h-4 text-[#0B69B7]" /> Set Passport Quote
-                    </button>
-                  ) : null}
                 </div>
-
-                {showSetQuote && effectiveStage === "PASSPORT_QUOTE_PENDING" && (
-                  <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">
-                    <p className="text-[11px] font-semibold text-[#102A43]">Set Quote for Passport Renewal</p>
-                    {!canSetPassportQuote ? (
-                      <p className="text-[11px] text-[#B42318]">Quote cannot be set because current status is {quoteStatusUpper || "N/A"}.</p>
-                    ) : null}
-                    <input
-                      value={quoteAmountGbp}
-                      onChange={(event) => setQuoteAmountGbp(event.target.value)}
-                      placeholder="Quote amount in GBP (e.g. 89.99)"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      className="w-full rounded border border-[#D9E1EA] px-2 py-1.5 text-xs"
-                    />
-                    <input
-                      value={quoteValidDays}
-                      onChange={(event) => setQuoteValidDays(event.target.value)}
-                      placeholder="Validity days"
-                      type="number"
-                      min="1"
-                      step="1"
-                      className="w-full rounded border border-[#D9E1EA] px-2 py-1.5 text-xs"
-                    />
-                    <textarea
-                      value={quoteNotes}
-                      onChange={(event) => setQuoteNotes(event.target.value)}
-                      placeholder="Quote notes (optional)"
-                      className="w-full min-h-[72px] rounded border border-[#D9E1EA] px-2 py-1.5 text-xs"
-                    />
-                    <button
-                      onClick={() => { void handleSetPassportQuote(); }}
-                      disabled={isSettingQuote || !canSetPassportQuote}
-                      className="inline-flex items-center gap-1 rounded-lg bg-[#102A43] text-white px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
-                    >
-                      {isSettingQuote ? "Setting quote..." : "Confirm Set Quote"}
-                    </button>
-                  </div>
-                )}
 
                 {showRequestDocs && (
                   <div className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3 space-y-2">

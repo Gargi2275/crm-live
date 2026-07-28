@@ -54,10 +54,11 @@ export function ConsentCheckboxes({
             </li>
             <li>I understand the refund policy and cancellation terms.</li>
             <li>I consent to the payment being processed securely.</li>
+            <li>I confirm I want FlyOCI to begin processing my application.</li>
             {includeAuditFeeAcknowledgement ? (
               <li>
-                I acknowledge the audit fee and understand it is credited against my final service fee if I proceed with
-                an OCI service (New OCI, OCI Renewal, or OCI Update) within 30 days of payment. Audit credit does not apply
+                I acknowledge the assessment fee and understand it is credited against my final service fee if I proceed with
+                an OCI service (New OCI, OCI Renewal, or OCI Update) within 30 days of payment. Assessment credit does not apply
                 to e-Visa or Passport Renewal.
               </li>
             ) : null}

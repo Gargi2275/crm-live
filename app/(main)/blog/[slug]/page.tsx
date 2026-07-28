@@ -248,10 +248,10 @@ export default async function BlogPostPage({ params }: PageProps) {
                     Clear guidance on your OCI or passport case.
                   </p>
                   <Link
-                    href="/document-audit"
+                    href="/services"
                     className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-[#155fc4] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#0b2a6b]"
                   >
-                    Start document audit
+                    Browse services
                   </Link>
                 </div>
               </div>

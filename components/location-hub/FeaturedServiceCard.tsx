@@ -27,7 +27,6 @@ export function FeaturedServiceCard({
   return (
     <section className={home.sectionWhite}>
       <div className={home.container}>
-        <p className={home.eyebrow}>Most popular</p>
         <div className={`${home.card} mt-4 flex flex-col gap-6 p-6 md:flex-row md:items-center md:justify-between`}>
           <div className="max-w-2xl">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">

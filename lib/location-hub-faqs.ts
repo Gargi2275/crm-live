@@ -19,7 +19,7 @@ const DEFAULT_FAQS: LocationHubFaq[] = [
   {
     question: "How does the application process work?",
     answer:
-      "Choose a service, start the document audit journey, upload clear scans, and our team guides checklist corrections and next steps through to submission readiness.",
+      "Choose a service, start your application, upload clear scans, and our team guides checklist corrections and next steps through to submission readiness.",
   },
   {
     question: "Do city pages use different pricing than the country?",

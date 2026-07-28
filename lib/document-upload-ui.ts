@@ -89,6 +89,12 @@ const BACKEND_TYPE_TO_CHECKLIST_IDS: Record<string, string[]> = {
     "recent-photo-35x45",
     "update_photo",
     "update-photo",
+    "applicant_photograph",
+    "applicant-photograph",
+    "recent_photo",
+    "recent-photo",
+    "oci_photo",
+    "oci-photo",
   ],
   old_oci: ["old_oci", "oci_card", "old-oci", "oci-card"],
   birth_certificate: ["proof_origin", "proof-origin", "birth_proof", "birth-proof", "minor_birth_certificate", "minor-birth-certificate"],
@@ -323,16 +329,21 @@ export function mergeHydratedDocuments(
   checklist: ChecklistItemRef[],
 ): Record<string, StoredDocumentState> {
   const next = { ...current };
+  const list = Array.isArray(backendDocs) ? backendDocs : [];
 
-  for (const doc of backendDocs) {
+  for (const doc of list) {
     const checklistId = mapBackendDocumentToChecklistId(doc, checklist);
     if (!checklistId) continue;
 
-    const fileName = String(doc.original_filename || "").trim() || (
-      looksLikeUploadedFileName(doc.document_name) ? "" : String(doc.document_name || "").trim()
-    );
+    const fileName =
+      String(doc.original_filename || "").trim() ||
+      String(doc.document_name || "").trim();
     const fileUrl = String(doc.file_path || "").trim();
-    if (!fileName && !fileUrl) continue;
+    const statusHint = String((doc as { status?: string }).status || "").trim().toLowerCase();
+    const hasUpload =
+      Boolean(fileName || fileUrl) ||
+      (statusHint !== "" && statusHint !== "not_uploaded" && statusHint !== "pending");
+    if (!hasUpload) continue;
 
     next[checklistId] = {
       status: "uploaded",

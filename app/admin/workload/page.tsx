@@ -34,7 +34,7 @@ type KpiFilterKey = "all" | "assigned" | "pending" | "completed" | "unassigned";
 type WorkloadTab = "overview" | "notes";
 
 const TASK_TYPE_LABELS: Record<string, string> = {
-  audit: "Audit",
+  audit: "Assessment",
   document_review: "Document Review",
   form_filling: "Form Filling",
   form_review: "Form Review",

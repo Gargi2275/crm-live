@@ -17,8 +17,8 @@ const steps = [
     desc: "Once you submit the form, you upload: Passport, OCI card (if already held), Proof of address, Marriage/birth certificate via a secure portal.",
   },
   {
-    title: "Step 3 — Document Audit Payment",
-    desc: "Checkout for the Document Audit (£15 per applicant). On successful payment, receive an email confirmation and optional WhatsApp welcome message.",
+    title: "Step 3 — Document Check & Application Start",
+    desc: "We confirm your documents are ready and guide you through starting the application. You receive email confirmation and an optional WhatsApp welcome message.",
   },
   {
     title: "Step 4 — Expert Review & Report",
@@ -26,7 +26,7 @@ const steps = [
   },
   {
     title: "Step 5 — Full Service Confirmation",
-    desc: "If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update), we deduct the £15 audit from the final fee. Audit credit does not apply to e-Visa or Passport Renewal. If you do not proceed, you keep the advice.",
+    desc: "If you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update), we confirm the final fee and next steps. If you do not proceed, you keep the advice.",
   },
   {
     title: "Step 6 — Application Preparation & Submission",
@@ -90,7 +90,7 @@ export function HowItWorksContent() {
             viewport={{ once: true }}
             className="mt-16 text-center"
           >
-            <Link href="/document-audit" className="group inline-block">
+            <Link href="/dashboard/document-audit?start=1" className="group inline-block">
               <motion.span
                 whileHover={reduceMotion ? undefined : { scale: 1.03 }}
                 whileTap={reduceMotion ? undefined : { scale: 0.98 }}

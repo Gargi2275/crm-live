@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { FadeInUp } from "@/components/FadeInUp";
 import { BlogPostCard } from "@/components/blog/BlogPostCard";
+import { ParallaxBlob, StaggerItem, StaggerReveal } from "@/components/home/HomeScrollMotion";
 import type { PublicBlogPost } from "@/lib/api";
 import { home } from "@/components/home/homeTheme";
 
@@ -13,8 +14,14 @@ export function BlogSection({ posts }: BlogSectionProps) {
 
   return (
     <section className={home.sectionSoft}>
-      <div className="pointer-events-none absolute -right-24 top-10 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.08)_0%,transparent_70%)]" />
-      <div className="pointer-events-none absolute -left-16 bottom-0 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(15,126,232,0.06)_0%,transparent_70%)]" />
+      <ParallaxBlob
+        speed={46}
+        className="pointer-events-none absolute -right-24 top-10 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.08)_0%,transparent_70%)]"
+      />
+      <ParallaxBlob
+        speed={30}
+        className="pointer-events-none absolute -left-16 bottom-0 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(15,126,232,0.06)_0%,transparent_70%)]"
+      />
 
       <div className={home.container}>
         <FadeInUp className="mb-10 flex flex-col gap-4 sm:mb-12 sm:flex-row sm:items-end sm:justify-between">
@@ -35,13 +42,13 @@ export function BlogSection({ posts }: BlogSectionProps) {
           </Link>
         </FadeInUp>
 
-        <FadeInUp delay={0.15}>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {posts.slice(0, 3).map((post) => (
-              <BlogPostCard key={post.id} post={post} />
-            ))}
-          </div>
-        </FadeInUp>
+        <StaggerReveal className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {posts.slice(0, 3).map((post) => (
+            <StaggerItem key={post.id}>
+              <BlogPostCard post={post} />
+            </StaggerItem>
+          ))}
+        </StaggerReveal>
       </div>
     </section>
   );

@@ -3,16 +3,8 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Button } from "./ui/Button";
-import { usePublicPricing } from "@/hooks/usePublicPricing";
 
 export function CTABanner() {
-  const { assessmentFee } = usePublicPricing();
-  const hasAssessment = assessmentFee != null && assessmentFee > 0;
-  const feeLabel =
-    hasAssessment && assessmentFee != null
-      ? `£${assessmentFee % 1 === 0 ? assessmentFee.toFixed(0) : assessmentFee.toFixed(2)}`
-      : null;
-
   return (
     <section className="bg-[linear-gradient(135deg,#eef7ff_0%,#f8fcff_45%,#ffffff_100%)] py-20 px-4 sm:px-6 lg:px-8 relative overflow-hidden border-y border-primary/15">
       <div className="absolute top-0 right-0 -mt-20 -mr-20 w-80 h-80 bg-primary opacity-20 rounded-full blur-[90px] pointer-events-none" />
@@ -46,7 +38,7 @@ export function CTABanner() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="flex flex-wrap items-center justify-center gap-3"
         >
-          <Link href="/dashboard/start">
+          <Link href="/dashboard/document-audit?start=1">
             <Button
               variant="primary"
               className="text-lg py-4 px-8 shadow-[0_12px_30px_rgba(51,161,253,0.35)] hover:shadow-[0_16px_36px_rgba(51,161,253,0.45)]"
@@ -54,13 +46,11 @@ export function CTABanner() {
               Start application
             </Button>
           </Link>
-          {hasAssessment && feeLabel ? (
-            <Link href="/document-audit">
-              <Button variant="outline" className="text-lg py-4 px-8">
-                Early assessment · {feeLabel}
-              </Button>
-            </Link>
-          ) : null}
+          <Link href="/services">
+            <Button variant="outline" className="text-lg py-4 px-8">
+              Browse services
+            </Button>
+          </Link>
         </motion.div>
       </div>
     </section>

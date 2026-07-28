@@ -17,6 +17,8 @@ export type ServiceQuestionRow = {
   label: string;
   question_type: "single" | "yes_no" | "text" | string;
   options: string[];
+  depends_on_code?: string;
+  options_by_answer?: Record<string, string[]>;
   help_text?: string;
   is_required: boolean;
   display_order: number;
@@ -30,6 +32,8 @@ export type JourneyQuestion = {
   question_type?: string;
   help_text?: string;
   is_required?: boolean;
+  depends_on_code?: string;
+  options_by_answer?: Record<string, string[]>;
 };
 
 const questionCache = new Map<string, { rows: ServiceQuestionRow[]; fetchedAt: number }>();
@@ -42,6 +46,15 @@ export function mapQuestionToJourneyItem(row: ServiceQuestionRow): JourneyQuesti
       : row.question_type === "yes_no"
         ? ["Yes", "No"]
         : [];
+  const optionsByAnswer =
+    row.options_by_answer && typeof row.options_by_answer === "object" && !Array.isArray(row.options_by_answer)
+      ? Object.fromEntries(
+          Object.entries(row.options_by_answer).map(([key, value]) => [
+            String(key),
+            Array.isArray(value) ? value.map((item) => String(item)) : [],
+          ]),
+        )
+      : undefined;
   return {
     id: row.code,
     label: row.label,
@@ -49,7 +62,71 @@ export function mapQuestionToJourneyItem(row: ServiceQuestionRow): JourneyQuesti
     question_type: row.question_type,
     help_text: row.help_text || "",
     is_required: row.is_required,
+    depends_on_code: (row.depends_on_code || "").trim() || undefined,
+    options_by_answer: optionsByAnswer,
   };
+}
+
+/** Hide cascading questions until their parent has an answer. */
+export function isQuestionVisible(
+  question: Pick<JourneyQuestion, "depends_on_code">,
+  answers: Record<string, string>,
+): boolean {
+  const parent = String(question.depends_on_code || "").trim();
+  if (!parent) return true;
+  return Boolean(String(answers[parent] || "").trim());
+}
+
+/** Resolve flat options, cascading map, or yes/no defaults for the current answers. */
+export function resolveQuestionOptions(
+  question: Pick<JourneyQuestion, "options" | "question_type" | "depends_on_code" | "options_by_answer">,
+  answers: Record<string, string>,
+): string[] {
+  const map = question.options_by_answer;
+  const parentCode = String(question.depends_on_code || "").trim();
+  if (map && parentCode) {
+    const parentAnswer = String(answers[parentCode] || "").trim();
+    const fromMap = parentAnswer ? map[parentAnswer] : undefined;
+    if (Array.isArray(fromMap) && fromMap.length) {
+      return fromMap.map((item) => String(item));
+    }
+    // Soft match (case/spacing) for admin typos.
+    if (parentAnswer) {
+      const hit = Object.entries(map).find(
+        ([key]) => key.trim().toLowerCase() === parentAnswer.toLowerCase(),
+      );
+      if (hit && Array.isArray(hit[1]) && hit[1].length) {
+        return hit[1].map((item) => String(item));
+      }
+    }
+    return [];
+  }
+  if (Array.isArray(question.options) && question.options.length) {
+    return question.options.map((item) => String(item));
+  }
+  if (question.question_type === "yes_no") return ["Yes", "No"];
+  return [];
+}
+
+export function clearDependentAnswers(
+  questions: Array<Pick<JourneyQuestion, "id" | "depends_on_code">>,
+  changedCode: string,
+  answers: Record<string, string>,
+): Record<string, string> {
+  const next = { ...answers };
+  const queue = [changedCode];
+  const cleared = new Set<string>();
+  while (queue.length) {
+    const parent = queue.shift()!;
+    for (const question of questions) {
+      if (String(question.depends_on_code || "").trim() !== parent) continue;
+      if (cleared.has(question.id)) continue;
+      next[question.id] = "";
+      cleared.add(question.id);
+      queue.push(question.id);
+    }
+  }
+  return next;
 }
 
 export function requirementMatchesAnswers(
@@ -124,15 +201,12 @@ export async function resolveServiceChecklist(
       questions?: ServiceQuestionRow[];
       requirements?: DocumentRequirementRow[];
     };
-    const requirements = Array.isArray(data.requirements) ? data.requirements : [];
     const questions = Array.isArray(data.questions) ? data.questions : [];
-    return {
-      questions,
-      requirements,
-      checklist: requirements.map(mapRequirementToChecklistItem),
-    };
+    const requirements = Array.isArray(data.requirements) ? data.requirements : [];
+    const checklist = requirements.map(mapRequirementToChecklistItem);
+    return { questions, requirements, checklist };
   } catch (error) {
-    console.warn("[questionnaire] resolve-checklist failed for", key, error);
+    console.warn("[questionnaire] Failed to resolve checklist for", key, error);
     return { questions: [], requirements: [], checklist: [] };
   }
 }

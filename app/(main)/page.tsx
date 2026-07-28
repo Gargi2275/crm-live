@@ -1,7 +1,6 @@
 import HeroSection from "@/components/HeroSection";
 import WhatWeDo from "@/components/WhatWeDo";
 import { CategoryServicesSection } from "@/components/home/CategoryServicesSection";
-import { DocumentAuditSection } from "@/components/home/DocumentAuditSection";
 import { OriginCountriesSection } from "@/components/home/OriginCountriesSection";
 import { TrustFeaturesSection } from "@/components/home/TrustFeaturesSection";
 import { BlogSection } from "@/components/home/BlogSection";
@@ -9,6 +8,7 @@ import { HowItWorksSection } from "@/components/home/HowItWorksSection";
 import { FinalCtaSection } from "@/components/home/FinalCtaSection";
 import { TestimonialsSection } from "@/components/home/TestimonialsSection";
 import { PricingSection } from "@/components/home/PricingSection";
+import { HomeSectionReveal } from "@/components/home/HomeScrollMotion";
 import {
   getPublicBlogPosts,
   getPublicHomepageModules,
@@ -28,7 +28,6 @@ const DEFAULT_MODULE_KEYS = [
   "what_we_do",
   "category_services",
   "origin_countries",
-  "document_audit",
   "how_it_works",
   "pricing",
   "trust_features",
@@ -44,7 +43,7 @@ const fallbackTestimonials = [
       "FlyOCI made my parents' OCI renewal very easy. All documents were checked in advance and there were no surprises at VFS.",
     author: "Rajesh K., UK",
     service: "OCI Renewal",
-    detail: "Document Audit Completed",
+    detail: "Documents checked ahead",
     rating: 5,
   },
   {
@@ -65,12 +64,12 @@ const fallbackTestimonials = [
     rating: 5,
   },
   {
-    title: "Audit Caught Missing Documents Early",
+    title: "Caught Missing Documents Early",
     quote:
-      "The pre-check report highlighted a name mismatch and missing supporting documents before submission. That saved me a rejection and a lot of delay.",
+      "The document check highlighted a name mismatch and missing supporting papers before submission. That saved me a rejection and a lot of delay.",
     author: "Rishabh S., London",
-    service: "Document Audit",
-    detail: "Pass / Fix / Missing Report",
+    service: "New OCI Card",
+    detail: "Pre-submission document check",
     rating: 5,
   },
   {
@@ -129,11 +128,18 @@ async function loadOriginCountries() {
 async function loadHomepageModuleKeys() {
   try {
     const modules = await getPublicHomepageModules();
-    const keys = modules.map((m) => m.key).filter(Boolean);
+    const keys = modules
+      .map((m) => m.key)
+      .filter((key): key is string => Boolean(key) && key !== "document_audit");
     return keys.length ? keys : DEFAULT_MODULE_KEYS;
   } catch {
     return DEFAULT_MODULE_KEYS;
   }
+}
+
+function wrapSection(key: string, node: ReactNode): ReactNode {
+  if (key === "hero" || !node) return node;
+  return <HomeSectionReveal key={key}>{node}</HomeSectionReveal>;
 }
 
 function renderHomepageModule(
@@ -148,38 +154,36 @@ function renderHomepageModule(
     case "hero":
       return <HeroSection key={key} />;
     case "what_we_do":
-      return <WhatWeDo key={key} />;
+      return wrapSection(key, <WhatWeDo />);
     case "category_services":
-      return <CategoryServicesSection key={key} />;
+      return wrapSection(key, <CategoryServicesSection />);
     case "origin_countries":
-      return (
+      return wrapSection(
+        key,
         <OriginCountriesSection
-          key={key}
           title={ctx.originCountries.title}
           subtitle={ctx.originCountries.subtitle}
           countries={ctx.originCountries.countries}
-        />
+        />,
       );
-    case "document_audit":
-      return <DocumentAuditSection key={key} />;
     case "how_it_works":
-      return <HowItWorksSection key={key} />;
+      return wrapSection(key, <HowItWorksSection />);
     case "pricing":
-      return <PricingSection key={key} />;
+      return wrapSection(key, <PricingSection />);
     case "trust_features":
-      return <TrustFeaturesSection key={key} />;
+      return wrapSection(key, <TrustFeaturesSection />);
     case "testimonials":
-      return (
+      return wrapSection(
+        key,
         <TestimonialsSection
-          key={key}
           testimonials={ctx.testimonials}
           fallbackTestimonials={fallbackTestimonials}
-        />
+        />,
       );
     case "blog":
-      return <BlogSection key={key} posts={ctx.blogPosts} />;
+      return wrapSection(key, <BlogSection posts={ctx.blogPosts} />);
     case "final_cta":
-      return <FinalCtaSection key={key} />;
+      return wrapSection(key, <FinalCtaSection />);
     default:
       return null;
   }

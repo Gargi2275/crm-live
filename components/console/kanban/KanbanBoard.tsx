@@ -54,9 +54,11 @@ interface KanbanBoardProps {
 
 const STAGE_ALIAS: Record<string, PipelineCase["stage"]> = {
   NEW_LEAD: "NEW_LEAD",
-  PASSPORT_QUOTE_PENDING: "PASSPORT_QUOTE_PENDING",
-  AUDIT_PENDING: "AUDIT_PENDING",
-  AUDIT_COMPLETED: "AUDIT_COMPLETED",
+  PASSPORT_QUOTE_PENDING: "PAYMENT_PENDING",
+  ASSESSMENT_PENDING: "ASSESSMENT_PENDING",
+  ASSESSMENT_COMPLETED: "ASSESSMENT_COMPLETED",
+  AUDIT_PENDING: "ASSESSMENT_PENDING",
+  AUDIT_COMPLETED: "ASSESSMENT_COMPLETED",
   DOCUMENTS_REQUIRED: "DOCUMENTS_REQUIRED",
   PAYMENT_PENDING: "PAYMENT_PENDING",
   UPLOAD_PENDING: "DOCUMENT_UPLOAD_PENDING",
@@ -89,11 +91,9 @@ const getStageBadgeClass = (stage: PipelineCase["stage"]) => {
   switch (stage) {
     case "NEW_LEAD":
       return "bg-[#E0F2FE] text-[#0B69B7] border-[#B7D7F7]";
-    case "PASSPORT_QUOTE_PENDING":
-      return "bg-[#EEF2FF] text-[#4338CA] border-[#C7D2FE]";
-    case "AUDIT_PENDING":
+    case "ASSESSMENT_PENDING":
       return "bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]";
-    case "AUDIT_COMPLETED":
+    case "ASSESSMENT_COMPLETED":
       return "bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]";
     case "DOCUMENTS_REQUIRED":
       return "bg-[#FFEDD5] text-[#9A3412] border-[#FED7AA]";
@@ -117,12 +117,7 @@ const getStageBadgeClass = (stage: PipelineCase["stage"]) => {
 };
 
 const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
-  const backendStage = String(item.stage || "").trim();
-  if (backendStage) {
-    return toStage(backendStage);
-  }
-
-  const rawStage = String(item.stage || item.current_stage || "").trim().toUpperCase().replace(/\s+/g, "_");
+  const rawStage = String(item.stage || item.current_stage || item.kanban_stage || "").trim().toUpperCase().replace(/\s+/g, "_");
   const auditResult = String(item.audit_result || "").toLowerCase();
   const applicationStatus = String(item.application_status || "").toLowerCase();
   const fullPaymentStatus = String(item.full_payment_status || "").toLowerCase();
@@ -132,23 +127,18 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
   const isPassportCase = serviceHint.includes("passport");
   const hasDocuments = Number(item.document_count || 0) > 0;
 
-  if (rawStage === "CORRECTION_REQUESTED" || applicationStatus === "correction_requested" || applicationStatus === "reuploaded_pending_review") {
-    return "DOCUMENTS_REQUIRED";
-  }
-
-  if (auditResult === "red" || applicationStatus === "rejected") {
-    return "DOCUMENTS_REQUIRED";
-  }
-
+  // Passport legacy quote states → PAYMENT_PENDING (docs) / NEW_LEAD (no docs).
+  // Run before trusting backend stage so old PASSPORT_QUOTE_PENDING rows alias correctly.
   if (
     isPassportCase &&
     (
       rawStage === "INITIAL_REVIEW" ||
+      rawStage === "PASSPORT_QUOTE_PENDING" ||
       applicationStatus === "pending_quote" ||
       quoteStatus === "PENDING_QUOTE"
     )
   ) {
-    return "PASSPORT_QUOTE_PENDING";
+    return hasDocuments ? "PAYMENT_PENDING" : "NEW_LEAD";
   }
 
   if (
@@ -159,6 +149,28 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
     )
   ) {
     return "PAYMENT_PENDING";
+  }
+
+  // Assessment approved + unpaid full service → Payment Pending (never Assessment Completed).
+  if (auditResult === "green" && fullPaymentStatus !== "paid" && applicationStatus !== "paid") {
+    return "PAYMENT_PENDING";
+  }
+
+  const backendStage = String(item.stage || "").trim();
+  if (backendStage) {
+    const mapped = toStage(backendStage);
+    if (mapped === "ASSESSMENT_COMPLETED" && fullPaymentStatus !== "paid") {
+      return "PAYMENT_PENDING";
+    }
+    return mapped;
+  }
+
+  if (rawStage === "CORRECTION_REQUESTED" || applicationStatus === "correction_requested" || applicationStatus === "reuploaded_pending_review") {
+    return "DOCUMENTS_REQUIRED";
+  }
+
+  if (auditResult === "red" || applicationStatus === "rejected") {
+    return "DOCUMENTS_REQUIRED";
   }
 
   if (isEVisaCase) {
@@ -233,12 +245,12 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
     return "DOCUMENTS_REQUIRED";
   }
 
-  if (auditResult === "pending" || rawStage === "AUDIT_PENDING" || rawStage === "DOCS_RECEIVED") {
-    return "AUDIT_PENDING";
+  if (auditResult === "pending" || rawStage === "ASSESSMENT_PENDING" || rawStage === "DOCS_RECEIVED") {
+    return "ASSESSMENT_PENDING";
   }
 
-  if (rawStage === "AUDIT_COMPLETED") {
-    return auditResult === "green" ? "PAYMENT_PENDING" : "AUDIT_COMPLETED";
+  if (rawStage === "ASSESSMENT_COMPLETED") {
+    return auditResult === "green" ? "PAYMENT_PENDING" : "ASSESSMENT_COMPLETED";
   }
 
   return (STAGE_ALIAS[rawStage] || "NEW_LEAD") as PipelineCase["stage"];
@@ -247,9 +259,8 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
 const getNextAction = (stage: PipelineCase["stage"]): string => {
   const map: Partial<Record<PipelineCase["stage"], string>> = {
     NEW_LEAD: "Open lead and assign service",
-    PASSPORT_QUOTE_PENDING: "Send passport quote to customer",
-    AUDIT_PENDING: "Review uploaded documents",
-    AUDIT_COMPLETED: "Send payment link to customer",
+    ASSESSMENT_PENDING: "Review uploaded documents",
+    ASSESSMENT_COMPLETED: "Send payment link to customer",
     DOCUMENTS_REQUIRED: "Request missing documents from customer",
     PAYMENT_PENDING: "Follow up on payment confirmation",
     DOCUMENT_UPLOAD_PENDING: "Wait for customer document upload",
@@ -283,6 +294,7 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
       ? String(item.file_number).trim()
       : item.reference_number || `APP-${item.id}`;
   const stage = resolveStage(item);
+  const feePlan = String(item.fee_plan_code || "").trim().toLowerCase();
   return {
     applicationId: item.id,
     createdAt,
@@ -301,6 +313,7 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
     assignedTo: item.assigned_staff ? String(item.assigned_staff) : null,
     slaTimer: `${ageHours}h`,
     slaBreached: ageHours >= 24 * 7,
+    isExpress: feePlan === "express" || feePlan.startsWith("express") || Boolean(item.is_express),
   };
 };
 
@@ -672,7 +685,7 @@ export function KanbanBoard({
         case "documents_requested":
           return stage === "DOCUMENTS_REQUIRED" || stage === "DOCUMENT_UPLOAD_PENDING";
         case "live_stages":
-          return stage === "PASSPORT_QUOTE_PENDING" || stage === "DOCUMENTS_REQUIRED" || stage === "PAYMENT_PENDING" || stage === "REVIEW_PENDING";
+          return stage === "DOCUMENTS_REQUIRED" || stage === "PAYMENT_PENDING" || stage === "REVIEW_PENDING";
         default:
           return true;
       }

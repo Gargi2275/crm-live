@@ -80,12 +80,8 @@ export function buildHubApplyHref(opts: {
 }): string {
   const serviceType = (opts.serviceType || "").trim().toLowerCase();
 
-  // e-Visa has its own minimal checkout pipeline — not document-audit.
   if (serviceType.startsWith("evisa")) {
     return "/indian-e-visa";
-  }
-  if (serviceType === "apostille") {
-    return "/apostille-pre-check";
   }
   if (serviceType === "express") {
     return "/services";

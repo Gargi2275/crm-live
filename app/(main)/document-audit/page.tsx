@@ -1,9 +1,6 @@
-import { DocumentAuditContent } from "@/components/pages/DocumentAuditContent";
-import { buildPageMetadata } from "@/lib/seo";
-import { PAGE_SEO } from "@/lib/seo-pages";
+import { redirect } from "next/navigation";
 
-export const metadata = buildPageMetadata(PAGE_SEO.documentAudit);
-
+/** Legacy public Document Audit product URL — redirect away from the sellable landing. */
 export default function DocumentAuditPage() {
-  return <DocumentAuditContent />;
+  redirect("/services");
 }

@@ -174,8 +174,9 @@ export function Sidebar({
       label: "System",
       items: [
         { name: "Logs", href: "/admin/logs", icon: Logs },
-        ...(role === "admin" ? [{ name: "Documents", href: "/admin/docs", icon: FolderArchive }] : []),
+        { name: "Documents", href: "/admin/docs", icon: FolderArchive },
         { name: "Notifications", href: "/admin/notifications", icon: Bell },
+        { name: "Mail password", href: "/admin/email", icon: KeyRound },
         { name: "Settings", href: "/admin/settings", icon: Settings },
       ],
     },

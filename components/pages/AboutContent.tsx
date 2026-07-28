@@ -2,7 +2,6 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import {
-  BadgeCheck,
   Clock,
   Globe,
   Heart,
@@ -26,7 +25,7 @@ const values = [
 
 const stats = [
   { label: "Families supported", value: "500+" },
-  { label: "Avg. audit turnaround", value: "24–48 hrs" },
+  { label: "Avg. review turnaround", value: "24–48 hrs" },
   { label: "Regions served", value: "UK & US" },
   { label: "Services covered", value: "OCI · Visa · Passport" },
 ];
@@ -35,14 +34,13 @@ const services = [
   { title: "New OCI Card", desc: "First-time OCI from the UK or US", icon: IdCard, href: "/services/new-oci" },
   { title: "OCI Renewal", desc: "Transfer to a new passport", icon: ShieldCheck, href: "/services/oci-renewal" },
   { title: "Indian e-Visa", desc: "1-year and 5-year options", icon: Plane, href: "/services/indian-evisa" },
-  { title: "Passport Renewal", desc: "Quote-based NRI renewals", icon: Globe, href: "/services/passport-renewal" },
-  { title: "Document Audit", desc: "£15 pre-check with OCI credit", icon: BadgeCheck, href: "/document-audit" },
-  { title: "Apostille", desc: "Free pre-check before payment", icon: Stamp, href: "/apostille-services" },
+  { title: "Passport Renewal", desc: "Fixed-fee NRI renewals", icon: Globe, href: "/services/passport-renewal" },
+  { title: "Apostille", desc: "Catalog fees — same guided journey", icon: Stamp, href: "/apostille-services" },
 ];
 
 const differentiators = [
   "Document-first approach — we check papers before forms",
-  "Written audit reports with Pass / Fix / Missing status",
+  "Clear written feedback on what to fix or add",
   "WhatsApp and email updates at every milestone",
   "Independent service — not a government website",
 ];
@@ -121,7 +119,7 @@ export function AboutContent() {
               <ul className="mt-6 space-y-3">
                 {differentiators.map((point) => (
                   <li key={point} className="flex items-start gap-2.5 text-sm font-semibold text-[#334e68]">
-                    <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
                     {point}
                   </li>
                 ))}
@@ -139,10 +137,10 @@ export function AboutContent() {
                 UK and US residents of Indian origin applying for themselves, their parents, children, or spouses — including cases with name changes, multi-country documents, or first-time OCI.
               </p>
               <Link
-                href="/document-audit"
+                href="/services"
                 className="mt-6 inline-flex rounded-2xl bg-white px-5 py-3 text-sm font-bold text-[#041020] transition-transform hover:scale-[1.02]"
               >
-                Start with a Document Audit
+                Browse our services
               </Link>
             </motion.div>
           </motion.div>

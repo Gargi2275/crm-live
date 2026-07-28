@@ -8,6 +8,7 @@ import { FileText, MessageCircle, Menu, X, CircleUserRound } from "lucide-react"
 import { useEVisa } from "@/context/EVisaContext";
 import { useAuth } from "@/context/AuthContext";
 import Image from "next/image";
+import { SUPPORT_WHATSAPP_HREF } from "@/lib/contact";
 
 export function MinimalNavbar() {
   const router = useRouter();
@@ -83,7 +84,7 @@ export function MinimalNavbar() {
         <div className="hidden md:flex items-center gap-8">
           {isRegistrationPage ? (
             <a
-              href="https://wa.me/442078086162"
+              href={SUPPORT_WHATSAPP_HREF}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 font-body font-semibold text-[#486581] hover:text-primary transition-colors"
@@ -103,7 +104,7 @@ export function MinimalNavbar() {
                 Track Application
               </Link>
               <a
-                href="https://wa.me/442078086162"
+                href={SUPPORT_WHATSAPP_HREF}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-2 font-body font-semibold text-secondary hover:opacity-80 transition-opacity"
@@ -194,7 +195,7 @@ export function MinimalNavbar() {
 
               {isRegistrationPage ? (
                 <a
-                  href="https://wa.me/442078086162"
+                  href={SUPPORT_WHATSAPP_HREF}
                   className="flex items-center gap-2 font-body font-bold text-lg text-secondary"
                   onClick={() => setMobileMenuOpen(false)}
                 >
@@ -218,7 +219,7 @@ export function MinimalNavbar() {
                     Track Application
                   </Link>
                   <a
-                    href="https://wa.me/442078086162"
+                    href={SUPPORT_WHATSAPP_HREF}
                     className="flex items-center gap-2 font-body font-bold text-lg text-secondary mt-2"
                     onClick={() => setMobileMenuOpen(false)}
                   >

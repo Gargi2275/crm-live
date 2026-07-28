@@ -12,6 +12,7 @@ import {
   Stamp,
 } from "lucide-react";
 import Link from "next/link";
+import { ParallaxBlob } from "@/components/home/HomeScrollMotion";
 import { home } from "@/components/home/homeTheme";
 
 const container = {
@@ -20,11 +21,11 @@ const container = {
 };
 
 const cardItem = {
-  hidden: { opacity: 0, y: 28 },
+  hidden: { opacity: 0, y: 24 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const },
+    transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] as const },
   },
 };
 
@@ -149,6 +150,14 @@ export default function WhatWeDo() {
 
   return (
     <section className={`${home.section} bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)]`}>
+      <ParallaxBlob
+        speed={50}
+        className="pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.12)_0%,transparent_70%)]"
+      />
+      <ParallaxBlob
+        speed={34}
+        className="pointer-events-none absolute -right-20 bottom-0 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(15,126,232,0.08)_0%,transparent_70%)]"
+      />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(51,161,253,0.10),transparent_34%),radial-gradient(circle_at_85%_80%,rgba(15,126,232,0.06),transparent_30%)]" />
 
       <div className={`${home.container} xl:px-10`}>

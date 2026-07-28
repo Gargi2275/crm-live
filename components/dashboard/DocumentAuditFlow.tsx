@@ -388,12 +388,12 @@ const [selectedService, setSelectedService] = useState<string | null>(null);
 
     setCurrentStep("payment");
     setLocalError("");
-    setLocalMessage("Review your upload summary and proceed to the audit fee.");
+    setLocalMessage("Review your upload summary and proceed to the assessment fee.");
   };
 
   const handlePayment = async () => {
     if (!paymentAccepted) {
-      setLocalError("Please confirm the audit fee acknowledgement first.");
+      setLocalError("Please confirm the assessment fee acknowledgement first.");
       return;
     }
 
@@ -437,7 +437,7 @@ const SERVICES = [
   { id: "oci-renewal", name: "OCI Renewal / Transfer", description: "Passport change and renewal", price: "£78" },
   { id: "oci-update", name: "OCI Update (Gratis)", description: "Mandatory update handling", price: "£50" },
   { id: "indian-evisa", name: "Indian e-Visa", description: "Travel visa pre-check", price: "£88 (1-Year) · £150 (5-Year)" },
-  { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal for UK or US residents", price: "Price on request" },
+  { id: "passport-renewal", name: "Indian Passport Renewal", description: "Renewal for UK or US residents", price: "See fee at checkout" },
   { id: "undecided", name: "Not Sure — Help Me Decide", description: "We recommend the right route", price: "" },
 ];
 
@@ -735,13 +735,13 @@ const renderService = () => (
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Step 4 of 6</p>
-          <h3 className="mt-1 text-2xl font-heading font-bold text-primary">Audit Fee Payment</h3>
+          <h3 className="mt-1 text-2xl font-heading font-bold text-primary">Assessment Fee Payment</h3>
           <p className="mt-2 text-sm text-slate-600">
-            Our expert team will review your documents within 12–24 working hours. The £15 audit fee is fully deducted from your final fee when you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update). Audit credit does not apply to e-Visa or Passport Renewal.
+            Our expert team will review your documents within 12–24 working hours. The £15 assessment fee is fully deducted from your final fee when you proceed with any OCI service (New OCI, OCI Renewal, or OCI Update). Assessment credit does not apply to e-Visa or Passport Renewal.
           </p>
         </div>
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-          Audit fee: £15
+          Assessment fee: £15
         </div>
       </div>
 
@@ -764,11 +764,11 @@ const renderService = () => (
         </div>
 
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 text-amber-950">
-          <h4 className="font-semibold text-amber-900">Audit summary</h4>
+          <h4 className="font-semibold text-amber-900">Assessment summary</h4>
           <div className="mt-4 space-y-2 text-sm">
             <p className="flex items-center justify-between gap-3"><span>Required docs uploaded</span><strong>{requiredUploadedCount}/{requiredChecklistItems.length}</strong></p>
             <p className="flex items-center justify-between gap-3"><span>Review time</span><strong>12–24 working hours</strong></p>
-            <p className="flex items-center justify-between gap-3"><span>Audit fee</span><strong>£15</strong></p>
+            <p className="flex items-center justify-between gap-3"><span>Assessment fee</span><strong>£15</strong></p>
           </div>
 
           <label className="mt-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm text-amber-900">
@@ -778,7 +778,7 @@ const renderService = () => (
               onChange={(event) => setPaymentAccepted(event.target.checked)}
               className="mt-1 h-4 w-4 rounded border-amber-300 text-primary focus:ring-primary/20"
             />
-            <span>I understand this is a pre-check audit fee.</span>
+            <span>I understand this is a pre-check assessment fee.</span>
           </label>
         </div>
       </div>
@@ -988,7 +988,7 @@ const renderService = () => (
       <div className="rounded-3xl border border-[#d7e5fb] bg-white p-5 sm:p-6 shadow-[0_14px_36px_rgba(30,74,135,0.08)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Document Audit Flow</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Application Flow</p>
             <h2 className="mt-1 text-2xl sm:text-3xl font-heading font-bold text-primary">Inline audit journey</h2>
             <p className="mt-2 max-w-3xl text-sm sm:text-base text-slate-600">This flow stays inside the dashboard and keeps the existing card layout intact.</p>
           </div>

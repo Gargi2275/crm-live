@@ -6,6 +6,7 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { usePublicPricing } from "@/hooks/usePublicPricing";
 import { groupServicesByCategory } from "@/lib/service-categories";
+import { ParallaxBlob } from "@/components/home/HomeScrollMotion";
 import { home } from "@/components/home/homeTheme";
 
 const container = {
@@ -14,7 +15,7 @@ const container = {
 };
 
 const fadeUp = {
-  hidden: { opacity: 0, y: 22 },
+  hidden: { opacity: 0, y: 24 },
   visible: {
     opacity: 1,
     y: 0,
@@ -45,6 +46,10 @@ export function CategoryServicesSection() {
 
   return (
     <section className={home.sectionWhite}>
+      <ParallaxBlob
+        speed={40}
+        className="pointer-events-none absolute -left-16 top-8 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(51,161,253,0.08)_0%,transparent_70%)]"
+      />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_0%,rgba(51,161,253,0.06),transparent_40%),radial-gradient(circle_at_90%_100%,rgba(15,126,232,0.05),transparent_35%)]" />
 
       <div className={home.container}>

@@ -333,6 +333,14 @@ export function hrefForServiceType(serviceType: ServiceTypeCode): string {
   return `/dashboard/document-audit?start=1&service=${encodeURIComponent(key)}`;
 }
 
+/** Start the application journey with this service already selected. */
+export function startHrefForServiceType(serviceType: ServiceTypeCode): string {
+  const key = String(serviceType || "").toLowerCase().trim();
+  if (!key || key === "document_audit") return "/services";
+  if (key.startsWith("evisa") || key === "morocco_turkey_evisa") return "/indian-e-visa";
+  return `/dashboard/document-audit?start=1&service=${encodeURIComponent(key)}`;
+}
+
 export function ctaForServiceType(serviceType: ServiceTypeCode): string {
   if (serviceType === "document_audit") return "Start assessment";
   if (serviceType === "passport_renewal" || serviceType === "apostille") return "Start application";

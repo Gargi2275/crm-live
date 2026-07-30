@@ -1,14 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   createEasyFlyStaffRevenueEntry,
+  EASYFLY_PAYMENT_MODE_OPTIONS,
+  easyflyPaymentMethodBadgeClass,
+  easyflyPaymentMethodChipClass,
   listEasyFlyBookings,
   listEasyFlyStaffRevenueEntries,
   type EasyFlyBooking,
   type EasyFlyStaffRevenueEntry,
+  type PaymentMode,
 } from "@/lib/easyfly";
 import { TrendingUp, Download, AlertCircle, Plus, X } from "lucide-react";
 import toast from "react-hot-toast";
@@ -73,6 +78,9 @@ type StaffRevenueEntryForm = {
   supplier: string;
   amountPaid: string;
   amountReceived: string;
+  payAgreed: string;
+  paid: string;
+  govtFees: string;
   paymentMode: PaymentMode;
   notes: string;
 };
@@ -83,6 +91,9 @@ const emptyStaffRevenueEntry: StaffRevenueEntryForm = {
   supplier: "",
   amountPaid: "",
   amountReceived: "",
+  payAgreed: "",
+  paid: "",
+  govtFees: "",
   paymentMode: "cash",
   notes: "",
 };
@@ -91,7 +102,7 @@ const ADMIN_REVENUE_ROLES = new Set(["admin", "ops_manager"]);
 const STAFF_ENTRY_ROLES = new Set(["case_processor", "support_agent", "reviewer"]);
 
 const inputClass =
-  "w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]";
+  "mt-1 w-full rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none placeholder:text-[#B8C7D6] focus:border-[#33A1FD] focus:ring-1 focus:ring-[#33A1FD]/30";
 
 type RevenueEntryFieldsProps = {
   form: StaffRevenueEntryForm;
@@ -101,92 +112,147 @@ type RevenueEntryFieldsProps = {
 };
 
 function RevenueEntryFields({ form, setForm, receiptFile, setReceiptFile }: RevenueEntryFieldsProps) {
+  const payAgreed = Number(form.payAgreed || 0);
+  const paid = Number(form.paid || 0);
+  const pendingPayment = Math.max(0, payAgreed - paid);
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-[#627D98]">Booking Reference / SR No.</span>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-3">
+      <label className="block">
+        <span className="text-xs font-semibold text-[#486581]">Booking Reference / SR No.</span>
         <input
           type="text"
           value={form.bookingReference}
           onChange={(e) => setForm((c) => ({ ...c, bookingReference: e.target.value }))}
           className={inputClass}
+          placeholder="e.g. SR-1024"
           required
         />
       </label>
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-[#627D98]">Customer Name</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-[#486581]">Customer Name</span>
         <input
           type="text"
           value={form.customerName}
           onChange={(e) => setForm((c) => ({ ...c, customerName: e.target.value }))}
           className={inputClass}
+          placeholder="Full name"
           required
         />
       </label>
-      <label className="block space-y-1.5 md:col-span-2">
-        <span className="text-xs font-medium text-[#627D98]">Supplier</span>
+      <label className="block sm:col-span-2">
+        <span className="text-xs font-semibold text-[#486581]">Supplier</span>
         <input
           type="text"
           value={form.supplier}
           onChange={(e) => setForm((c) => ({ ...c, supplier: e.target.value }))}
           className={inputClass}
+          placeholder="Supplier name"
           required
         />
       </label>
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-[#627D98]">Ticket Amount / Amount Paid to Supplier (£)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-[#486581]">Pay Agreed (£)</span>
         <input
           type="number"
           min="0"
-          step="1"
-          value={form.amountPaid}
-          onChange={(e) => setForm((c) => ({ ...c, amountPaid: e.target.value }))}
+          step="0.01"
+          value={form.payAgreed}
+          onChange={(e) => setForm((c) => ({ ...c, payAgreed: e.target.value }))}
           className={inputClass}
+          placeholder="0.00"
           required
         />
       </label>
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-[#627D98]">Amount Received from Customer (£)</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-[#486581]">Paid (£)</span>
         <input
           type="number"
           min="0"
-          step="1"
-          value={form.amountReceived}
-          onChange={(e) => setForm((c) => ({ ...c, amountReceived: e.target.value }))}
+          step="0.01"
+          value={form.paid}
+          onChange={(e) =>
+            setForm((c) => ({
+              ...c,
+              paid: e.target.value,
+              amountReceived: e.target.value,
+            }))
+          }
           className={inputClass}
+          placeholder="0.00"
           required
         />
       </label>
-      <label className="block space-y-1.5 md:col-span-2">
-        <span className="text-xs font-medium text-[#627D98]">Mode of Payment</span>
-        <select
-          value={form.paymentMode}
-          onChange={(e) => setForm((c) => ({ ...c, paymentMode: e.target.value as PaymentMode }))}
-          className={inputClass}
-          required
-        >
-          <option value="cash">Cash</option>
-          <option value="card">Card</option>
-          <option value="bank_transfer">Bank Transfer</option>
-        </select>
-      </label>
-      <label className="block space-y-1.5 md:col-span-2">
-        <span className="text-xs font-medium text-[#627D98]">Receipt / Screenshot</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-[#486581]">Pending Payment (£)</span>
         <input
-          type="file"
-          accept=".pdf,image/*"
-          onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
-          className="w-full rounded-[12px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-sm text-[#102A43] outline-none"
+          type="text"
+          value={Number.isFinite(pendingPayment) ? pendingPayment.toFixed(2) : "0.00"}
+          readOnly
+          className={`${inputClass} bg-[#FFF8EB] text-[#8D5E12] font-semibold cursor-default`}
+          tabIndex={-1}
+          aria-live="polite"
         />
-        {receiptFile ? <span className="text-xs text-[#627D98]">{receiptFile.name}</span> : null}
       </label>
-      <label className="block space-y-1.5 md:col-span-2">
-        <span className="text-xs font-medium text-[#627D98]">Notes</span>
+      <label className="block">
+        <span className="text-xs font-semibold text-[#486581]">Any Govt Fees (£)</span>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.govtFees}
+          onChange={(e) => setForm((c) => ({ ...c, govtFees: e.target.value }))}
+          className={inputClass}
+          placeholder="0.00"
+        />
+      </label>
+      <div className="sm:col-span-2">
+        <span className="text-xs font-semibold text-[#486581]">Mode of Payment</span>
+        <div className="mt-1.5 grid grid-cols-3 gap-2" role="group" aria-label="Mode of payment">
+          {EASYFLY_PAYMENT_MODE_OPTIONS.map((option) => {
+            const selected = form.paymentMode === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setForm((c) => ({ ...c, paymentMode: option.value }))}
+                className={easyflyPaymentMethodChipClass(option.value, selected)}
+                aria-pressed={selected}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="sm:col-span-2">
+        <span className="text-xs font-semibold text-[#486581]">Receipt / Screenshot</span>
+        <label className="mt-1 flex cursor-pointer items-center justify-between gap-3 rounded-[10px] border border-dashed border-[#B8C7D6] bg-[#F8FAFC] px-3 py-2.5 hover:border-[#33A1FD] hover:bg-[#F0F7FF] transition-colors">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-[#102A43] truncate">
+              {receiptFile ? receiptFile.name : "Choose PDF or image"}
+            </p>
+            <p className="text-[11px] text-[#829AB1]">Optional · PDF, JPG, PNG</p>
+          </div>
+          <span className="shrink-0 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1 text-xs font-semibold text-[#486581]">
+            Browse
+          </span>
+          <input
+            type="file"
+            accept=".pdf,image/*"
+            onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
+            className="sr-only"
+          />
+        </label>
+      </div>
+      <label className="block sm:col-span-2">
+        <span className="text-xs font-semibold text-[#486581]">Notes</span>
         <textarea
           value={form.notes}
           onChange={(e) => setForm((c) => ({ ...c, notes: e.target.value }))}
           rows={3}
-          className={`${inputClass} resize-y`}
+          placeholder="Optional notes"
+          className={`${inputClass} resize-y min-h-[80px]`}
         />
       </label>
     </div>
@@ -220,8 +286,10 @@ function EasyFlyStaffRevenueEntryForm() {
         bookingReference: form.bookingReference.trim(),
         customerName: form.customerName.trim(),
         supplier: form.supplier.trim(),
-        amountPaid: form.amountPaid,
-        amountReceived: form.amountReceived,
+        amountPaid: "0",
+        amountReceived: form.paid || form.amountReceived || "0",
+        payAgreed: form.payAgreed || "0",
+        govtFees: form.govtFees || "0",
         paymentMode: form.paymentMode,
         notes: form.notes.trim(),
         receiptFile,
@@ -283,9 +351,14 @@ type UnifiedRevenueRow = {
   paid: string;
   received: string;
   extra: string;
+  payAgreed: string;
+  customerPaid: string;
+  pendingPayment: string;
+  govtFees: string;
   dueOrEarnings: string;
   dueOrEarningsClass: string;
   paymentMode: string;
+  paymentModeKey: string;
   primaryDate: string;
   dueDate: string | null;
   statusLabel: string;
@@ -348,6 +421,11 @@ function EasyFlyAdminRevenueView() {
   const [addForm, setAddForm] = useState<StaffRevenueEntryForm>(emptyStaffRevenueEntry);
   const [addReceipt, setAddReceipt] = useState<File | null>(null);
   const [addSubmitting, setAddSubmitting] = useState(false);
+  const [portalReady, setPortalReady] = useState(false);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -383,8 +461,10 @@ function EasyFlyAdminRevenueView() {
         bookingReference: addForm.bookingReference.trim(),
         customerName: addForm.customerName.trim(),
         supplier: addForm.supplier.trim(),
-        amountPaid: addForm.amountPaid,
-        amountReceived: addForm.amountReceived,
+        amountPaid: "0",
+        amountReceived: addForm.paid || addForm.amountReceived || "0",
+        payAgreed: addForm.payAgreed || "0",
+        govtFees: addForm.govtFees || "0",
         paymentMode: addForm.paymentMode,
         notes: addForm.notes.trim(),
         receiptFile: addReceipt,
@@ -446,6 +526,10 @@ function EasyFlyAdminRevenueView() {
         paid: formatInr(booking.amountPaid),
         received: formatInr(booking.amountReceived),
         extra: formatInr(booking.extraAmount || 0),
+        payAgreed: "—",
+        customerPaid: formatInr(booking.amountReceived),
+        pendingPayment: formatInr(booking.amountDue || 0),
+        govtFees: "—",
         dueOrEarnings: isPending ? formatInr(booking.amountDue) : formatInr(earnings),
         dueOrEarningsClass: isPending
           ? "text-[#B42318] font-semibold"
@@ -453,6 +537,7 @@ function EasyFlyAdminRevenueView() {
             ? "text-[#006F57] font-semibold"
             : "text-[#B42318] font-semibold",
         paymentMode: formatPaymentMode(booking.paymentMode),
+        paymentModeKey: booking.paymentMode || "card",
         primaryDate: bookedOn,
         dueDate: booking.paymentDueDate,
         statusLabel: isPending ? TIER_LABELS[tier].label : "Settled",
@@ -471,6 +556,9 @@ function EasyFlyAdminRevenueView() {
   const staffRows = useMemo((): UnifiedRevenueRow[] => {
     return rangeStaffEntries.map((entry) => {
         const earnings = Number(entry.amountReceived) - Number(entry.amountPaid);
+        const payAgreed = Number(entry.payAgreed || 0);
+        const customerPaid = Number(entry.amountReceived || 0);
+        const pending = Math.max(0, payAgreed - customerPaid);
         return {
           key: `staff-${entry.id}`,
           type: "staff",
@@ -481,9 +569,14 @@ function EasyFlyAdminRevenueView() {
           paid: formatGbp(entry.amountPaid),
           received: formatGbp(entry.amountReceived),
           extra: "—",
+          payAgreed: formatGbp(entry.payAgreed || 0),
+          customerPaid: formatGbp(entry.amountReceived),
+          pendingPayment: formatGbp(pending),
+          govtFees: formatGbp(entry.govtFees || 0),
           dueOrEarnings: formatGbp(earnings),
           dueOrEarningsClass: earnings >= 0 ? "text-[#006F57] font-semibold" : "text-[#B42318] font-semibold",
           paymentMode: formatPaymentMode(entry.paymentMode),
+          paymentModeKey: entry.paymentMode || "cash",
           primaryDate: entry.entryDate,
           dueDate: null,
           statusLabel: staffEntryStatusLabel(entry.status),
@@ -538,6 +631,10 @@ function EasyFlyAdminRevenueView() {
       "supplier",
       "paid",
       "received",
+      "payAgreed",
+      "customerPaid",
+      "pendingPayment",
+      "govtFees",
       "extra",
       "dueOrEarnings",
       "paymentMode",
@@ -555,6 +652,10 @@ function EasyFlyAdminRevenueView() {
       row.supplier,
       row.paid,
       row.received,
+      row.payAgreed,
+      row.customerPaid,
+      row.pendingPayment,
+      row.govtFees,
       row.extra,
       row.dueOrEarnings,
       row.paymentMode,
@@ -664,63 +765,78 @@ function EasyFlyAdminRevenueView() {
 
   return (
     <div className="space-y-4 font-body max-w-[1500px] mx-auto">
-      {addOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#102A43]/40">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-revenue-title"
-            className="w-full max-w-[720px] max-h-[90vh] overflow-y-auto rounded-[12px] bg-white border border-[#D9E1EA] shadow-xl"
-          >
-            <div className="flex items-center justify-between border-b border-[#E5EAF0] px-5 py-4">
-              <div>
-                <h2 id="add-revenue-title" className="text-lg font-heading font-semibold text-[#102A43]">
-                  Add Revenue Entry
-                </h2>
-                <p className="mt-0.5 text-xs text-[#627D98]">Admin entries are saved as approved for today</p>
-              </div>
+      {addOpen && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-[#102A43]/45 p-0 sm:p-4">
               <button
                 type="button"
+                className="absolute inset-0 cursor-default"
+                aria-label="Close dialog backdrop"
                 onClick={() => {
                   setAddOpen(false);
                   resetAddForm();
                 }}
-                className="rounded-[8px] p-1.5 text-[#627D98] hover:bg-[#F5F7FA] hover:text-[#102A43]"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleAddRevenue} className="p-5 space-y-4">
-              <RevenueEntryFields
-                form={addForm}
-                setForm={setAddForm}
-                receiptFile={addReceipt}
-                setReceiptFile={setAddReceipt}
               />
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAddOpen(false);
-                    resetAddForm();
-                  }}
-                  className="rounded-[10px] border border-[#D9E1EA] px-4 py-2.5 text-sm font-semibold text-[#486581] hover:bg-[#F5F7FA]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={addSubmitting}
-                  className="inline-flex items-center justify-center rounded-[10px] bg-[#009877] px-5 py-2.5 text-sm font-heading font-semibold text-white hover:bg-[#007B61] disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {addSubmitting ? "Saving…" : "Save Entry"}
-                </button>
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="add-revenue-title"
+                className="relative z-[1] flex w-full max-h-[92dvh] sm:max-h-[min(88dvh,720px)] max-w-[560px] flex-col rounded-t-[16px] sm:rounded-[14px] bg-white border border-[#D9E1EA] shadow-2xl overflow-hidden"
+              >
+                <div className="shrink-0 flex items-center justify-between gap-3 border-b border-[#E5EAF0] px-4 sm:px-5 py-3.5">
+                  <h2 id="add-revenue-title" className="text-base font-heading font-semibold text-[#102A43]">
+                    Add Revenue Entry
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddOpen(false);
+                      resetAddForm();
+                    }}
+                    className="shrink-0 rounded-[8px] p-1.5 text-[#627D98] hover:bg-[#F5F7FA] hover:text-[#102A43]"
+                    aria-label="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleAddRevenue} className="flex min-h-0 flex-1 flex-col">
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 space-y-4">
+                    <div className="rounded-[10px] border border-[#F9DBAF] bg-[#FFF8EB] px-3 py-2 text-xs text-[#8D5E12]">
+                      Admin entries are saved as approved for today.
+                    </div>
+                    <RevenueEntryFields
+                      form={addForm}
+                      setForm={setAddForm}
+                      receiptFile={addReceipt}
+                      setReceiptFile={setAddReceipt}
+                    />
+                  </div>
+                  <div className="shrink-0 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 border-t border-[#E5EAF0] bg-[#F8FAFC] px-4 sm:px-5 py-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddOpen(false);
+                        resetAddForm();
+                      }}
+                      className="rounded-[10px] border border-[#D9E1EA] bg-white px-4 py-2.5 text-sm font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={addSubmitting}
+                      className="inline-flex items-center justify-center rounded-[10px] bg-[#009877] px-5 py-2.5 text-sm font-heading font-semibold text-white hover:bg-[#007B61] disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {addSubmitting ? "Saving…" : "Save Entry"}
+                    </button>
+                  </div>
+                </form>
               </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
 
       {loading && (
         <div className="rounded-[12px] border border-dashed border-[#B8C7D9] bg-white px-4 py-8 text-sm text-[#627D98]">
@@ -756,7 +872,7 @@ function EasyFlyAdminRevenueView() {
               <div className="px-4 py-10 text-center text-sm text-[#627D98]">No records match the current filters.</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1300px] text-sm">
+                <table className="w-full min-w-[1500px] text-sm">
                   <thead className="bg-[#F5F7FA] text-[#486581]">
                     <tr>
                       <th className="px-3 py-2.5 text-left font-semibold">Type</th>
@@ -766,6 +882,10 @@ function EasyFlyAdminRevenueView() {
                       <th className="px-3 py-2.5 text-left font-semibold">Supplier</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Supplier Paid</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Client Received</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Pay Agreed</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Paid</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Pending</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Govt Fees</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Extra</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Pending / Earnings</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Payment</th>
@@ -797,9 +917,17 @@ function EasyFlyAdminRevenueView() {
                         <td className="px-3 py-2.5">{row.supplier}</td>
                         <td className="px-3 py-2.5">{row.paid}</td>
                         <td className="px-3 py-2.5">{row.received}</td>
+                        <td className="px-3 py-2.5">{row.payAgreed}</td>
+                        <td className="px-3 py-2.5">{row.customerPaid}</td>
+                        <td className="px-3 py-2.5 font-medium text-[#8D5E12]">{row.pendingPayment}</td>
+                        <td className="px-3 py-2.5">{row.govtFees}</td>
                         <td className="px-3 py-2.5">{row.extra}</td>
                         <td className={`px-3 py-2.5 ${row.dueOrEarningsClass}`}>{row.dueOrEarnings}</td>
-                        <td className="px-3 py-2.5">{row.paymentMode}</td>
+                        <td className="px-3 py-2.5">
+                          <span className={easyflyPaymentMethodBadgeClass(row.paymentModeKey)}>
+                            {row.paymentMode}
+                          </span>
+                        </td>
                         <td className="px-3 py-2.5">{formatDate(row.primaryDate)}</td>
                         <td className="px-3 py-2.5">
                           {row.dueDate ? (

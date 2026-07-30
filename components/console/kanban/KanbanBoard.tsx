@@ -49,6 +49,7 @@ interface KanbanBoardProps {
   serviceFilter?: string;
   staffFilter?: string;
   ageingFilter?: string;
+  searchQuery?: string;
   viewMode?: KanbanViewMode;
 }
 
@@ -384,6 +385,7 @@ export function KanbanBoard({
   serviceFilter = "All",
   staffFilter = "All",
   ageingFilter = "Any",
+  searchQuery = "",
   viewMode = "pipeline",
 }: KanbanBoardProps) {
   const { adminUser } = useAdminAuth();
@@ -643,6 +645,23 @@ export function KanbanBoard({
   };
 
   const filteredCases = cases.filter((item) => {
+    const q = searchQuery.trim().toLowerCase();
+    const bySearch =
+      !q ||
+      [
+        item.id,
+        item.customer,
+        item.assignedTo,
+        item.serviceType,
+        item.applicationStatus,
+        item.stage,
+        item.country,
+        item.nextAction,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
     const byService = serviceFilter === "All" || item.serviceType === serviceFilter;
     const byStaff = staffFilter === "All" || (staffFilter === "Unassigned" ? !item.assignedTo : item.assignedTo === staffFilter);
     const ageDays = ageInDays(item.createdAt);
@@ -691,7 +710,7 @@ export function KanbanBoard({
       }
     })();
 
-    return byService && byStaff && byAgeing && byQuickFilter;
+    return bySearch && byService && byStaff && byAgeing && byQuickFilter;
   });
 
   const renderColumns = (staffView: boolean) => (

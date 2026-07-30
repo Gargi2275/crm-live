@@ -58,11 +58,18 @@ export const SERVICE_CATEGORY_META: Record<string, ServiceCategoryMeta> = {
 
 export const SERVICE_CATEGORY_ORDER: PricingCategoryId[] = [
   "oci",
-  "evisa",
   "passport",
+  "evisa",
   "apostille",
   "other",
 ];
+
+/** Categories shown as a centered “Others” band in menus (not a 5th grid column). */
+export const SERVICE_OTHER_CATEGORY_IDS = new Set<PricingCategoryId>([
+  "other",
+  "pan_card",
+  "uncategorized",
+]);
 
 export type ServiceCategoryGroup = {
   id: PricingCategoryId;
@@ -100,6 +107,13 @@ function metaForCategory(id: PricingCategoryId, categoryName: string): ServiceCa
   };
 }
 
+function categorySortIndex(id: PricingCategoryId): number {
+  const idx = SERVICE_CATEGORY_ORDER.indexOf(id);
+  if (idx >= 0) return idx;
+  if (SERVICE_OTHER_CATEGORY_IDS.has(id)) return SERVICE_CATEGORY_ORDER.indexOf("other");
+  return 100 + id.localeCompare("a");
+}
+
 export function groupServicesByCategory(
   services: CatalogService[],
   options?: { exclude?: PricingCategoryId[] },
@@ -114,19 +128,28 @@ export function groupServicesByCategory(
     if (exclude.has(service.category)) continue;
     // Assessment lives under OCI for search/browse; keep it out of other categories.
     if (service.serviceType === "document_audit" && service.category !== "oci") continue;
-    const list = byCategory.get(service.category) || [];
+
+    // Fold pan_card / uncategorized into the centered Others group.
+    const categoryId: PricingCategoryId = SERVICE_OTHER_CATEGORY_IDS.has(service.category)
+      ? "other"
+      : service.category;
+
+    const list = byCategory.get(categoryId) || [];
     list.push(service);
-    byCategory.set(service.category, list);
-    const current = orderByCategory.get(service.category);
+    byCategory.set(categoryId, list);
+    const current = orderByCategory.get(categoryId);
     if (current === undefined || service.categoryDisplayOrder < current) {
-      orderByCategory.set(service.category, service.categoryDisplayOrder);
+      orderByCategory.set(categoryId, service.categoryDisplayOrder);
     }
-    if (!nameByCategory.has(service.category) && service.categoryName) {
-      nameByCategory.set(service.category, service.categoryName);
+    if (!nameByCategory.has(categoryId) && service.categoryName && categoryId !== "other") {
+      nameByCategory.set(categoryId, service.categoryName);
     }
   }
 
   const ids = Array.from(byCategory.keys()).sort((a, b) => {
+    const ai = categorySortIndex(a);
+    const bi = categorySortIndex(b);
+    if (ai !== bi) return ai - bi;
     const ao = orderByCategory.get(a) ?? 999;
     const bo = orderByCategory.get(b) ?? 999;
     if (ao !== bo) return ao - bo;
@@ -146,4 +169,10 @@ export function groupServicesByCategory(
       services: byCategory.get(id) || [],
     };
   });
+}
+
+export function splitPrimaryAndOtherServiceGroups(groups: ServiceCategoryGroup[]) {
+  const primaryGroups = groups.filter((group) => !SERVICE_OTHER_CATEGORY_IDS.has(group.id));
+  const otherGroups = groups.filter((group) => SERVICE_OTHER_CATEGORY_IDS.has(group.id));
+  return { primaryGroups, otherGroups };
 }

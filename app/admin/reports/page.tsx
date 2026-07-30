@@ -162,6 +162,117 @@ function isPendingPayment(app: AdminApplication) {
   return Number(app.amount_due_pence || 0) > 0 || PENDING_PAY_STATUSES.has(status);
 }
 
+function isAuditPaid(app: AdminApplication) {
+  const payment = String(app.audit_payment_status || "").toLowerCase();
+  return Boolean(app.audit_fee_paid) || payment === "paid" || payment === "succeeded";
+}
+
+/** Best available paid service amount in £. */
+function appPaidGbp(app: AdminApplication) {
+  if (!isPaidApplication(app)) return 0;
+  const pence = Number(
+    app.service_total_pence ||
+      app.fee_plan_fee_pence ||
+      app.quote_amount_pence ||
+      (typeof app.quoted_fee === "number" ? app.quoted_fee * 100 : 0) ||
+      0,
+  );
+  return Number.isFinite(pence) ? Math.max(0, pence) / 100 : 0;
+}
+
+function appAuditGbp(app: AdminApplication) {
+  if (!isAuditPaid(app)) return 0;
+  const pence = Number(app.audit_fee_pence || 0);
+  return Number.isFinite(pence) ? Math.max(0, pence) / 100 : 0;
+}
+
+function dayKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function monthKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function periodDayCount(period: ReportPeriod) {
+  if (period === "today") return 1;
+  if (period === "week") return 7;
+  if (period === "month") return 30;
+  return 30;
+}
+
+function buildDailyRevenueSeries(apps: AdminApplication[], period: ReportPeriod) {
+  const days = period === "all" ? 30 : periodDayCount(period);
+  const labels: string[] = [];
+  const map = new Map<string, number>();
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const d = daysAgo(i);
+    const key = dayKey(d);
+    labels.push(key.slice(5)); // MM-DD
+    map.set(key, 0);
+  }
+  for (const app of apps) {
+    const created = appCreatedAt(app);
+    if (!created || !isPaidApplication(app)) continue;
+    const key = dayKey(created);
+    if (!map.has(key)) continue;
+    map.set(key, (map.get(key) || 0) + appPaidGbp(app));
+  }
+  const rows = Array.from(map.entries()).map(([key, actual], index) => {
+    const window = labels.slice(Math.max(0, index - 2), index + 1);
+    const keys = Array.from(map.keys()).slice(Math.max(0, index - 2), index + 1);
+    const expected =
+      keys.length > 0 ? keys.reduce((sum, k) => sum + (map.get(k) || 0), 0) / keys.length : 0;
+    return {
+      day: key.slice(5),
+      actual: Number(actual.toFixed(2)),
+      expected: Number(expected.toFixed(2)),
+      _window: window,
+    };
+  });
+  return rows;
+}
+
+function buildMonthlyRevenueSeries(apps: AdminApplication[]) {
+  const map = new Map<string, number>();
+  for (let i = 5; i >= 0; i -= 1) {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - i);
+    map.set(monthKey(d), 0);
+  }
+  for (const app of apps) {
+    const created = appCreatedAt(app);
+    if (!created || !isPaidApplication(app)) continue;
+    const key = monthKey(created);
+    if (!map.has(key)) continue;
+    map.set(key, (map.get(key) || 0) + appPaidGbp(app));
+  }
+  return Array.from(map.entries()).map(([month, revenue]) => ({
+    month: month.slice(5),
+    revenue: Number(revenue.toFixed(2)),
+    fullMonth: month,
+  }));
+}
+
+function buildServiceRevenueSeries(apps: AdminApplication[]) {
+  const map = new Map<string, number>();
+  for (const app of apps) {
+    if (!isPaidApplication(app)) continue;
+    const name = app.service_name || "Other";
+    map.set(name, (map.get(name) || 0) + appPaidGbp(app));
+  }
+  return Array.from(map.entries())
+    .map(([name, value]) => ({
+      name: name.length > 22 ? `${name.slice(0, 20)}…` : name,
+      fullName: name,
+      value: Number(value.toFixed(2)),
+    }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+}
+
 function csvEscape(value: string | number | boolean | null | undefined) {
   const text = String(value ?? "");
   if (text.includes(",") || text.includes("\n") || text.includes('"')) {
@@ -183,13 +294,42 @@ function downloadCsv(filename: string, headers: string[], rows: Array<Array<stri
   URL.revokeObjectURL(url);
 }
 
-function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function MetricCard({
+  label,
+  value,
+  hint,
+  active = false,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const interactive = Boolean(onClick);
+  const className = `rounded-[12px] border bg-white p-4 text-left shadow-sm transition ${
+    active
+      ? "border-[#009877] ring-1 ring-[#009877]/30 bg-[#009877]/5"
+      : "border-[#D9E1EA]"
+  } ${interactive ? "cursor-pointer hover:border-[#009877]/40 hover:bg-[#F8FAFC]" : ""}`;
+
+  if (!interactive) {
+    return (
+      <div className={className}>
+        <p className="text-xs font-medium uppercase tracking-wide text-[#627D98]">{label}</p>
+        <p className="mt-2 text-xl font-heading font-semibold text-[#102A43]">{value}</p>
+        {hint ? <p className="mt-1 text-[11px] text-[#829AB1]">{hint}</p> : null}
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-4 shadow-sm">
+    <button type="button" onClick={onClick} aria-pressed={active} className={className}>
       <p className="text-xs font-medium uppercase tracking-wide text-[#627D98]">{label}</p>
       <p className="mt-2 text-xl font-heading font-semibold text-[#102A43]">{value}</p>
-      {hint ? <p className="mt-1 text-[11px] text-[#829AB1]">{hint}</p> : null}
-    </div>
+      <p className="mt-1 text-[11px] text-[#829AB1]">{active ? "Filtering table" : hint || "Click to filter"}</p>
+    </button>
   );
 }
 
@@ -232,6 +372,7 @@ export default function ReportsPage() {
   const [period, setPeriod] = useState<ReportPeriod>("month");
   const [serviceFilter, setServiceFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [kpiFilter, setKpiFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
@@ -241,6 +382,7 @@ export default function ReportsPage() {
   const setReportType = useCallback(
     (next: ReportType) => {
       setReportTypeState(next);
+      setKpiFilter(null);
       const params = new URLSearchParams(searchParams.toString());
       params.set("type", next);
       router.replace(`/admin/reports?${params.toString()}`, { scroll: false });
@@ -248,11 +390,14 @@ export default function ReportsPage() {
     [router, searchParams],
   );
 
+  const toggleKpi = useCallback((key: string) => {
+    setKpiFilter((current) => (current === key ? null : key));
+  }, []);
+
   useEffect(() => {
     const next = searchParams.get("type") as ReportType | null;
-    if (next && REPORT_OPTIONS.some((o) => o.id === next)) {
-      setReportTypeState(next);
-    }
+    if (!next || !REPORT_OPTIONS.some((o) => o.id === next)) return;
+    setReportTypeState(next);
   }, [searchParams]);
 
   const loadReports = useCallback(async () => {
@@ -315,20 +460,92 @@ export default function ReportsPage() {
     });
   }, [applications, period, serviceFilter, statusFilter]);
 
-  const kpiSnapshot = dashboardData?.kpi_snapshot;
-  const healthMetrics = dashboardData?.health_metrics;
-  const dailyRevenue = dashboardData?.daily_revenue ?? [];
-  const monthlyRevenue = dashboardData?.monthly_revenue ?? [];
-  const serviceRevenueBreakdown = dashboardData?.service_revenue_breakdown ?? [];
   const pipelineOverview = dashboardData?.pipeline_overview ?? [];
   const staffMembers = dashboardData?.staff_members ?? [];
 
+  const paidApps = useMemo(() => filteredApps.filter(isPaidApplication), [filteredApps]);
+  const pendingApps = useMemo(() => filteredApps.filter(isPendingPayment), [filteredApps]);
   const leadsInPeriod = filteredApps.length;
-  const convertedInPeriod = filteredApps.filter(isPaidApplication).length;
+  const convertedInPeriod = paidApps.length;
   const conversionRate =
     leadsInPeriod > 0 ? `${((convertedInPeriod / leadsInPeriod) * 100).toFixed(1)}%` : "0%";
-  const pendingApps = filteredApps.filter(isPendingPayment);
   const pendingAmount = pendingApps.reduce((sum, app) => sum + Number(app.amount_due_pence || 0), 0) / 100;
+  const revenueInPeriod = paidApps.reduce((sum, app) => sum + appPaidGbp(app), 0);
+  const auditRevenueInPeriod = filteredApps.reduce((sum, app) => sum + appAuditGbp(app), 0);
+  const avgTicket = convertedInPeriod > 0 ? revenueInPeriod / convertedInPeriod : 0;
+  const todayLeads = filteredApps.filter((app) => inPeriod(appCreatedAt(app), "today")).length;
+  const auditPassCount = filteredApps.filter((app) => String(app.audit_result || "").toLowerCase() === "green").length;
+  const auditFailCount = filteredApps.filter((app) => String(app.audit_result || "").toLowerCase() === "red").length;
+  const auditRequestedCount = filteredApps.filter((app) => {
+    const result = String(app.audit_result || "").toLowerCase();
+    return Boolean(result) || isAuditPaid(app);
+  }).length;
+  const auditSuccessRatio =
+    auditPassCount + auditFailCount > 0
+      ? `${((auditPassCount / (auditPassCount + auditFailCount)) * 100).toFixed(1)}%`
+      : "0%";
+
+  const importantKpis = useMemo(
+    () => [
+      {
+        key: "revenue",
+        label: "Revenue",
+        value: formatInr(revenueInPeriod),
+        hint: "Paid cases in filters",
+        report: "revenue" as ReportType,
+        kpi: "avg_ticket",
+      },
+      {
+        key: "leads",
+        label: "Leads",
+        value: String(leadsInPeriod),
+        hint: "Applications in period",
+        report: "leads" as ReportType,
+        kpi: "leads",
+      },
+      {
+        key: "conversion",
+        label: "Conversion",
+        value: conversionRate,
+        hint: "Paid / leads",
+        report: "leads" as ReportType,
+        kpi: "converted",
+      },
+      {
+        key: "pending",
+        label: "Pending pay",
+        value: formatInr(pendingAmount),
+        hint: `${pendingApps.length} cases`,
+        report: "pending_payments" as ReportType,
+        kpi: "amount",
+      },
+      {
+        key: "audit_rev",
+        label: "Assessment £",
+        value: formatInr(auditRevenueInPeriod),
+        hint: "Assessment fees paid",
+        report: "audit" as ReportType,
+        kpi: "revenue",
+      },
+      {
+        key: "avg_ticket",
+        label: "Avg ticket",
+        value: formatInr(avgTicket),
+        hint: "Per paid case",
+        report: "revenue" as ReportType,
+        kpi: "avg_ticket",
+      },
+    ],
+    [
+      auditRevenueInPeriod,
+      avgTicket,
+      conversionRate,
+      leadsInPeriod,
+      pendingAmount,
+      pendingApps.length,
+      revenueInPeriod,
+    ],
+  );
 
   const serviceMixFromApps = useMemo(() => {
     const map = new Map<string, { name: string; cases: number; paid: number }>();
@@ -379,25 +596,6 @@ export default function ReportsPage() {
     });
   }, [filteredApps]);
 
-  const auditOutcomeBreakdown = useMemo(() => {
-    const counts = { green: 0, amber: 0, red: 0, pending: 0, none: 0 };
-    for (const app of filteredApps) {
-      const result = String(app.audit_result || "").toLowerCase();
-      if (result === "green") counts.green += 1;
-      else if (result === "amber") counts.amber += 1;
-      else if (result === "red") counts.red += 1;
-      else if (result === "pending") counts.pending += 1;
-      else counts.none += 1;
-    }
-    return [
-      { name: "Pass (green)", value: counts.green, fill: "#009877" },
-      { name: "Fix (amber)", value: counts.amber, fill: "#B87333" },
-      { name: "Fail (red)", value: counts.red, fill: "#B42318" },
-      { name: "Pending", value: counts.pending, fill: "#33A1FD" },
-      { name: "No audit", value: counts.none, fill: "#D9E1EA" },
-    ].filter((row) => row.value > 0);
-  }, [filteredApps]);
-
   const staffAuditChart = useMemo(
     () =>
       staffMembers
@@ -413,9 +611,103 @@ export default function ReportsPage() {
     [staffMembers],
   );
 
-  const statusBreakdown = useMemo(() => {
+  const kpiScopedApps = useMemo(() => {
+    if (!kpiFilter) return filteredApps;
+    if (reportType === "revenue") {
+      if (kpiFilter === "revenue_today") {
+        return filteredApps.filter((app) => inPeriod(appCreatedAt(app), "today") && isPaidApplication(app));
+      }
+      if (kpiFilter === "audit") {
+        return filteredApps.filter((app) => isAuditPaid(app) || Boolean(app.audit_result));
+      }
+      if (kpiFilter === "avg_ticket") return filteredApps.filter(isPaidApplication);
+      if (kpiFilter === "pending") return filteredApps.filter(isPendingPayment);
+    }
+    if (reportType === "leads") {
+      if (kpiFilter === "converted") return filteredApps.filter(isPaidApplication);
+      if (kpiFilter === "today") return filteredApps.filter((app) => inPeriod(appCreatedAt(app), "today"));
+      if (kpiFilter === "conversion") return filteredApps.filter(isPaidApplication);
+    }
+    if (reportType === "pending_payments") {
+      if (kpiFilter === "amount") return pendingApps.filter((app) => Number(app.amount_due_pence || 0) > 0);
+      if (kpiFilter === "cases" || kpiFilter === "snapshot") return pendingApps;
+    }
+    if (reportType === "audit") {
+      if (kpiFilter === "success") {
+        return filteredApps.filter((app) => String(app.audit_result || "").toLowerCase() === "green");
+      }
+      if (kpiFilter === "failed") {
+        return filteredApps.filter((app) => String(app.audit_result || "").toLowerCase() === "red");
+      }
+      if (kpiFilter === "revenue") {
+        return filteredApps.filter((app) => isAuditPaid(app));
+      }
+      if (kpiFilter === "requested") return auditApps.length ? auditApps : filteredApps;
+    }
+    return filteredApps;
+  }, [auditApps, filteredApps, kpiFilter, pendingApps, reportType]);
+
+  const kpiScopedPendingApps = useMemo(() => {
+    if (reportType !== "pending_payments") return pendingApps;
+    if (!kpiFilter || kpiFilter === "cases" || kpiFilter === "snapshot") return pendingApps;
+    if (kpiFilter === "amount") return pendingApps.filter((app) => Number(app.amount_due_pence || 0) > 0);
+    return pendingApps;
+  }, [kpiFilter, pendingApps, reportType]);
+
+  const kpiScopedStaffRows = useMemo(() => {
+    if (reportType !== "staff_performance" || !kpiFilter || kpiFilter === "staff") return staffRows;
+    if (kpiFilter === "assigned") return staffRows.filter((row) => row.assigned > 0);
+    if (kpiFilter === "completed") return staffRows.filter((row) => row.completed > 0);
+    if (kpiFilter === "accuracy") {
+      const avg =
+        staffRows.length > 0
+          ? staffRows.reduce((sum, row) => sum + Number(row.accuracy), 0) / staffRows.length
+          : 0;
+      return staffRows.filter((row) => Number(row.accuracy) >= avg);
+    }
+    return staffRows;
+  }, [kpiFilter, reportType, staffRows]);
+
+  const kpiScopedPipeline = useMemo(() => {
+    if (reportType !== "pipeline_sla" || !kpiFilter || kpiFilter === "stages") return pipelineOverview;
+    if (kpiFilter === "breached") return pipelineOverview.filter((row) => Number(row.breached || 0) > 0);
+    if (kpiFilter === "open") return pipelineOverview.filter((row) => Number(row.openCases || 0) > 0);
+    return pipelineOverview;
+  }, [kpiFilter, pipelineOverview, reportType]);
+
+  const kpiScopedServiceMix = useMemo(() => {
+    if (reportType !== "service_mix" || !kpiFilter || kpiFilter === "services") return serviceMixFromApps;
+    if (kpiFilter === "paid") return serviceMixFromApps.filter((row) => row.paid > 0);
+    if (kpiFilter === "cases") return serviceMixFromApps.filter((row) => row.cases > 0);
+    return serviceMixFromApps;
+  }, [kpiFilter, reportType, serviceMixFromApps]);
+
+  const chartApps = useMemo(() => {
+    if (reportType === "pending_payments") return kpiScopedPendingApps;
+    if (reportType === "audit") return kpiFilter ? kpiScopedApps : auditApps.length ? auditApps : filteredApps;
+    if (reportType === "leads") return kpiFilter && kpiFilter !== "leads" ? kpiScopedApps : filteredApps;
+    if (reportType === "revenue") return kpiScopedApps;
+    return filteredApps;
+  }, [
+    auditApps,
+    filteredApps,
+    kpiFilter,
+    kpiScopedApps,
+    kpiScopedPendingApps,
+    reportType,
+  ]);
+
+  const filteredDailyRevenue = useMemo(
+    () => buildDailyRevenueSeries(chartApps, period),
+    [chartApps, period],
+  );
+  const filteredMonthlyRevenue = useMemo(() => buildMonthlyRevenueSeries(chartApps), [chartApps]);
+  const filteredServiceRevenue = useMemo(() => buildServiceRevenueSeries(chartApps), [chartApps]);
+
+  const kpiStatusBreakdown = useMemo(() => {
+    const source = chartApps;
     const map = new Map<string, number>();
-    for (const app of filteredApps) {
+    for (const app of source) {
       const status = String(app.application_status || "unknown").replace(/_/g, " ");
       map.set(status, (map.get(status) || 0) + 1);
     }
@@ -423,38 +715,52 @@ export default function ReportsPage() {
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 8);
-  }, [filteredApps]);
+  }, [chartApps]);
 
-  const pipelineChartData = useMemo(
-    () =>
-      pipelineOverview.map((row) => ({
-        stage: row.stage.length > 14 ? `${row.stage.slice(0, 12)}…` : row.stage,
-        fullStage: row.stage,
-        open: Number(row.openCases || 0),
-        breached: Number(row.breached || 0),
-      })),
-    [pipelineOverview],
-  );
+  const auditOutcomeBreakdown = useMemo(() => {
+    const source = reportType === "audit" ? chartApps : filteredApps;
+    const counts = { green: 0, amber: 0, red: 0, pending: 0, none: 0 };
+    for (const app of source) {
+      const result = String(app.audit_result || "").toLowerCase();
+      if (result === "green") counts.green += 1;
+      else if (result === "amber") counts.amber += 1;
+      else if (result === "red") counts.red += 1;
+      else if (result === "pending") counts.pending += 1;
+      else counts.none += 1;
+    }
+    return [
+      { name: "Pass (green)", value: counts.green, fill: "#009877" },
+      { name: "Fix (amber)", value: counts.amber, fill: "#B87333" },
+      { name: "Fail (red)", value: counts.red, fill: "#B42318" },
+      { name: "Pending", value: counts.pending, fill: "#33A1FD" },
+      { name: "No audit", value: counts.none, fill: "#D9E1EA" },
+    ].filter((row) => row.value > 0);
+  }, [chartApps, filteredApps, reportType]);
+
+  useEffect(() => {
+    setKpiFilter(null);
+  }, [period, serviceFilter, statusFilter]);
 
   const clearFilters = useCallback(() => {
     setPeriod("month");
     setServiceFilter("all");
     setStatusFilter("all");
+    setKpiFilter(null);
     setReportType("revenue");
-  }, []);
+  }, [setReportType]);
 
   const activeFilterCount =
     (period !== "month" ? 1 : 0) +
     (serviceFilter !== "all" ? 1 : 0) +
     (statusFilter !== "all" ? 1 : 0) +
-    (reportType !== "revenue" ? 1 : 0);
+    (kpiFilter ? 1 : 0);
 
   const handleExport = () => {
     if (reportType === "pending_payments") {
       downloadCsv(
         `pending-payments-${period}.csv`,
         ["reference", "customer", "service", "status", "amount_due", "created_at"],
-        pendingApps.map((app) => [
+        kpiScopedPendingApps.map((app) => [
           app.reference_number,
           app.customer_name || "",
           app.service_name || "",
@@ -512,7 +818,7 @@ export default function ReportsPage() {
     downloadCsv(
       `revenue-summary-${period}.csv`,
       ["day", "expected", "actual"],
-      dailyRevenue.map((row) => [row.day, Number(row.expected || 0), Number(row.actual || 0)]),
+      filteredDailyRevenue.map((row) => [row.day, Number(row.expected || 0), Number(row.actual || 0)]),
     );
     toast.success("Revenue CSV exported.");
   };
@@ -525,8 +831,8 @@ export default function ReportsPage() {
           icon: BarChart3,
           activeFilterCount,
           onClearFilters: clearFilters,
-          syncKey: `${reportType}|${period}|${serviceFilter}|${statusFilter}|${loading}|${filteredApps.length}`,
-          meta: loading ? "Loading…" : `${filteredApps.length} apps in period`,
+          syncKey: `${reportType}|${period}|${serviceFilter}|${statusFilter}|${kpiFilter}|${loading}|${filteredApps.length}`,
+          meta: loading ? "Loading…" : `${filteredApps.length} apps in period${kpiFilter ? " · KPI filter on" : ""}`,
           actions: (
             <button
               type="button"
@@ -615,20 +921,59 @@ export default function ReportsPage() {
 
   const activeReport = REPORT_OPTIONS.find((item) => item.id === reportType)!;
 
-  const statusChartData = statusBreakdown.map((row) => ({
+  const statusChartData = kpiStatusBreakdown.map((row) => ({
     ...row,
     name: row.name.length > 16 ? `${row.name.slice(0, 14)}…` : row.name,
     fullName: row.name,
   }));
 
-  const servicePieData = serviceRevenueBreakdown.map((row) => ({
-    ...row,
-    name: row.name.length > 22 ? `${row.name.slice(0, 20)}…` : row.name,
-    fullName: row.name,
+  const pipelineChartScoped = kpiScopedPipeline.map((row) => ({
+    stage: row.stage.length > 14 ? `${row.stage.slice(0, 12)}…` : row.stage,
+    fullStage: row.stage,
+    open: Number(row.openCases || 0),
+    breached: Number(row.breached || 0),
   }));
+
+  const servicePieData = filteredServiceRevenue;
+
+  const activateImportantKpi = (item: (typeof importantKpis)[number]) => {
+    setReportTypeState(item.report);
+    setKpiFilter(item.kpi);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("type", item.report);
+    router.replace(`/admin/reports?${params.toString()}`, { scroll: false });
+  };
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-4 font-body">
+      <section className="rounded-[12px] border border-[#D9E1EA] bg-white p-3 sm:p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-heading font-semibold text-[#102A43]">Important KPIs</h2>
+            <p className="text-[11px] text-[#829AB1]">
+              Live from current filters · click to open module &amp; filter charts
+              {kpiFilter ? " · KPI filter on" : ""}
+            </p>
+          </div>
+          {loading ? <span className="text-xs text-[#627D98]">Loading…</span> : null}
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {importantKpis.map((item) => {
+            const active = reportType === item.report && kpiFilter === item.kpi;
+            return (
+              <MetricCard
+                key={item.key}
+                label={item.label}
+                value={item.value}
+                hint={item.hint}
+                active={active}
+                onClick={() => activateImportantKpi(item)}
+              />
+            );
+          })}
+        </div>
+      </section>
+
       <section className="rounded-[12px] border border-[#D9E1EA] bg-white p-2">
         <div className="flex flex-wrap gap-1.5">
           {REPORT_OPTIONS.map((option) => {
@@ -667,24 +1012,39 @@ export default function ReportsPage() {
         {reportType === "revenue" ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <MetricCard label="Revenue today" value={formatInr(Number(kpiSnapshot?.revenue_today || 0))} />
               <MetricCard
-                label="Assessment revenue today"
-                value={formatInr(Number(kpiSnapshot?.audit_revenue_today || 0))}
+                label="Revenue (filtered)"
+                value={formatInr(revenueInPeriod)}
+                hint={`${convertedInPeriod} paid cases`}
+                active={kpiFilter === "avg_ticket"}
+                onClick={() => toggleKpi("avg_ticket")}
               />
-              <MetricCard label="Avg ticket" value={formatInr(Number(kpiSnapshot?.avg_ticket_size || 0))} />
+              <MetricCard
+                label="Assessment revenue"
+                value={formatInr(auditRevenueInPeriod)}
+                active={kpiFilter === "audit"}
+                onClick={() => toggleKpi("audit")}
+              />
+              <MetricCard
+                label="Avg ticket"
+                value={formatInr(avgTicket)}
+                active={kpiFilter === "avg_ticket"}
+                onClick={() => toggleKpi("avg_ticket")}
+              />
               <MetricCard
                 label="Pending payments"
-                value={formatInr(Number(kpiSnapshot?.pending_payments || 0))}
-                hint="From live snapshot"
+                value={formatInr(pendingAmount)}
+                hint={`${pendingApps.length} cases`}
+                active={kpiFilter === "pending"}
+                onClick={() => toggleKpi("pending")}
               />
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <ChartBox title="Daily revenue trend" height={300} className="lg:col-span-2">
+              <ChartBox title="Daily revenue trend (filtered)" height={300} className="lg:col-span-2">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={dailyRevenue} margin={{ ...CHART_MARGIN, top: 28 }}>
+                  <LineChart data={filteredDailyRevenue} margin={{ ...CHART_MARGIN, top: 28 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
-                    <XAxis dataKey="day" tick={TICK_STYLE} interval={0} />
+                    <XAxis dataKey="day" tick={TICK_STYLE} interval="preserveStartEnd" minTickGap={18} />
                     <YAxis tick={TICK_STYLE} width={48} />
                     <Tooltip contentStyle={TOOLTIP_STYLE} />
                     <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: 12 }} />
@@ -693,9 +1053,9 @@ export default function ReportsPage() {
                   </LineChart>
                 </ResponsiveContainer>
               </ChartBox>
-              <ChartBox title="Monthly revenue" height={300}>
+              <ChartBox title="Monthly revenue (filtered)" height={300}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyRevenue} margin={CHART_MARGIN} barCategoryGap="28%">
+                  <BarChart data={filteredMonthlyRevenue} margin={CHART_MARGIN} barCategoryGap="28%">
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
                     <XAxis dataKey="month" tick={TICK_STYLE} interval={0} />
                     <YAxis tick={TICK_STYLE} width={48} />
@@ -706,9 +1066,9 @@ export default function ReportsPage() {
               </ChartBox>
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <ChartBox title="Service revenue mix" height={300}>
+              <ChartBox title="Service revenue mix (filtered)" height={300}>
                 {servicePieData.length === 0 ? (
-                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No service revenue yet.</p>
+                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No paid service revenue in filters.</p>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
@@ -743,7 +1103,7 @@ export default function ReportsPage() {
                     <YAxis type="category" dataKey="name" width={118} tick={TICK_STYLE} interval={0} />
                     <Tooltip
                       contentStyle={TOOLTIP_STYLE}
-                      formatter={(value: number) => [value, "Cases"]}
+                      formatter={(value) => [Number(value || 0), "Cases"]}
                       labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullName || "")}
                     />
                     <Bar dataKey="value" fill="#33A1FD" radius={[0, 6, 6, 0]} name="Cases" maxBarSize={22} />
@@ -751,16 +1111,63 @@ export default function ReportsPage() {
                 </ResponsiveContainer>
               </ChartBox>
             </div>
+            <div className="overflow-auto rounded-[10px] border border-[#E5EAF0] max-h-[380px]">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="sticky top-0 bg-[#F5F7FA] text-[#486581]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Reference</th>
+                    <th className="px-3 py-2 text-left font-semibold">Customer</th>
+                    <th className="px-3 py-2 text-left font-semibold">Service</th>
+                    <th className="px-3 py-2 text-left font-semibold">Status</th>
+                    <th className="px-3 py-2 text-left font-semibold">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+                  {kpiScopedApps.slice(0, 80).map((app) => (
+                    <tr key={app.id} className="hover:bg-[#F8FCFF]">
+                      <td className="px-3 py-2 font-medium text-[#102A43]">{app.reference_number}</td>
+                      <td className="px-3 py-2">{app.customer_name || "—"}</td>
+                      <td className="px-3 py-2">{app.service_name || "—"}</td>
+                      <td className="px-3 py-2 capitalize">{String(app.application_status || "—").replace(/_/g, " ")}</td>
+                      <td className="px-3 py-2">{app.created_at ? new Date(app.created_at).toLocaleDateString() : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {kpiScopedApps.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-[#627D98]">No applications match this KPI filter.</p>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
         {reportType === "leads" ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <MetricCard label="Leads in period" value={String(leadsInPeriod)} />
-              <MetricCard label="Converted" value={String(convertedInPeriod)} />
-              <MetricCard label="Conversion" value={conversionRate} />
-              <MetricCard label="Today's leads" value={String(kpiSnapshot?.todays_leads ?? 0)} />
+              <MetricCard
+                label="Leads in period"
+                value={String(leadsInPeriod)}
+                active={kpiFilter === "leads" || kpiFilter === null}
+                onClick={() => toggleKpi("leads")}
+              />
+              <MetricCard
+                label="Converted"
+                value={String(convertedInPeriod)}
+                active={kpiFilter === "converted"}
+                onClick={() => toggleKpi("converted")}
+              />
+              <MetricCard
+                label="Conversion"
+                value={conversionRate}
+                active={kpiFilter === "conversion"}
+                onClick={() => toggleKpi("conversion")}
+              />
+              <MetricCard
+                label="Today's leads"
+                value={String(todayLeads)}
+                active={kpiFilter === "today"}
+                onClick={() => toggleKpi("today")}
+              />
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <ChartBox title="Status breakdown" height={280}>
@@ -792,7 +1199,7 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-                    {filteredApps.slice(0, 80).map((app) => (
+                    {(kpiFilter === "leads" || !kpiFilter ? filteredApps : kpiScopedApps).slice(0, 80).map((app) => (
                       <tr key={app.id} className="hover:bg-[#F8FCFF]">
                         <td className="px-3 py-2 font-medium text-[#102A43]">{app.reference_number}</td>
                         <td className="px-3 py-2">{app.customer_name || "—"}</td>
@@ -803,7 +1210,7 @@ export default function ReportsPage() {
                     ))}
                   </tbody>
                 </table>
-                {filteredApps.length === 0 ? (
+                {(kpiFilter === "leads" || !kpiFilter ? filteredApps : kpiScopedApps).length === 0 ? (
                   <p className="px-3 py-6 text-center text-sm text-[#627D98]">No leads match these filters.</p>
                 ) : null}
               </div>
@@ -814,11 +1221,23 @@ export default function ReportsPage() {
         {reportType === "pending_payments" ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-              <MetricCard label="Pending cases" value={String(pendingApps.length)} />
-              <MetricCard label="Amount due (filtered)" value={formatInr(pendingAmount)} />
               <MetricCard
-                label="Snapshot pending"
-                value={formatInr(Number(kpiSnapshot?.pending_payments || 0))}
+                label="Pending cases"
+                value={String(pendingApps.length)}
+                active={kpiFilter === "cases" || kpiFilter === null}
+                onClick={() => toggleKpi("cases")}
+              />
+              <MetricCard
+                label="Amount due (filtered)"
+                value={formatInr(pendingAmount)}
+                active={kpiFilter === "amount"}
+                onClick={() => toggleKpi("amount")}
+              />
+              <MetricCard
+                label="Avg due / case"
+                value={formatInr(pendingApps.length ? pendingAmount / pendingApps.length : 0)}
+                active={kpiFilter === "amount"}
+                onClick={() => toggleKpi("amount")}
               />
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -826,7 +1245,7 @@ export default function ReportsPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={Object.values(
-                      pendingApps.reduce(
+                      kpiScopedPendingApps.reduce(
                         (acc, app) => {
                           const name = app.service_name || "Other";
                           const short = name.length > 14 ? `${name.slice(0, 12)}…` : name;
@@ -864,7 +1283,7 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-                    {pendingApps.slice(0, 80).map((app) => (
+                    {kpiScopedPendingApps.slice(0, 80).map((app) => (
                       <tr key={app.id} className="hover:bg-[#F8FCFF]">
                         <td className="px-3 py-2 font-medium text-[#102A43]">{app.reference_number}</td>
                         <td className="px-3 py-2">{app.customer_name || "—"}</td>
@@ -877,7 +1296,7 @@ export default function ReportsPage() {
                     ))}
                   </tbody>
                 </table>
-                {pendingApps.length === 0 ? (
+                {kpiScopedPendingApps.length === 0 ? (
                   <p className="px-3 py-6 text-center text-sm text-[#627D98]">No pending payments in this filter.</p>
                 ) : null}
               </div>
@@ -888,7 +1307,12 @@ export default function ReportsPage() {
         {reportType === "staff_performance" ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <MetricCard label="Staff in report" value={String(staffRows.length)} />
+              <MetricCard
+                label="Staff in report"
+                value={String(staffRows.length)}
+                active={kpiFilter === "staff" || kpiFilter === null}
+                onClick={() => toggleKpi("staff")}
+              />
               <MetricCard
                 label="Avg accuracy"
                 value={
@@ -896,21 +1320,27 @@ export default function ReportsPage() {
                     ? `${(staffRows.reduce((s, r) => s + Number(r.accuracy), 0) / staffRows.length).toFixed(1)}%`
                     : "0%"
                 }
+                active={kpiFilter === "accuracy"}
+                onClick={() => toggleKpi("accuracy")}
               />
               <MetricCard
                 label="Assigned total"
                 value={String(staffRows.reduce((s, r) => s + r.assigned, 0))}
+                active={kpiFilter === "assigned"}
+                onClick={() => toggleKpi("assigned")}
               />
               <MetricCard
                 label="Completed total"
                 value={String(staffRows.reduce((s, r) => s + r.completed, 0))}
+                active={kpiFilter === "completed"}
+                onClick={() => toggleKpi("completed")}
               />
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <ChartBox title="Accuracy by staff" height={300}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={staffRows.slice(0, 10).map((r) => ({ name: r.name.split(" ")[0], accuracy: r.accuracy, fullName: r.name }))}
+                    data={kpiScopedStaffRows.slice(0, 10).map((r) => ({ name: r.name.split(" ")[0], accuracy: r.accuracy, fullName: r.name }))}
                     margin={CHART_MARGIN}
                     barCategoryGap="24%"
                   >
@@ -937,7 +1367,7 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-                    {staffRows.map((row) => (
+                    {kpiScopedStaffRows.map((row) => (
                       <tr key={row.id} className="hover:bg-[#F8FCFF]">
                         <td className="px-3 py-2 font-medium text-[#102A43]">{row.name}</td>
                         <td className="px-3 py-2">{Number(row.accuracy).toFixed(1)}%</td>
@@ -948,7 +1378,7 @@ export default function ReportsPage() {
                     ))}
                   </tbody>
                 </table>
-                {staffRows.length === 0 ? (
+                {kpiScopedStaffRows.length === 0 ? (
                   <p className="px-3 py-6 text-center text-sm text-[#627D98]">No staff performance rows available.</p>
                 ) : null}
               </div>
@@ -959,19 +1389,28 @@ export default function ReportsPage() {
         {reportType === "pipeline_sla" ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-              <MetricCard label="Open stages" value={String(pipelineOverview.length)} />
+              <MetricCard
+                label="Open stages"
+                value={String(pipelineOverview.length)}
+                active={kpiFilter === "stages" || kpiFilter === null}
+                onClick={() => toggleKpi("stages")}
+              />
               <MetricCard
                 label="Total SLA breaches"
                 value={String(pipelineOverview.reduce((sum, row) => sum + Number(row.breached || 0), 0))}
+                active={kpiFilter === "breached"}
+                onClick={() => toggleKpi("breached")}
               />
               <MetricCard
                 label="Open cases"
                 value={String(pipelineOverview.reduce((sum, row) => sum + Number(row.openCases || 0), 0))}
+                active={kpiFilter === "open"}
+                onClick={() => toggleKpi("open")}
               />
             </div>
             <ChartBox title="Open cases vs SLA breaches by stage" height={300}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={pipelineChartData} margin={{ ...CHART_MARGIN, top: 28 }} barCategoryGap="22%" barGap={4}>
+                <BarChart data={pipelineChartScoped} margin={{ ...CHART_MARGIN, top: 28 }} barCategoryGap="22%" barGap={4}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5EAF0" />
                   <XAxis dataKey="stage" tick={TICK_STYLE} interval={0} />
                   <YAxis tick={TICK_STYLE} width={40} allowDecimals={false} />
@@ -986,7 +1425,7 @@ export default function ReportsPage() {
               </ResponsiveContainer>
             </ChartBox>
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {pipelineOverview.map((row) => (
+              {kpiScopedPipeline.map((row) => (
                 <div key={row.stage} className="rounded-[10px] border border-[#E5EAF0] bg-[#F8FAFC] p-3">
                   <p className="text-sm font-semibold text-[#102A43]">{row.stage}</p>
                   <p className="mt-2 text-xs text-[#486581] flex justify-between gap-2">
@@ -1014,19 +1453,27 @@ export default function ReportsPage() {
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <MetricCard
                 label="Checks requested"
-                value={String(healthMetrics?.audits_requested ?? auditApps.length)}
+                value={String(auditRequestedCount)}
+                active={kpiFilter === "requested" || kpiFilter === null}
+                onClick={() => toggleKpi("requested")}
               />
               <MetricCard
                 label="Check success ratio"
-                value={String(healthMetrics?.audit_success_ratio ?? "0%")}
+                value={auditSuccessRatio}
+                active={kpiFilter === "success"}
+                onClick={() => toggleKpi("success")}
               />
               <MetricCard
-                label="Assessment revenue today"
-                value={formatInr(Number(kpiSnapshot?.audit_revenue_today || 0))}
+                label="Assessment revenue"
+                value={formatInr(auditRevenueInPeriod)}
+                active={kpiFilter === "revenue"}
+                onClick={() => toggleKpi("revenue")}
               />
               <MetricCard
-                label="Avg processing time"
-                value={String(healthMetrics?.avg_processing_time ?? "0h")}
+                label="Failed checks"
+                value={String(auditFailCount)}
+                active={kpiFilter === "failed"}
+                onClick={() => toggleKpi("failed")}
               />
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -1089,7 +1536,7 @@ export default function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-                  {(auditApps.length ? auditApps : filteredApps).slice(0, 80).map((app) => {
+                  {(kpiFilter ? kpiScopedApps : auditApps.length ? auditApps : filteredApps).slice(0, 80).map((app) => {
                     const result = String(app.audit_result || "none");
                     return (
                       <tr key={app.id} className="hover:bg-[#F8FCFF]">
@@ -1122,7 +1569,7 @@ export default function ReportsPage() {
                   })}
                 </tbody>
               </table>
-              {filteredApps.length === 0 ? (
+              {(kpiFilter ? kpiScopedApps : auditApps.length ? auditApps : filteredApps).length === 0 ? (
                 <p className="px-3 py-6 text-center text-sm text-[#627D98]">No applications match these filters.</p>
               ) : null}
             </div>
@@ -1132,14 +1579,29 @@ export default function ReportsPage() {
         {reportType === "service_mix" ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-              <MetricCard label="Services" value={String(serviceMixFromApps.length)} />
-              <MetricCard label="Cases in period" value={String(leadsInPeriod)} />
-              <MetricCard label="Paid cases" value={String(convertedInPeriod)} />
+              <MetricCard
+                label="Services"
+                value={String(serviceMixFromApps.length)}
+                active={kpiFilter === "services" || kpiFilter === null}
+                onClick={() => toggleKpi("services")}
+              />
+              <MetricCard
+                label="Cases in period"
+                value={String(leadsInPeriod)}
+                active={kpiFilter === "cases"}
+                onClick={() => toggleKpi("cases")}
+              />
+              <MetricCard
+                label="Paid cases"
+                value={String(convertedInPeriod)}
+                active={kpiFilter === "paid"}
+                onClick={() => toggleKpi("paid")}
+              />
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <ChartBox title="Revenue by service (snapshot)" height={300}>
+              <ChartBox title="Revenue by service (filtered)" height={300}>
                 {servicePieData.length === 0 ? (
-                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No revenue mix yet.</p>
+                  <p className="flex h-full items-center justify-center text-sm text-[#627D98]">No revenue mix in filters.</p>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
@@ -1165,7 +1627,7 @@ export default function ReportsPage() {
               <ChartBox title="Cases by service (filtered)" height={300}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={serviceMixFromApps.map((row) => ({
+                    data={kpiScopedServiceMix.map((row) => ({
                       ...row,
                       label: row.name.length > 12 ? `${row.name.slice(0, 10)}…` : row.name,
                     }))}
@@ -1198,7 +1660,7 @@ export default function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-                  {serviceMixFromApps.map((row) => (
+                  {kpiScopedServiceMix.map((row) => (
                     <tr key={row.name} className="hover:bg-[#F8FCFF]">
                       <td className="px-3 py-2 font-medium text-[#102A43]">{row.name}</td>
                       <td className="px-3 py-2">{row.cases}</td>
@@ -1210,7 +1672,7 @@ export default function ReportsPage() {
                   ))}
                 </tbody>
               </table>
-              {serviceMixFromApps.length === 0 ? (
+              {kpiScopedServiceMix.length === 0 ? (
                 <p className="px-3 py-6 text-center text-sm text-[#627D98]">No services match these filters.</p>
               ) : null}
             </div>

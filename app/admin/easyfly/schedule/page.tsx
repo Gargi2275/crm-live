@@ -105,6 +105,7 @@ export default function EasyFlySchedulePage() {
   const [supplierFilter, setSupplierFilter] = useState("all");
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [kpiFilter, setKpiFilter] = useState<"all" | "minor" | "major">("all");
 
   useEffect(() => {
     let isMounted = true;
@@ -157,6 +158,9 @@ export default function EasyFlySchedulePage() {
 
   const majorCount = scheduleRows.filter((booking) => booking.scheduleChange === "major").length;
   const minorCount = scheduleRows.filter((booking) => booking.scheduleChange === "minor").length;
+
+  const visibleMajorRows = kpiFilter === "minor" ? [] : majorRows;
+  const visibleMinorRows = kpiFilter === "major" ? [] : minorRows;
 
   const clearFilters = useCallback(() => {
     setChangeFilter("all");
@@ -244,43 +248,68 @@ export default function EasyFlySchedulePage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
+        <button
+          type="button"
+          onClick={() => setKpiFilter("all")}
+          aria-pressed={kpiFilter === "all"}
+          className={`bg-white border-[0.5px] rounded-[12px] p-4 text-left transition ${
+            kpiFilter === "all" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+          }`}
+        >
           <p className="text-xs text-[#627D98]">Total Schedule Changes</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">{scheduleRows.length}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => setKpiFilter((current) => (current === "minor" ? "all" : "minor"))}
+          aria-pressed={kpiFilter === "minor"}
+          className={`bg-white border-[0.5px] rounded-[12px] p-4 text-left transition ${
+            kpiFilter === "minor" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+          }`}
+        >
           <p className="text-xs text-[#627D98]">Minor Changes</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#8D5E12]">{minorCount}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => setKpiFilter((current) => (current === "major" ? "all" : "major"))}
+          aria-pressed={kpiFilter === "major"}
+          className={`bg-white border-[0.5px] rounded-[12px] p-4 text-left transition ${
+            kpiFilter === "major" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+          }`}
+        >
           <p className="text-xs text-[#627D98]">Major Changes</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#B42318]">{majorCount}</p>
-        </div>
+        </button>
       </div>
 
+      {kpiFilter !== "minor" ? (
       <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden border-l-4 border-l-[#B42318]">
         <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
           <h2 className="text-sm font-heading font-semibold text-[#102A43]">Major Changes</h2>
-          <span className="text-xs text-[#B42318] font-semibold">{majorRows.length} booking(s)</span>
+          <span className="text-xs text-[#B42318] font-semibold">{visibleMajorRows.length} booking(s)</span>
         </div>
-        {majorRows.length > 0 ? (
-          <SectionTable rows={majorRows} type="major" />
+        {visibleMajorRows.length > 0 ? (
+          <SectionTable rows={visibleMajorRows} type="major" />
         ) : (
           <div className="px-4 py-8 text-center text-sm text-[#7B8794]">No major changes for current filters.</div>
         )}
       </section>
+      ) : null}
 
+      {kpiFilter !== "major" ? (
       <section className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden border-l-4 border-l-[#D4A84F]">
         <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
           <h2 className="text-sm font-heading font-semibold text-[#102A43]">Minor Changes</h2>
-          <span className="text-xs text-[#8D5E12] font-semibold">{minorRows.length} booking(s)</span>
+          <span className="text-xs text-[#8D5E12] font-semibold">{visibleMinorRows.length} booking(s)</span>
         </div>
-        {minorRows.length > 0 ? (
-          <SectionTable rows={minorRows} type="minor" />
+        {visibleMinorRows.length > 0 ? (
+          <SectionTable rows={visibleMinorRows} type="minor" />
         ) : (
           <div className="px-4 py-8 text-center text-sm text-[#7B8794]">No minor changes for current filters.</div>
         )}
       </section>
+      ) : null}
     </div>
   );
 }

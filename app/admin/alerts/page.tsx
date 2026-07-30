@@ -216,15 +216,44 @@ import { motion } from "framer-motion";
 import { AlertTriangle, CircleCheck, TimerReset } from "lucide-react";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
+function isCriticalSignal(severity?: string | null) {
+  const value = String(severity || "").toLowerCase();
+  return value === "critical" || value === "high";
+}
+
+function severityRank(severity?: string | null) {
+  const value = String(severity || "").toLowerCase();
+  if (value === "critical") return 0;
+  if (value === "high") return 1;
+  if (value === "medium") return 2;
+  return 3;
+}
+
+function severityPillClass(severity?: string | null) {
+  const value = String(severity || "").toLowerCase();
+  if (value === "critical") return "bg-[#FEF3F2] text-[#B42318] border-[#FECDCA]";
+  if (value === "high") return "bg-[#FFFAEB] text-[#B54708] border-[#FEDF89]";
+  if (value === "low") return "bg-[#F5F7FA] text-[#486581] border-[#D9E1EA]";
+  return "bg-[#F0F9FF] text-[#026AA2] border-[#B9E6FE]";
+}
+
+function matchesKpi(alert: AdminAlert, kpiFilter: "all" | "open" | "critical") {
+  const status = String(alert.status || "").toLowerCase();
+  if (kpiFilter === "open") return status === "open";
+  if (kpiFilter === "critical") return isCriticalSignal(alert.severity);
+  return true;
+}
+
 export default function AlertsPage() {
   const [alertsData, setAlertsData] = useState<AdminAlertsResponse | null>(null);
   const [updatingAlertId, setUpdatingAlertId] = useState<number | null>(null);
+  const [kpiFilter, setKpiFilter] = useState<"all" | "open" | "critical">("all");
 
   useSetAdminPageChrome({
     title: "Alerts",
     subtitle: "NDR / SLA",
     icon: AlertTriangle,
-    syncKey: `${alertsData?.summary?.open ?? 0}|${updatingAlertId ?? ""}`,
+    syncKey: `${alertsData?.summary?.open ?? 0}|${updatingAlertId ?? ""}|${kpiFilter}`,
   });
 
   useEffect(() => {
@@ -249,8 +278,87 @@ export default function AlertsPage() {
   }, []);
 
   const alertFeed = useMemo(() => alertsData?.alerts ?? [], [alertsData]);
+  const notifications = useMemo(() => alertsData?.notifications ?? [], [alertsData]);
 
   const criticalCount = useMemo(() => Number(alertsData?.summary?.critical ?? 0), [alertsData]);
+  const openCount = useMemo(() => Number(alertsData?.summary?.open ?? 0), [alertsData]);
+
+  const rankedAlerts = useMemo(() => {
+    const rows = alertFeed.map((alert) => ({
+      alert,
+      match: matchesKpi(alert, kpiFilter),
+    }));
+
+    rows.sort((a, b) => {
+      // Matching KPI rows always float to the top.
+      if (a.match !== b.match) return a.match ? -1 : 1;
+
+      if (kpiFilter === "critical") {
+        // Critical severity before high; acknowledged high/critical before open
+        // so this view differs immediately from the Open KPI at the top.
+        const bySeverity = severityRank(a.alert.severity) - severityRank(b.alert.severity);
+        if (bySeverity !== 0) return bySeverity;
+        const aOpen = String(a.alert.status || "").toLowerCase() === "open" ? 1 : 0;
+        const bOpen = String(b.alert.status || "").toLowerCase() === "open" ? 1 : 0;
+        if (aOpen !== bOpen) return aOpen - bOpen;
+      }
+
+      if (kpiFilter === "open") {
+        const bySeverity = severityRank(a.alert.severity) - severityRank(b.alert.severity);
+        if (bySeverity !== 0) return bySeverity;
+      }
+
+      const aTime = a.alert.last_seen_at ? new Date(a.alert.last_seen_at).getTime() : 0;
+      const bTime = b.alert.last_seen_at ? new Date(b.alert.last_seen_at).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    return rows;
+  }, [alertFeed, kpiFilter]);
+
+  const matchedAlerts = useMemo(() => rankedAlerts.filter((row) => row.match), [rankedAlerts]);
+  const otherAlerts = useMemo(
+    () => (kpiFilter === "all" ? [] : rankedAlerts.filter((row) => !row.match)),
+    [kpiFilter, rankedAlerts],
+  );
+
+  const rankedNotifications = useMemo(() => {
+    const rows = notifications.map((row) => {
+      const id = String(row.id || "");
+      let match = true;
+      if (kpiFilter === "open") {
+        match = id.startsWith("alert-") && !row.is_read;
+      } else if (kpiFilter === "critical") {
+        match = isCriticalSignal(row.severity);
+      }
+      return { row, match };
+    });
+
+    rows.sort((a, b) => {
+      if (a.match !== b.match) return a.match ? -1 : 1;
+      if (kpiFilter === "critical") {
+        const bySeverity = severityRank(a.row.severity) - severityRank(b.row.severity);
+        if (bySeverity !== 0) return bySeverity;
+      }
+      const aTime = a.row.timestamp ? new Date(a.row.timestamp).getTime() : 0;
+      const bTime = b.row.timestamp ? new Date(b.row.timestamp).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    return rows;
+  }, [kpiFilter, notifications]);
+
+  const matchedNotifications = useMemo(
+    () => rankedNotifications.filter((item) => item.match).map((item) => item.row),
+    [rankedNotifications],
+  );
+
+  const filterLabel =
+    kpiFilter === "open"
+      ? "Open alerts"
+      : kpiFilter === "critical"
+        ? "Critical / high signals"
+        : "All alerts";
 
   const handleAlertStatusUpdate = async (alert: AdminAlert, status: "acknowledged" | "resolved" | "dismissed") => {
     try {
@@ -266,6 +374,73 @@ export default function AlertsPage() {
     }
   };
 
+  const kpiCards = [
+    { key: "open" as const, label: "Open alerts", value: openCount, icon: AlertTriangle, tone: "text-[#B42318]" },
+    { key: "critical" as const, label: "Critical signals", value: criticalCount, icon: TimerReset, tone: "text-[#9C4F17]" },
+    { key: "all" as const, label: "Auto-monitored", value: "Realtime", icon: CircleCheck, tone: "text-[#009877]" },
+  ];
+
+  const renderAlertCard = (alert: AdminAlert, matched: boolean) => {
+    const severity = String(alert.severity || "medium");
+    return (
+      <motion.div
+        key={alert.id}
+        whileHover={{ y: matched ? -2 : 0 }}
+        className={`rounded-[12px] border p-4 flex items-center justify-between gap-3 shadow-sm transition ${
+          matched
+            ? "bg-white border-[#009877]/45 ring-1 ring-[#009877]/15"
+            : "bg-[#F8FAFC] border-[#E5EAF0] opacity-55"
+        }`}
+      >
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${severityPillClass(severity)}`}>
+              {severity}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-[#D9E1EA] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#486581]">
+              {alert.status}
+            </span>
+            {!matched ? (
+              <span className="text-[10px] uppercase tracking-wide text-[#829AB1]">Outside filter</span>
+            ) : null}
+          </div>
+          <p className="text-sm text-[#102A43] font-medium">{alert.title}</p>
+          <p className="text-xs text-[#627D98]">{alert.formatted_message || alert.message || alert.source_reference}</p>
+          {alert.source_reference === "tasks:high_priority" &&
+            Array.isArray((alert.metadata as Record<string, unknown>)?.task_ids) &&
+            ((alert.metadata as Record<string, unknown>).task_ids as Record<string, unknown>[]).map((task) => (
+              <p key={String(task.id)} className="text-xs text-[#B42318] mt-0.5">
+                #{String(task.application__reference_number ?? "N/A")} — {String(task.task_type)} —{" "}
+                {String(task.priority).toUpperCase()} — due{" "}
+                {new Date(String(task.deadline)).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+              </p>
+            ))}
+          <p className="mt-1 text-[11px] uppercase tracking-[0.08em] text-[#486581]">
+            {alert.alert_type_label || getAlertTypeLabel(alert.alert_type)}
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            className="text-xs px-3 py-1 rounded-full bg-[#F5F7FA] text-[#334E68] border-[0.5px] border-[#D9E1EA] disabled:opacity-60"
+            onClick={() => void handleAlertStatusUpdate(alert, "dismissed")}
+            disabled={updatingAlertId === alert.id || alert.status === "dismissed"}
+          >
+            Dismiss
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            className="text-xs px-3 py-1 rounded-full bg-[#009877] text-white hover:bg-[#007B61] disabled:opacity-60"
+            onClick={() => void handleAlertStatusUpdate(alert, "acknowledged")}
+            disabled={updatingAlertId === alert.id || alert.status === "acknowledged"}
+          >
+            Acknowledge
+          </motion.button>
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -274,52 +449,69 @@ export default function AlertsPage() {
       className="space-y-5 font-body max-w-[1300px] mx-auto"
     >
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
-          <p className="text-xs text-[#627D98]">Open alerts</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-[#B42318]" />{alertsData?.summary.open ?? 0}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
-          <p className="text-xs text-[#627D98]">Critical signals</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><TimerReset className="w-4 h-4 text-[#9C4F17]" />{criticalCount}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
-          <p className="text-xs text-[#627D98]">Auto-monitored</p>
-          <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><CircleCheck className="w-4 h-4 text-[#009877]" />Realtime</p>
-        </div>
+        {kpiCards.map((card) => {
+          const selected = kpiFilter === card.key;
+          return (
+            <button
+              key={card.key}
+              type="button"
+              onClick={() => setKpiFilter((current) => (current === card.key && card.key !== "all" ? "all" : card.key))}
+              aria-pressed={selected}
+              className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left transition ${
+                selected ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+              }`}
+            >
+              <p className="text-xs text-[#627D98]">{card.label}</p>
+              <p className={`mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2`}>
+                <card.icon className={`w-4 h-4 ${card.tone}`} />
+                {card.value}
+              </p>
+              <p className="mt-1 text-[11px] text-[#829AB1]">
+                {selected && card.key !== "all" ? "Pinned to top" : "Click to pin matching first"}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="rounded-[12px] border border-[#D9E1EA] bg-white px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium text-[#102A43]">
+          {filterLabel}: <span className="font-semibold text-[#009877]">{matchedAlerts.length}</span>
+          {kpiFilter !== "all" ? (
+            <span className="text-[#627D98] font-normal"> matching · shown first</span>
+          ) : null}
+        </p>
+        {kpiFilter === "critical" ? (
+          <p className="text-xs text-[#627D98]">Includes high + critical · acknowledged criticals listed before open</p>
+        ) : null}
       </div>
 
       <div className="space-y-3">
-        {alertFeed.map((alert) => (
-          <motion.div key={alert.id} whileHover={{ y: -2 }} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4 flex items-center justify-between gap-3 shadow-sm">
-            <div>
-              <p className="text-sm text-[#102A43] font-medium">{alert.title}</p>
-             <p className="text-xs text-[#627D98]">{alert.formatted_message || alert.message || alert.source_reference}</p>
-{alert.source_reference === "tasks:high_priority" &&
-  Array.isArray((alert.metadata as Record<string, unknown>)?.task_ids) &&
-  ((alert.metadata as Record<string, unknown>).task_ids as Record<string, unknown>[]).map((task) => (
-    <p key={String(task.id)} className="text-xs text-[#B42318] mt-0.5">
-      #{String(task.application__reference_number ?? "N/A")} — {String(task.task_type)} — {String(task.priority).toUpperCase()} — due {new Date(String(task.deadline)).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-    </p>
-  ))
-}
-<p className="mt-1 text-[11px] uppercase tracking-[0.08em] text-[#486581]">{alert.alert_type_label || getAlertTypeLabel(alert.alert_type)} | Status: {alert.status}</p>
-            </div>
-            <div className="flex gap-2">
-              <motion.button whileTap={{ scale: 0.97 }} className="text-xs px-3 py-1 rounded-full bg-[#F5F7FA] text-[#334E68] border-[0.5px] border-[#D9E1EA] disabled:opacity-60" onClick={() => void handleAlertStatusUpdate(alert, "dismissed")} disabled={updatingAlertId === alert.id || alert.status === "dismissed"}>
-                Dismiss
-              </motion.button>
-              <motion.button whileTap={{ scale: 0.97 }} className="text-xs px-3 py-1 rounded-full bg-[#009877] text-white hover:bg-[#007B61] disabled:opacity-60" onClick={() => void handleAlertStatusUpdate(alert, "acknowledged")} disabled={updatingAlertId === alert.id || alert.status === "acknowledged"}>
-                Acknowledge
-              </motion.button>
-            </div>
-          </motion.div>
-        ))}
+        {matchedAlerts.length === 0 ? (
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-6 text-center text-sm text-[#627D98]">
+            No alerts match this KPI filter.
+          </div>
+        ) : (
+          matchedAlerts.map(({ alert }) => renderAlertCard(alert, true))
+        )}
+
+        {otherAlerts.length > 0 ? (
+          <div className="pt-2 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#829AB1]">
+              Other alerts ({otherAlerts.length})
+            </p>
+            {otherAlerts.map(({ alert }) => renderAlertCard(alert, false))}
+          </div>
+        ) : null}
       </div>
 
       <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden">
         <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between">
           <h2 className="text-sm font-heading font-semibold text-[#102A43]">Alert handling queue</h2>
-          <span className="text-xs text-[#627D98]">Live data</span>
+          <span className="text-xs text-[#627D98]">
+            {matchedNotifications.length} matching
+            {kpiFilter !== "all" ? " · pinned first" : ""}
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -331,47 +523,60 @@ export default function AlertsPage() {
                 <th className="px-4 py-2.5 text-left">Priority</th>
               </tr>
             </thead>
-           <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-  {(alertsData?.notifications ?? []).map((notification) => (
-    <tr key={notification.id}>
-      {/* Case column — show task details if available */}
-      <td className="px-4 py-2.5">
-        <span>{notification.message}</span>
-        {Array.isArray(notification.task_ids) &&
-          notification.task_ids.map((task) => (
-            <p key={String(task.id)} className="text-xs text-[#B42318] mt-0.5">
-              #{String(task.application__reference_number ?? "N/A")} — {String(task.task_type)} — {String(task.priority).toUpperCase()} — due {new Date(String(task.deadline)).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-            </p>
-          ))
-        }
-      </td>
-      {/* Owner column — show actor name if available */}
-      <td className="px-4 py-2.5">
-        {notification.assignee_name
-          || notification.actor
-          || notification.type_label
-          || getAlertTypeLabel(notification.type)}
-      </td>
-      {/* Age column */}
-      <td className="px-4 py-2.5">
-        {new Date(notification.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-      </td>
-      {/* Priority column */}
-      <td className="px-4 py-2.5">
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-          notification.severity === "critical" ? "bg-red-100 text-red-700" :
-          notification.severity === "high" ? "bg-orange-100 text-orange-700" :
-          notification.severity === "low" ? "bg-gray-100 text-gray-600" :
-          "bg-yellow-100 text-yellow-700"
-        }`}>
-          {notification.severity
-            ? notification.severity.charAt(0).toUpperCase() + notification.severity.slice(1)
-            : "Medium"}
-        </span>
-      </td>
-    </tr>
-  ))}
-</tbody>
+            <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
+              {rankedNotifications.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-8 text-center text-[#627D98]">
+                    No queue items for this KPI filter.
+                  </td>
+                </tr>
+              ) : (
+                rankedNotifications.map(({ row: notification, match }) => (
+                  <tr key={notification.id} className={match ? "bg-white" : "bg-[#F8FAFC] opacity-55"}>
+                    <td className="px-4 py-2.5">
+                      <span>{notification.message}</span>
+                      {Array.isArray(notification.task_ids) &&
+                        notification.task_ids.map((task) => (
+                          <p key={String(task.id)} className="text-xs text-[#B42318] mt-0.5">
+                            #{String(task.application__reference_number ?? "N/A")} — {String(task.task_type)} —{" "}
+                            {String(task.priority).toUpperCase()} — due{" "}
+                            {new Date(String(task.deadline)).toLocaleDateString("en-IN", {
+                              day: "2-digit",
+                              month: "short",
+                            })}
+                          </p>
+                        ))}
+                      {!match ? (
+                        <p className="mt-0.5 text-[10px] uppercase tracking-wide text-[#829AB1]">Outside filter</p>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {notification.assignee_name ||
+                        notification.actor ||
+                        notification.type_label ||
+                        getAlertTypeLabel(notification.type)}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {new Date(notification.timestamp).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium border ${severityPillClass(
+                          notification.severity,
+                        )}`}
+                      >
+                        {notification.severity
+                          ? notification.severity.charAt(0).toUpperCase() + notification.severity.slice(1)
+                          : "Medium"}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
           </table>
         </div>
       </div>

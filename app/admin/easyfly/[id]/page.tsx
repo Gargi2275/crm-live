@@ -10,6 +10,9 @@ import {
   createEasyFlyPaymentOrder,
   deleteEasyFlyBooking,
   deleteEasyFlyPaymentLedgerEntry,
+  EASYFLY_LEDGER_METHOD_OPTIONS,
+  EASYFLY_PAYMENT_MODE_OPTIONS,
+  easyflyPaymentMethodChipClass,
   getEasyFlyBooking,
   listEasyFlyPaymentLedger,
   runEasyFlyAIVerify,
@@ -19,7 +22,9 @@ import {
   uploadEasyFlyPaymentProof,
   verifyEasyFlyPaymentLedgerEntry,
   type EasyFlyBooking,
+  type EasyFlyLedgerMethod,
   type EasyFlyPaymentLedgerEntry,
+  type PaymentMode,
 } from "@/lib/easyfly";
 import {
   clearStripeReturnParams,
@@ -43,7 +48,6 @@ import {
 
 type RefundStatus = "none" | "pending" | "credit_note";
 type ScheduleChange = "none" | "minor" | "major";
-type PaymentMode = "card" | "bank_transfer" | "cash";
 
 type BookingFormState = {
   srNo: string;
@@ -54,9 +58,9 @@ type BookingFormState = {
   airlineCode: string;
   depDate: string;
   returnDate: string;
-  amountPaid: string;
-  amountReceived: string;
-  extraAmount: string;
+  payAgreed: string;
+  paid: string;
+  supplierFees: string;
   paymentDueDate: string;
   paymentMode: PaymentMode;
   depositType: "office" | "home";
@@ -67,7 +71,7 @@ type PaymentLedgerEntry = {
   backendId: number | null;
   date: string;
   amount: string;
-  method: "cash" | "card" | "bank_transfer" | "payment_link" | "other";
+  method: EasyFlyLedgerMethod;
   proof: File | null;
   proofName: string;
   proofUrl: string;
@@ -146,9 +150,9 @@ const mapBookingToForm = (data: BookingRow): BookingFormState => ({
   airlineCode: data.airlineCode,
   depDate: data.depDate,
   returnDate: data.returnDate,
-  amountPaid: String(data.amountPaid),
-  amountReceived: String(data.amountReceived),
-  extraAmount: String(data.extraAmount || 0),
+  payAgreed: String(data.payAgreed ?? 0),
+  paid: String(data.amountReceived),
+  supplierFees: String(data.amountPaid),
   paymentDueDate: data.paymentDueDate || "",
   paymentMode: data.paymentMode,
   depositType: data.depositType,
@@ -165,29 +169,36 @@ const buildBookingUpdatePayload = (
     scheduleChange: ScheduleChange;
     isReissued: boolean;
   },
-) => ({
-  sr_no: form.srNo.trim(),
-  supplier: form.supplier.trim(),
-  invoice_number: form.invoiceNumber.trim(),
-  pnr: form.pnr.trim(),
-  pax_name: form.paxName.trim(),
-  airline_code: form.airlineCode.trim(),
-  dep_date: form.depDate,
-  return_date: form.returnDate,
-  amount_paid: Number.parseInt(form.amountPaid, 10) || 0,
-  amount_received: Number.parseInt(form.amountReceived, 10) || 0,
-  extra_amount: Number.parseInt(form.extraAmount, 10) || 0,
-  payment_due_date: form.paymentDueDate || null,
-  payment_mode: form.paymentMode,
-  deposit_type: form.depositType,
-  receipt_received: form.receiptReceived,
-  is_youth_category: extras.isYouthCategory,
-  refund_status: extras.isRefund ? "credit_note" : "none",
-  refund_received_from_supplier: extras.refundReceivedFromSupplier,
-  given_to_customer: extras.givenToCustomer,
-  schedule_change: extras.scheduleChange,
-  is_reissued: extras.isReissued,
-});
+) => {
+  const payAgreed = Number.parseInt(form.payAgreed, 10) || 0;
+  const paid = Number.parseInt(form.paid, 10) || 0;
+  const supplierFees = Number.parseInt(form.supplierFees, 10) || 0;
+  return {
+    sr_no: form.srNo.trim(),
+    supplier: form.supplier.trim(),
+    invoice_number: form.invoiceNumber.trim(),
+    pnr: form.pnr.trim(),
+    pax_name: form.paxName.trim(),
+    airline_code: form.airlineCode.trim(),
+    dep_date: form.depDate,
+    return_date: form.returnDate,
+    pay_agreed: payAgreed,
+    amount_received: paid,
+    amount_paid: supplierFees,
+    amount_due: Math.max(0, payAgreed - paid),
+    extra_amount: 0,
+    payment_due_date: form.paymentDueDate || null,
+    payment_mode: form.paymentMode,
+    deposit_type: form.depositType,
+    receipt_received: form.receiptReceived,
+    is_youth_category: extras.isYouthCategory,
+    refund_status: extras.isRefund ? "credit_note" : "none",
+    refund_received_from_supplier: extras.refundReceivedFromSupplier,
+    given_to_customer: extras.givenToCustomer,
+    schedule_change: extras.scheduleChange,
+    is_reissued: extras.isReissued,
+  };
+};
 
 const createBlankLedgerEntry = (bookingId: number, enteredBy = "Staff"): PaymentLedgerEntry => ({
   id: `${bookingId}-payment-${Date.now()}`,
@@ -422,9 +433,9 @@ export default function EasyFlyBookingDetailPage() {
     airlineCode: "",
     depDate: "",
     returnDate: "",
-    amountPaid: "0",
-    amountReceived: "0",
-    extraAmount: "0",
+    payAgreed: "0",
+    paid: "0",
+    supplierFees: "0",
     paymentDueDate: "",
     paymentMode: "card",
     depositType: "office",
@@ -570,18 +581,18 @@ export default function EasyFlyBookingDetailPage() {
     );
   }
 
-  const amountPaid = Number.parseInt(form.amountPaid, 10) || 0;
-  const amountReceived = Number.parseInt(form.amountReceived, 10) || 0;
-  const totalPayment = amountPaid + amountReceived;
-  const paymentPending = amountPaid - amountReceived;
-  const earnings = amountReceived - amountPaid;
+  const payAgreed = Number.parseInt(form.payAgreed, 10) || 0;
+  const paid = Number.parseInt(form.paid, 10) || 0;
+  const supplierFees = Number.parseInt(form.supplierFees, 10) || 0;
+  const paymentPending = payAgreed - paid;
+  const earnings = paid - supplierFees;
 
   const updateForm = (patch: Partial<BookingFormState>) => {
     setForm((current) => ({ ...current, ...patch }));
   };
   const pendingStripeAmount = Math.max(0, paymentPending);
   const totalLedgerReceived = paymentLedger.reduce((sum, entry) => sum + (Number.parseFloat(entry.amount) || 0), 0);
-  const balancePending = amountPaid - totalLedgerReceived;
+  const balancePending = payAgreed - totalLedgerReceived;
   const isFullyPaid = balancePending <= 0;
 
   const handleDelete = async () => {
@@ -966,33 +977,42 @@ export default function EasyFlyBookingDetailPage() {
               className={passengerFieldClassName}
             />
           </FormField>
-          <FormField label="Supplier Paid Amount">
+          <FormField label="Pay Agreed">
             <input
               type="number"
               min="0"
               step="1"
-              value={form.amountPaid}
-              onChange={(event) => updateForm({ amountPaid: event.target.value })}
+              value={form.payAgreed}
+              onChange={(event) => updateForm({ payAgreed: event.target.value })}
               className={passengerFieldClassName}
             />
           </FormField>
-          <FormField label="Client / Customer Received">
+          <FormField label="Paid">
             <input
               type="number"
               min="0"
               step="1"
-              value={form.amountReceived}
-              onChange={(event) => updateForm({ amountReceived: event.target.value })}
+              value={form.paid}
+              onChange={(event) => updateForm({ paid: event.target.value })}
               className={passengerFieldClassName}
             />
           </FormField>
-          <FormField label="Extra Charges Paid To">
+          <FormField label="Pending Amount">
+            <input
+              type="text"
+              readOnly
+              value={formatInr(Math.max(0, paymentPending))}
+              className={`${passengerFieldClassName} cursor-default bg-[#FFF8F0] text-[#8D5E12] font-semibold`}
+              tabIndex={-1}
+            />
+          </FormField>
+          <FormField label="Supplier Fees">
             <input
               type="number"
               min="0"
               step="1"
-              value={form.extraAmount}
-              onChange={(event) => updateForm({ extraAmount: event.target.value })}
+              value={form.supplierFees}
+              onChange={(event) => updateForm({ supplierFees: event.target.value })}
               className={passengerFieldClassName}
             />
           </FormField>
@@ -1005,15 +1025,22 @@ export default function EasyFlyBookingDetailPage() {
             />
           </FormField>
           <FormField label="Payment Mode">
-            <select
-              value={form.paymentMode}
-              onChange={(event) => updateForm({ paymentMode: event.target.value as PaymentMode })}
-              className={passengerFieldClassName}
-            >
-              <option value="card">Card</option>
-              <option value="bank_transfer">Bank Transfer</option>
-              <option value="cash">Cash</option>
-            </select>
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Payment mode">
+              {EASYFLY_PAYMENT_MODE_OPTIONS.map((option) => {
+                const selected = form.paymentMode === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => updateForm({ paymentMode: option.value })}
+                    className={easyflyPaymentMethodChipClass(option.value, selected)}
+                    aria-pressed={selected}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
           </FormField>
           <FormField label="Deposit Type">
             <select
@@ -1038,15 +1065,15 @@ export default function EasyFlyBookingDetailPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <LabelValue label="Total Payment" value={formatInr(totalPayment)} />
+          <LabelValue label="Pay Agreed" value={formatInr(payAgreed)} />
           <LabelValue
-            label="Client Pending"
+            label="Pending"
             value={formatInr(Math.max(0, paymentPending))}
             valueClassName="text-[#8D5E12]"
           />
           <LabelValue
-            label="Extra Paid"
-            value={formatInr(Number.parseInt(form.extraAmount, 10) || 0)}
+            label="Supplier Fees"
+            value={formatInr(supplierFees)}
             valueClassName="text-[#1E40AF]"
           />
           <LabelValue
@@ -1372,24 +1399,29 @@ export default function EasyFlyBookingDetailPage() {
                   className={passengerFieldClassName}
                 />
               </label>
-              <label className="block space-y-1">
+              <div className="block space-y-1 md:col-span-3">
                 <span className="text-xs text-[#627D98]">Method</span>
-                <select
-                  value={entry.method}
-                  onChange={(event) =>
-                    updatePaymentLedgerEntry(entry.id, {
-                      method: event.target.value as PaymentLedgerEntry["method"],
-                    })
-                  }
-                  className={passengerFieldClassName}
-                >
-                  <option value="cash">Cash</option>
-                  <option value="card">Card</option>
-                  <option value="bank_transfer">Bank Transfer</option>
-                  <option value="payment_link">Payment Link</option>
-                  <option value="other">Other</option>
-                </select>
-              </label>
+                <div className="mt-1 flex flex-wrap gap-2" role="group" aria-label="Payment method">
+                  {EASYFLY_LEDGER_METHOD_OPTIONS.map((option) => {
+                    const selected = entry.method === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() =>
+                          updatePaymentLedgerEntry(entry.id, {
+                            method: option.value,
+                          })
+                        }
+                        className={easyflyPaymentMethodChipClass(option.value, selected)}
+                        aria-pressed={selected}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             <div>

@@ -3,7 +3,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAdminAuth } from "@/context/AdminAuthContext";
-import { createEasyFlyBooking } from "@/lib/easyfly";
+import {
+  createEasyFlyBooking,
+  EASYFLY_PAYMENT_MODE_OPTIONS,
+  easyflyPaymentMethodChipClass,
+  type PaymentMode,
+} from "@/lib/easyfly";
 import toast from "react-hot-toast";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { ChevronLeft, Plus } from "lucide-react";
@@ -29,12 +34,12 @@ type CreateForm = {
   airlineCode: string;
   depDate: string;
   returnDate: string;
-  amountPaid: string;
-  amountReceived: string;
-  extraAmount: string;
+  payAgreed: string;
+  paid: string;
+  supplierFees: string;
   refundStatus: string;
   scheduleChange: string;
-  paymentMode: string;
+  paymentMode: PaymentMode;
 };
 
 function Field({
@@ -94,9 +99,9 @@ export default function NewEasyFlyBookingPage() {
     airlineCode: "",
     depDate: "",
     returnDate: "",
-    amountPaid: "",
-    amountReceived: "",
-    extraAmount: "",
+    payAgreed: "",
+    paid: "",
+    supplierFees: "",
     refundStatus: "none",
     scheduleChange: "none",
     paymentMode: "card",
@@ -113,11 +118,11 @@ export default function NewEasyFlyBookingPage() {
     return toDateInputValue(depDate);
   }, [createForm.depDate]);
 
-  const supplierPaid = Number(createForm.amountPaid || 0);
-  const clientReceived = Number(createForm.amountReceived || 0);
-  const extraCharges = Number(createForm.extraAmount || 0);
-  const clientPending = Math.max(0, supplierPaid - clientReceived);
-  const earnings = clientReceived - supplierPaid;
+  const payAgreed = Number(createForm.payAgreed || 0);
+  const paid = Number(createForm.paid || 0);
+  const supplierFees = Number(createForm.supplierFees || 0);
+  const pendingAmount = Math.max(0, payAgreed - paid);
+  const earnings = paid - supplierFees;
 
   const updateField = <K extends keyof CreateForm>(key: K, value: CreateForm[K]) => {
     setCreateForm((current) => {
@@ -152,10 +157,11 @@ export default function NewEasyFlyBookingPage() {
         airline_code: createForm.airlineCode.trim() || "AI",
         dep_date: createForm.depDate,
         return_date: createForm.returnDate || createForm.depDate,
-        amount_paid: supplierPaid,
-        amount_received: clientReceived,
-        amount_due: clientPending,
-        extra_amount: extraCharges,
+        amount_paid: supplierFees,
+        amount_received: paid,
+        pay_agreed: payAgreed,
+        amount_due: pendingAmount,
+        extra_amount: 0,
         refund_status: createForm.refundStatus,
         schedule_change: createForm.scheduleChange,
         payment_mode: createForm.paymentMode,
@@ -183,7 +189,7 @@ export default function NewEasyFlyBookingPage() {
     title: "Add Booking",
     subtitle: "Supplier, client amounts & travel details",
     icon: Plus,
-    syncKey: `${createSaving ? 1 : 0}|${adminUser?.username ?? ""}|${createForm.amountPaid}|${createForm.amountReceived}`,
+    syncKey: `${createSaving ? 1 : 0}|${adminUser?.username ?? ""}|${createForm.payAgreed}|${createForm.paid}|${createForm.supplierFees}`,
     actions: (
       <>
         <button
@@ -295,54 +301,48 @@ export default function NewEasyFlyBookingPage() {
       <section className="rounded-[14px] border border-[#D9E1EA] bg-white p-5 shadow-[0_8px_20px_rgba(16,42,67,0.04)]">
         <h2 className="text-sm font-heading font-semibold text-[#102A43]">Amounts</h2>
         <p className="mt-0.5 text-xs text-[#627D98]">
-          Supplier cost, client payment, pending balance, and any extra charges
+          Pay agreed, paid, pending balance, and supplier fees
         </p>
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Supplier paid amount" hint="Amount paid to the supplier / ticket cost">
+          <Field label="Pay Agreed" hint="Total amount agreed with the customer">
             <input
               type="number"
               min="0"
               step="1"
-              value={createForm.amountPaid}
-              onChange={(e) => updateField("amountPaid", e.target.value)}
+              value={createForm.payAgreed}
+              onChange={(e) => updateField("payAgreed", e.target.value)}
               className={fieldClass}
               placeholder="0"
             />
           </Field>
-          <Field label="Client / customer received" hint="Amount received from the client">
+          <Field label="Paid" hint="Amount paid by the customer so far">
             <input
               type="number"
               min="0"
               step="1"
-              value={createForm.amountReceived}
-              onChange={(e) => updateField("amountReceived", e.target.value)}
+              value={createForm.paid}
+              onChange={(e) => updateField("paid", e.target.value)}
               className={fieldClass}
               placeholder="0"
             />
           </Field>
-          <Field
-            label="Client amount pending"
-            hint="Auto: supplier paid − client received"
-          >
+          <Field label="Pending amount" hint="Auto: pay agreed − paid">
             <input
               type="text"
               readOnly
-              value={formatInr(clientPending)}
+              value={formatInr(pendingAmount)}
               className={`${fieldClass} cursor-default bg-[#FFF8F0] text-[#8D5E12] font-semibold`}
               tabIndex={-1}
             />
           </Field>
-          <Field
-            label="Extra charges paid to"
-            hint="Any extra paid to supplier, client, or anyone else"
-          >
+          <Field label="Supplier fees" hint="Fees / amount paid to the supplier">
             <input
               type="number"
               min="0"
               step="1"
-              value={createForm.extraAmount}
-              onChange={(e) => updateField("extraAmount", e.target.value)}
+              value={createForm.supplierFees}
+              onChange={(e) => updateField("supplierFees", e.target.value)}
               className={fieldClass}
               placeholder="0"
             />
@@ -350,23 +350,23 @@ export default function NewEasyFlyBookingPage() {
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <SummaryCard label="Supplier paid" value={formatInr(supplierPaid)} />
-          <SummaryCard label="Client received" value={formatInr(clientReceived)} tone="ok" />
-          <SummaryCard label="Client pending" value={formatInr(clientPending)} tone="warn" />
-          <SummaryCard label="Extra charges" value={formatInr(extraCharges)} tone="info" />
+          <SummaryCard label="Pay agreed" value={formatInr(payAgreed)} />
+          <SummaryCard label="Paid" value={formatInr(paid)} tone="ok" />
+          <SummaryCard label="Pending" value={formatInr(pendingAmount)} tone="warn" />
+          <SummaryCard label="Supplier fees" value={formatInr(supplierFees)} tone="info" />
         </div>
         <p className="mt-3 text-xs text-[#627D98]">
           Earnings preview:{" "}
           <span className={`font-semibold ${earnings >= 0 ? "text-[#006F57]" : "text-[#B42318]"}`}>
             {formatInr(earnings)}
           </span>
-          <span className="text-[#829AB1]"> (client received − supplier paid)</span>
+          <span className="text-[#829AB1]"> (paid − supplier fees)</span>
         </p>
       </section>
 
       <section className="rounded-[14px] border border-[#D9E1EA] bg-white p-5 shadow-[0_8px_20px_rgba(16,42,67,0.04)]">
         <h2 className="text-sm font-heading font-semibold text-[#102A43]">Status & payment</h2>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Refund status">
             <select
               value={createForm.refundStatus}
@@ -389,17 +389,26 @@ export default function NewEasyFlyBookingPage() {
               <option value="major">Major</option>
             </select>
           </Field>
-          <Field label="Payment mode">
-            <select
-              value={createForm.paymentMode}
-              onChange={(e) => updateField("paymentMode", e.target.value)}
-              className={fieldClass}
-            >
-              <option value="card">Card</option>
-              <option value="bank_transfer">Bank transfer</option>
-              <option value="cash">Cash</option>
-            </select>
-          </Field>
+          <div className="sm:col-span-2 rounded-[12px] border border-[#D9E1EA] bg-[#F8FAFC] p-3">
+            <span className="text-xs font-semibold text-[#486581]">Payment mode</span>
+            <p className="mt-0.5 text-[11px] text-[#829AB1]">Choose how this booking was paid — shown in the bookings table.</p>
+            <div className="mt-2.5 flex flex-wrap gap-2" role="group" aria-label="Payment mode">
+              {EASYFLY_PAYMENT_MODE_OPTIONS.map((option) => {
+                const selected = createForm.paymentMode === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => updateField("paymentMode", option.value)}
+                    className={easyflyPaymentMethodChipClass(option.value, selected)}
+                    aria-pressed={selected}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </section>
     </div>

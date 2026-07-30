@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft } from "lucide-react";
 import {
+  formatTaskStatusLabel,
   getTaskEffectiveStatus,
   isTaskCompleted,
   isTaskPending,
+  taskStatusBadgeClass,
   type AdminStaffInternalMessage,
   type AdminTaskItem,
 } from "@/lib/admin-auth";
@@ -64,7 +66,7 @@ function staffActivitySummary(task: AdminTaskItem) {
   if (status === "in_progress") {
     return task.updated_at ? `In progress · updated ${formatDateTime(task.updated_at)}` : "In progress";
   }
-  if (status === "blocked") return "Blocked / needs review";
+  if (status === "blocked") return "Waiting / needs follow-up";
   if (status === "cancelled") return "Cancelled";
   return task.created_at ? `Assigned ${formatDateTime(task.created_at)}` : "Assigned";
 }
@@ -412,8 +414,10 @@ function TaskListRow({ task, onClick }: { task: AdminTaskItem; onClick: () => vo
           </p>
           <p className="text-xs text-[#627D98] truncate mt-0.5">{task.customer_name || "—"}</p>
         </div>
-        <span className="uppercase text-[10px] rounded-full border border-[#D9E1EA] bg-[#F5F7FA] px-2 py-0.5 text-[#486581] shrink-0">
-          {getTaskEffectiveStatus(task)}
+        <span
+          className={`uppercase text-[10px] rounded-full border px-2 py-0.5 font-semibold shrink-0 ${taskStatusBadgeClass(getTaskEffectiveStatus(task))}`}
+        >
+          {formatTaskStatusLabel(getTaskEffectiveStatus(task))}
         </span>
       </div>
       <p className="text-[11px] text-[#627D98] mt-1.5">Deadline: {formatDateOnly(task.deadline)} · View details →</p>
@@ -431,8 +435,10 @@ function TaskDetailView({ task, staffName }: { task: AdminTaskItem; staffName: s
   return (
     <div className="space-y-5 pb-4">
       <div className="flex items-center justify-between gap-2 pt-1">
-        <span className="uppercase text-[11px] rounded-full border border-[#D9E1EA] bg-[#F5F7FA] px-2.5 py-1 text-[#486581]">
-          {getTaskEffectiveStatus(task)}
+        <span
+          className={`uppercase text-[11px] rounded-full border px-2.5 py-1 font-semibold ${taskStatusBadgeClass(getTaskEffectiveStatus(task))}`}
+        >
+          {formatTaskStatusLabel(getTaskEffectiveStatus(task))}
         </span>
         <span className="text-xs text-[#9C4F17] uppercase font-semibold">{task.priority} priority</span>
       </div>

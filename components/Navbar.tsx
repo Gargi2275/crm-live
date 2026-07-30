@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion";
 import Link from "next/link";
@@ -10,7 +10,8 @@ import { Button } from "./ui/Button";
 import Image from "next/image";
 import { useAuth } from "@/context/AuthContext";
 import { usePublicPricing } from "@/hooks/usePublicPricing";
-import { groupServicesByCategory } from "@/lib/service-categories";
+import { startHrefForServiceType } from "@/lib/public-pricing";
+import { groupServicesByCategory, splitPrimaryAndOtherServiceGroups } from "@/lib/service-categories";
 
 const baseNavLinks = [
   { name: "Home", href: "/" },
@@ -47,6 +48,11 @@ export function Navbar() {
     [services],
   );
 
+  const { primaryGroups, otherGroups } = useMemo(
+    () => splitPrimaryAndOtherServiceGroups(serviceGroups),
+    [serviceGroups],
+  );
+
   const serviceHrefs = useMemo(
     () => serviceGroups.flatMap((group) => [group.href, ...group.services.map((s) => s.href)]),
     [serviceGroups],
@@ -70,6 +76,15 @@ export function Navbar() {
   const closeServicesMenu = () => {
     if (servicesCloseTimer.current) clearTimeout(servicesCloseTimer.current);
     servicesCloseTimer.current = setTimeout(() => setActiveDropdown(false), 120);
+  };
+
+  const toggleServicesMenu = (event: MouseEvent) => {
+    event.preventDefault();
+    if (servicesCloseTimer.current) {
+      clearTimeout(servicesCloseTimer.current);
+      servicesCloseTimer.current = null;
+    }
+    setActiveDropdown((open) => !open);
   };
 
   useEffect(() => {
@@ -172,6 +187,7 @@ export function Navbar() {
                 >
                   <Link
                     href={link.href}
+                    onClick={link.servicesMenu ? toggleServicesMenu : undefined}
                     className={`relative flex items-center whitespace-nowrap rounded-md px-2 py-2 text-base font-medium no-underline transition-colors duration-250 xl:px-3 ${
                       isActive || (link.servicesMenu && activeDropdown)
                         ? "text-primary"
@@ -381,7 +397,7 @@ export function Navbar() {
                       </Link>
                       {link.servicesMenu && (
                         <div className="mt-3 ml-1 space-y-5 border-l-2 border-primary/20 pl-4">
-                          {serviceGroups.map((group) => (
+                          {primaryGroups.map((group) => (
                             <div key={group.id}>
                               <Link
                                 href={group.href}
@@ -393,8 +409,29 @@ export function Navbar() {
                                 {group.services.map((service) => (
                                   <Link
                                     key={String(service.id)}
-                                    href={service.href}
+                                    href={startHrefForServiceType(service.serviceType)}
                                     className="block py-1.5 text-[15px] font-medium text-[#334e68] hover:text-primary"
+                                  >
+                                    {service.name}
+                                  </Link>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                          {otherGroups.map((group) => (
+                            <div key={group.id} className="rounded-xl border border-[#e8f1ff] bg-[#f8fbff] p-3">
+                              <Link
+                                href={group.href}
+                                className="block text-center text-sm font-bold text-[#1c69dd]"
+                              >
+                                {group.title}
+                              </Link>
+                              <div className="mt-2 space-y-1">
+                                {group.services.map((service) => (
+                                  <Link
+                                    key={String(service.id)}
+                                    href={startHrefForServiceType(service.serviceType)}
+                                    className="block py-1.5 text-center text-[15px] font-medium text-[#334e68] hover:text-primary"
                                   >
                                     {service.name}
                                   </Link>
@@ -450,53 +487,82 @@ export function Navbar() {
                 >
                   <div
                     role="menu"
-                    className="pointer-events-auto w-full max-w-5xl overflow-hidden rounded-2xl border border-[#d6e8ff] bg-white shadow-[0_24px_56px_rgba(15,42,67,0.16)]"
+                    className="pointer-events-auto flex w-full max-w-5xl max-h-[min(42rem,calc(100dvh-6.5rem))] flex-col overflow-hidden rounded-2xl border border-[#d6e8ff] bg-white shadow-[0_24px_56px_rgba(15,42,67,0.16)]"
                     onMouseEnter={openServicesMenu}
                     onMouseLeave={closeServicesMenu}
                   >
-                    <div className="border-b border-[#eef3f9] px-6 py-4">
+                    <div className="shrink-0 border-b border-[#eef3f9] px-6 py-4">
                       <p className="text-sm font-semibold text-[#102a43]">Browse services by category</p>
                       <p className="mt-0.5 text-sm text-[#627d98]">
                         Pick a category, then choose the service that fits your case.
                       </p>
                     </div>
 
-                    <div
-                      className={`grid gap-0 px-3 py-5 sm:px-5 ${
-                        serviceGroups.length >= 4
-                          ? "grid-cols-2 xl:grid-cols-4"
-                          : serviceGroups.length === 3
-                            ? "grid-cols-1 md:grid-cols-3"
-                            : "grid-cols-1 sm:grid-cols-2"
-                      }`}
-                    >
-                      {pricingLoading && serviceGroups.length === 0
-                        ? Array.from({ length: 4 }).map((_, i) => (
-                            <div key={i} className="animate-pulse space-y-3 px-4 py-2">
-                              <div className="h-4 w-32 rounded bg-[#e8f1ff]" />
-                              <div className="h-5 w-full rounded bg-[#f0f5ff]" />
-                              <div className="h-5 w-5/6 rounded bg-[#f0f5ff]" />
-                            </div>
-                          ))
-                        : serviceGroups.map((group, index) => (
-                            <div
-                              key={group.id}
-                              className={`px-4 py-2 ${
-                                index > 0 ? "border-t border-[#eef3f9] xl:border-t-0 xl:border-l" : ""
-                              }`}
-                            >
+                    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white">
+                      <div
+                        className={`grid gap-0 px-3 py-5 sm:px-5 ${
+                          primaryGroups.length >= 4
+                            ? "grid-cols-2 xl:grid-cols-4"
+                            : primaryGroups.length === 3
+                              ? "grid-cols-1 md:grid-cols-3"
+                              : "grid-cols-1 sm:grid-cols-2"
+                        }`}
+                      >
+                        {pricingLoading && primaryGroups.length === 0
+                          ? Array.from({ length: 4 }).map((_, i) => (
+                              <div key={i} className="animate-pulse space-y-3 px-4 py-2">
+                                <div className="h-4 w-32 rounded bg-[#e8f1ff]" />
+                                <div className="h-5 w-full rounded bg-[#f0f5ff]" />
+                                <div className="h-5 w-5/6 rounded bg-[#f0f5ff]" />
+                              </div>
+                            ))
+                          : primaryGroups.map((group, index) => (
+                              <div
+                                key={group.id}
+                                className={`px-4 py-2 ${
+                                  index > 0 ? "border-t border-[#eef3f9] xl:border-t-0 xl:border-l" : ""
+                                }`}
+                              >
+                                <Link
+                                  href={group.href}
+                                  className="mb-3 block text-[15px] font-bold leading-snug text-[#1c69dd] transition-colors hover:text-[#155fc4]"
+                                >
+                                  {group.title}
+                                </Link>
+                                <ul className="space-y-1">
+                                  {group.services.map((service) => (
+                                    <li key={String(service.id)}>
+                                      <Link
+                                        href={startHrefForServiceType(service.serviceType)}
+                                        className="block rounded-lg px-2 py-2.5 text-[15px] font-medium leading-snug text-[#102a43] transition-colors hover:bg-[#f4f8ff] hover:text-[#1c69dd]"
+                                        onClick={() => setActiveDropdown(false)}
+                                      >
+                                        {service.name}
+                                      </Link>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                      </div>
+
+                      {otherGroups.length > 0 ? (
+                        <div className="border-t border-[#eef3f9] bg-white px-4 py-5 sm:px-6">
+                          {otherGroups.map((group) => (
+                            <div key={group.id} className="mx-auto w-full max-w-sm">
                               <Link
                                 href={group.href}
                                 className="mb-3 block text-[15px] font-bold leading-snug text-[#1c69dd] transition-colors hover:text-[#155fc4]"
                               >
                                 {group.title}
                               </Link>
-                              <ul className="space-y-1">
+                              <ul className="flex flex-col gap-1">
                                 {group.services.map((service) => (
-                                  <li key={String(service.id)}>
+                                  <li key={String(service.id)} className="w-full">
                                     <Link
-                                      href={service.href}
-                                      className="block rounded-lg px-2 py-2.5 text-[15px] font-medium leading-snug text-[#102a43] transition-colors hover:bg-[#f4f8ff] hover:text-[#1c69dd]"
+                                      href={startHrefForServiceType(service.serviceType)}
+                                      className="block w-full rounded-lg px-2 py-2.5 text-left text-[15px] font-medium leading-snug text-[#102a43] transition-colors hover:bg-[#f4f8ff] hover:text-[#1c69dd]"
+                                      onClick={() => setActiveDropdown(false)}
                                     >
                                       {service.name}
                                     </Link>
@@ -505,9 +571,11 @@ export function Navbar() {
                               </ul>
                             </div>
                           ))}
+                        </div>
+                      ) : null}
                     </div>
 
-                    <div className="flex flex-col gap-2 border-t border-[#e8f1ff] bg-[#f8fbff] px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex shrink-0 flex-col gap-2 border-t border-[#e8f1ff] bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
                       <Link
                         href="/services"
                         className="inline-flex items-center gap-1.5 text-[15px] font-bold text-[#1c69dd] transition-colors hover:text-[#155fc4]"

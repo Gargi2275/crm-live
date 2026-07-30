@@ -39,7 +39,7 @@ function HomeFeeCard({ service, auditFee }: { service: CatalogService; auditFee:
           : "border border-gray-200 bg-white hover:border-[#1c69dd]/40 hover:shadow-[0_16px_40px_rgba(28,105,221,0.12)]"
       }`}
     >
-      <h3 className="text-base font-heading font-bold leading-snug text-primary sm:text-lg">
+      <h3 className="text-base font-heading font-bold leading-snug text-dark sm:text-lg">
         {service.name}
       </h3>
       <p className="mt-1 line-clamp-2 text-xs text-textMuted sm:text-sm">{service.description}</p>
@@ -47,7 +47,7 @@ function HomeFeeCard({ service, auditFee }: { service: CatalogService; auditFee:
       <div className="mt-3 border-t border-gray-200 pt-3" />
 
       <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Our Fee</p>
-      <p className="mt-1 text-xl font-heading font-bold tabular-nums text-primary sm:text-2xl">
+      <p className="mt-1 text-xl font-heading font-bold tabular-nums text-dark sm:text-2xl">
         {price}
       </p>
 
@@ -84,7 +84,7 @@ function HomeFeeCard({ service, auditFee }: { service: CatalogService; auditFee:
           className={`block w-full rounded-xl py-2 text-center text-sm font-semibold transition-colors sm:py-2.5 sm:text-base ${
             service.isQuoteBased
               ? "border border-dashed border-gray-400 text-gray-700 hover:bg-white"
-              : "border border-gray-300 text-primary hover:bg-gray-50"
+              : "border border-gray-300 text-dark hover:bg-gray-50"
           }`}
         >
           {service.isQuoteBased ? `${service.cta} →` : "Select"}

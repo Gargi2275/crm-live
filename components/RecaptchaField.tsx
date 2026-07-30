@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { RECAPTCHA_DEV_TOKEN, RECAPTCHA_SITE_KEY, isRecaptchaConfigured } from "@/lib/recaptcha";
+import {
+  RECAPTCHA_DEV_TOKEN,
+  RECAPTCHA_SITE_KEY,
+  isRecaptchaBypassed,
+  isRecaptchaConfigured,
+} from "@/lib/recaptcha";
 
 declare global {
   interface Window {
@@ -56,9 +61,9 @@ function loadRecaptchaScript(): Promise<void> {
 }
 
 /**
- * Compulsory Google reCAPTCHA v2 checkbox.
- * When NEXT_PUBLIC_RECAPTCHA_SITE_KEY is empty, shows a local stand-in checkbox
- * so forms still require captcha until real keys are added.
+ * Google reCAPTCHA v2 checkbox.
+ * Bypassed automatically in local development (NODE_ENV=development).
+ * Required in production / live.
  */
 export function RecaptchaField({ onChange, className = "", error }: RecaptchaFieldProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -72,7 +77,17 @@ export function RecaptchaField({ onChange, className = "", error }: RecaptchaFie
     onChangeRef.current = onChange;
   }, [onChange]);
 
+  // Auto-supply bypass token in local so forms never block on captcha.
+  useEffect(() => {
+    if (!isRecaptchaBypassed) return;
+    onChangeRef.current(RECAPTCHA_DEV_TOKEN);
+  }, []);
+
   const reset = useCallback(() => {
+    if (isRecaptchaBypassed) {
+      onChangeRef.current(RECAPTCHA_DEV_TOKEN);
+      return;
+    }
     if (isRecaptchaConfigured && widgetIdRef.current != null && window.grecaptcha) {
       window.grecaptcha.reset(widgetIdRef.current);
     }
@@ -81,6 +96,7 @@ export function RecaptchaField({ onChange, className = "", error }: RecaptchaFie
   }, []);
 
   useEffect(() => {
+    if (isRecaptchaBypassed) return;
     if (!isRecaptchaConfigured) {
       onChangeRef.current("");
       return;
@@ -114,12 +130,21 @@ export function RecaptchaField({ onChange, className = "", error }: RecaptchaFie
     };
   }, []);
 
-  // Expose reset via DOM dataset for parent forms that need to clear after submit.
   useEffect(() => {
     const el = containerRef.current?.parentElement;
     if (!el) return;
     (el as HTMLElement & { __recaptchaReset?: () => void }).__recaptchaReset = reset;
   }, [reset]);
+
+  if (isRecaptchaBypassed) {
+    return (
+      <div className={className} data-recaptcha-field={reactId} data-recaptcha-bypassed="1">
+        <p className="rounded-xl border border-dashed border-[#c5d8ef] bg-[#f5f9ff] px-3 py-2 text-xs text-[#5f7692]">
+          Captcha skipped in local development.
+        </p>
+      </div>
+    );
+  }
 
   if (!isRecaptchaConfigured) {
     return (
@@ -157,6 +182,7 @@ export function RecaptchaField({ onChange, className = "", error }: RecaptchaFie
 }
 
 export function requireCaptchaToken(token: string): string | null {
+  if (isRecaptchaBypassed) return null;
   if (!(token || "").trim()) return "Please complete the captcha.";
   return null;
 }

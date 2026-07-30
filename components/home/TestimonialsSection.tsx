@@ -28,7 +28,7 @@ export function TestimonialsSection({
           </p>
         </FadeInUp>
 
-        <FadeInUp delay={0.2} className="overflow-visible">
+        <FadeInUp delay={0.15}>
           <TestimonialsCarousel initialItems={testimonials} staticItems={fallbackTestimonials} />
         </FadeInUp>
       </div>

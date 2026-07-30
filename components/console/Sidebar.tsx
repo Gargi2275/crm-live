@@ -122,7 +122,7 @@ export function Sidebar({
       : []),
   ];
 
-  const canViewMyCases = hasMyActiveCasesAccess(role);
+  const canViewMyCases = accessScope !== "easyfly_only" && hasMyActiveCasesAccess(role);
   const dashboardHref = getConsoleHomePath(accessScope);
   const dashboardLabel = getConsoleDashboardLabel(accessScope);
 
@@ -143,14 +143,12 @@ export function Sidebar({
       items: [
         { name: "Performance", href: "/admin/team-performance", icon: Activity },
         { name: "Staff", href: "/admin/staff", icon: Briefcase },
-        { name: "Services", href: "/admin/services", icon: Layers },
-        { name: "Categories", href: "/admin/categories", icon: Layers },
+        { name: "Services & Categories", href: "/admin/services", icon: Layers },
         { name: "Origin countries", href: "/admin/origin-countries", icon: Globe2 },
         { name: "Service hubs", href: "/admin/service-hubs", icon: MapPin },
         { name: "Blog", href: "/admin/blog", icon: Newspaper },
         { name: "Homepage", href: "/admin/homepage", icon: LayoutTemplate },
-        { name: "Roles", href: "/admin/roles", icon: ShieldCheck },
-        { name: "Permissions", href: "/admin/permissions", icon: KeyRound },
+        { name: "Roles & Permissions", href: "/admin/roles", icon: ShieldCheck },
         { name: "Team overview", href: "/admin/team", icon: Users },
       ],
     },
@@ -184,8 +182,8 @@ export function Sidebar({
 
   const canShowItem = (item: NavItem) => {
     if (accessScope === "easyfly_only") {
-      if (item.href === "/admin/easyfly") return false;
-      return item.href === dashboardHref || item.href.startsWith("/admin/easyfly");
+      // EasyFly-only users only see the EasyFly section (dropdown + sub-routes).
+      return item.href === "/admin/easyfly" || item.href.startsWith("/admin/easyfly/");
     }
 
     if (!hasEasyFlyConsoleAccess(accessScope) && item.href.startsWith("/admin/easyfly")) {
@@ -213,7 +211,10 @@ export function Sidebar({
       ...group,
       items: group.items.filter(canShowItem),
     }))
-    .filter((group) => group.items.length > 0);
+    .filter((group) => {
+      if (accessScope === "easyfly_only") return group.id === "easyfly";
+      return group.items.length > 0;
+    });
 
   const linkClass = (isActive: boolean) =>
     cn(

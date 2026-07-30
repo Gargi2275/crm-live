@@ -184,7 +184,11 @@ function CountriesBlock({ countries }: { countries: HubCountrySummary[] }) {
 
 export function Footer({ compact = false }: { compact?: boolean }) {
   const pathname = usePathname() || "";
-  const isDashboard = pathname.startsWith("/dashboard") || pathname.startsWith("/auth");
+  // Auth pages are full-bleed login/signup — no site footer.
+  if (pathname.startsWith("/auth")) {
+    return null;
+  }
+  const isDashboard = pathname.startsWith("/dashboard");
   const useCompact = compact || isDashboard;
   const [countries, setCountries] = useState<HubCountrySummary[]>([]);
   const [supportEmail, setSupportEmail] = useState(DEFAULT_SUPPORT_EMAIL);

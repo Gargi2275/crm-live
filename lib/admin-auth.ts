@@ -163,6 +163,7 @@ export interface AdminDashboardOverview {
     initials: string;
     role: string;
     role_key?: StaffRole | string;
+    access_scope?: AccessScope;
     cases_generated?: number;
     cases_completed?: number;
     assigned: number;
@@ -554,6 +555,36 @@ export function getTaskEffectiveStatus(task: AdminTaskItem): string {
   return effective;
 }
 
+/** User-facing task status label. Internal value `blocked` means waiting / on hold. */
+export function formatTaskStatusLabel(status: string | null | undefined): string {
+  const key = String(status || "").trim().toLowerCase();
+  const labels: Record<string, string> = {
+    new: "New",
+    in_progress: "In progress",
+    completed: "Completed",
+    blocked: "Waiting",
+    cancelled: "Cancelled",
+  };
+  if (labels[key]) return labels[key];
+  return key ? key.replace(/_/g, " ") : "New";
+}
+
+/** Color classes for workload task status badges. */
+export function taskStatusBadgeClass(status: string | null | undefined): string {
+  const key = String(status || "").trim().toLowerCase();
+  const map: Record<string, string> = {
+    new: "border-[#93C5FD] bg-[#DBEAFE] text-[#1E40AF]",
+    in_progress: "border-[#FCD34D] bg-[#FEF3C7] text-[#92400E]",
+    completed: "border-[#6EE7B7] bg-[#D1FAE5] text-[#065F46]",
+    blocked: "border-[#C4B5FD] bg-[#EDE9FE] text-[#5B21B6]",
+    cancelled: "border-[#CBD5E1] bg-[#F1F5F9] text-[#475569]",
+  };
+  return (
+    map[key] ||
+    "border-[#D9E1EA] bg-[#F5F7FA] text-[#486581]"
+  );
+}
+
 export function isTaskPending(task: AdminTaskItem): boolean {
   return PENDING_TASK_STATUSES.has(getTaskEffectiveStatus(task));
 }
@@ -900,8 +931,14 @@ export interface AdminStaffListResponse {
 
 export const listStaffUsersWithSummary = async (options?: {
   excludeAdmin?: boolean;
+  activeOnly?: boolean;
+  status?: "all" | "active" | "inactive";
 }): Promise<AdminStaffListResponse> => {
-  const query = options?.excludeAdmin ? "?exclude_admin=1" : "";
+  const params = new URLSearchParams();
+  if (options?.excludeAdmin) params.set("exclude_admin", "1");
+  if (options?.activeOnly) params.set("active_only", "1");
+  if (options?.status && options.status !== "all") params.set("status", options.status);
+  const query = params.toString() ? `?${params.toString()}` : "";
   const response = await adminAuthenticatedFetch(`/admin/staff/list/${query}`, { method: "GET" });
   const payload = await parseApiResponse<AdminStaffListResponse | AdminStaffUser[]>(response);
   const data = payload.data;
@@ -919,7 +956,8 @@ export const listStaffUsersWithSummary = async (options?: {
 };
 
 export const listStaffUsers = async () => {
-  const payload = await listStaffUsersWithSummary();
+  // Assignees / pickers should only see active staff.
+  const payload = await listStaffUsersWithSummary({ activeOnly: true });
   return payload.staff_users;
 };
 

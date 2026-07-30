@@ -86,12 +86,31 @@ function FilterButton({
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function StatCard({
+  label,
+  value,
+  accent,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <div className="rounded-[16px] border border-[#D9E1EA] bg-white p-4 shadow-[0_8px_22px_rgba(16,42,67,0.04)]">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-[16px] border bg-white p-4 text-left shadow-[0_8px_22px_rgba(16,42,67,0.04)] transition ${
+        active ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+      }`}
+    >
       <p className="text-xs font-medium uppercase tracking-wide text-[#627D98]">{label}</p>
       <p className={`mt-2 text-[22px] font-heading font-semibold ${accent || "text-[#102A43]"}`}>{value}</p>
-    </div>
+    </button>
   );
 }
 
@@ -118,6 +137,7 @@ export default function EasyFlyTravelPage() {
   const [supplierFilter, setSupplierFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
   const [staffFilter, setStaffFilter] = useState<"all" | "assigned" | "unassigned">("all");
+  const [kpiFilter, setKpiFilter] = useState<"upcoming" | "departing" | "returning" | "payment" | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -153,7 +173,7 @@ export default function EasyFlyTravelPage() {
     [bookings],
   );
 
-  const filteredRows = useMemo(() => {
+  const baseFilteredRows = useMemo(() => {
     return bookings.filter((booking) => {
       const matchesDate = matchesTravelFilters(booking, departureFilter, returnFilter, customFrom, customTo);
       const matchesAirline = airlineFilter === "all" || booking.airlineCode === airlineFilter;
@@ -168,19 +188,45 @@ export default function EasyFlyTravelPage() {
         (staffFilter === "unassigned" && booking.createdBy === null);
       return matchesDate && matchesAirline && matchesSupplier && matchesPayment && matchesStaff;
     });
-  }, [airlineFilter, bookings, customFrom, customTo, departureFilter, paymentFilter, returnFilter, staffFilter, supplierFilter]);
+  }, [
+    airlineFilter,
+    bookings,
+    customFrom,
+    customTo,
+    departureFilter,
+    paymentFilter,
+    returnFilter,
+    staffFilter,
+    supplierFilter,
+  ]);
+
+  const filteredRows = useMemo(() => {
+    if (!kpiFilter || kpiFilter === "upcoming") return baseFilteredRows;
+    return baseFilteredRows.filter((booking) => {
+      if (kpiFilter === "departing") {
+        return isDateInWindow(booking.depDate, departureFilter === "all" ? "72h" : departureFilter, customFrom, customTo);
+      }
+      if (kpiFilter === "returning") {
+        return isDateInWindow(booking.returnDate, returnFilter === "all" ? "72h" : returnFilter, "", "");
+      }
+      if (kpiFilter === "payment") {
+        return getPaymentPending(booking) > 0;
+      }
+      return true;
+    });
+  }, [baseFilteredRows, customFrom, customTo, departureFilter, kpiFilter, returnFilter]);
 
   const stats = useMemo(() => {
-    const totalUpcoming = filteredRows.length;
-    const departingSoon = filteredRows.filter((booking) =>
+    const totalUpcoming = baseFilteredRows.length;
+    const departingSoon = baseFilteredRows.filter((booking) =>
       isDateInWindow(booking.depDate, departureFilter === "all" ? "72h" : departureFilter, customFrom, customTo),
     ).length;
-    const returningSoon = filteredRows.filter((booking) =>
+    const returningSoon = baseFilteredRows.filter((booking) =>
       isDateInWindow(booking.returnDate, returnFilter === "all" ? "72h" : returnFilter, "", ""),
     ).length;
-    const paymentPendingCount = filteredRows.filter((booking) => getPaymentPending(booking) > 0).length;
+    const paymentPendingCount = baseFilteredRows.filter((booking) => getPaymentPending(booking) > 0).length;
     return { totalUpcoming, departingSoon, returningSoon, paymentPendingCount };
-  }, [customFrom, customTo, departureFilter, filteredRows, returnFilter]);
+  }, [baseFilteredRows, customFrom, customTo, departureFilter, returnFilter]);
 
   const clearFilters = useCallback(() => {
     setDepartureFilter("72h");
@@ -306,10 +352,36 @@ export default function EasyFlyTravelPage() {
   return (
     <div className="space-y-4 font-body max-w-[1500px] mx-auto">
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <StatCard label="Total upcoming" value={String(stats.totalUpcoming)} />
-        <StatCard label="Departing soon" value={String(stats.departingSoon)} accent="text-[#0B69B7]" />
-        <StatCard label="Returning soon" value={String(stats.returningSoon)} accent="text-[#006F57]" />
-        <StatCard label="Payment pending" value={String(stats.paymentPendingCount)} accent="text-[#8D5E12]" />
+        <StatCard
+          label="Total upcoming"
+          value={String(stats.totalUpcoming)}
+          active={kpiFilter === "upcoming" || kpiFilter === null}
+          onClick={() => setKpiFilter((current) => (current === "upcoming" ? null : "upcoming"))}
+        />
+        <StatCard
+          label="Departing soon"
+          value={String(stats.departingSoon)}
+          accent="text-[#0B69B7]"
+          active={kpiFilter === "departing"}
+          onClick={() => setKpiFilter((current) => (current === "departing" ? null : "departing"))}
+        />
+        <StatCard
+          label="Returning soon"
+          value={String(stats.returningSoon)}
+          accent="text-[#006F57]"
+          active={kpiFilter === "returning"}
+          onClick={() => setKpiFilter((current) => (current === "returning" ? null : "returning"))}
+        />
+        <StatCard
+          label="Payment pending"
+          value={String(stats.paymentPendingCount)}
+          accent="text-[#8D5E12]"
+          active={kpiFilter === "payment"}
+          onClick={() => {
+            setPaymentFilter("pending");
+            setKpiFilter((current) => (current === "payment" ? null : "payment"));
+          }}
+        />
       </div>
 
       {loading ? (

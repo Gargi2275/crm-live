@@ -4,15 +4,19 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { RefreshCw, ClipboardList } from "lucide-react";
+import { RefreshCw, ClipboardList, KanbanSquare, UserCog } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { SlideOverPanel } from "@/components/console/kanban/SlideOverPanel";
 import { useAdminCaseSlideOver } from "@/components/console/kanban/useAdminCaseSlideOver";
+import { KanbanView } from "@/components/console/kanban/KanbanView";
+import { WorkloadView } from "@/components/console/workload/WorkloadView";
+import { subscribeOpenAdminCase } from "@/lib/admin-open-case";
 import {
   getAdminInternalMessagesFeed,
   hasMyActiveCasesAccess,
   listAdminTasks,
+  formatTaskStatusLabel,
   type AdminStaffInternalMessage,
   type AdminTaskItem,
 } from "@/lib/admin-auth";
@@ -23,6 +27,13 @@ const filterFieldClass =
 const PENDING_STATUSES = new Set(["new", "in_progress", "blocked"]);
 
 type KpiFilterKey = "all" | "assigned" | "pending" | "completed";
+type CasesPageTab = "cases" | "pipeline" | "workload";
+
+const CASES_PAGE_TABS: Array<{ id: CasesPageTab; label: string; icon: typeof ClipboardList }> = [
+  { id: "cases", label: "My cases", icon: ClipboardList },
+  { id: "pipeline", label: "Pipeline", icon: KanbanSquare },
+  { id: "workload", label: "Workload", icon: UserCog },
+];
 
 function taskTimestamp(task: AdminTaskItem, field: "completed" | "updated" | "created"): number {
   const raw =
@@ -73,6 +84,7 @@ function MyActiveCasesContent() {
   const [taskTypeFilter, setTaskTypeFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [internalMessages, setInternalMessages] = useState<AdminStaffInternalMessage[]>([]);
+  const [pageTab, setPageTab] = useState<CasesPageTab>("cases");
   const openedFromUrlRef = useRef(false);
 
   const effectiveKpi = kpiFilter === "all" ? null : kpiFilter;
@@ -217,8 +229,20 @@ function MyActiveCasesContent() {
     const applicationId = Number(searchParams.get("applicationId") || 0);
     if (!applicationId || !isStaff) return;
     openedFromUrlRef.current = true;
+    setPageTab("cases");
     void openCaseByApplicationId(applicationId);
   }, [searchParams, isStaff, openCaseByApplicationId]);
+
+  useEffect(() => {
+    if (!isStaff) return;
+    return subscribeOpenAdminCase((detail) => {
+      setPageTab("cases");
+      void openCaseByApplicationId(detail.applicationId, {
+        reference: detail.reference,
+        customer: detail.customer,
+      });
+    });
+  }, [isStaff, openCaseByApplicationId]);
 
   const handleStageResolvedWithReload = async (nextStage: Parameters<typeof handleStageResolved>[0]) => {
     await handleStageResolved(nextStage);
@@ -236,79 +260,94 @@ function MyActiveCasesContent() {
     isStaff
       ? {
           title: "My Active Cases",
-          subtitle: "Work your queue in the drawer",
+          subtitle:
+            pageTab === "pipeline"
+              ? "Pipeline opens here — no redirect"
+              : pageTab === "workload"
+                ? "Workload opens here — no redirect"
+                : "Work your queue in the drawer",
           icon: ClipboardList,
-          search: {
-            value: searchQuery,
-            onChange: setSearchQuery,
-            placeholder: "Search ref or customer…",
-          },
-          activeFilterCount,
-          onClearFilters: resetFilters,
-          meta: loading ? "Loading…" : `${filteredTasks.length} task(s)`,
-          syncKey: `${searchQuery}|${dateFrom}|${dateTo}|${priorityFilter}|${taskTypeFilter}|${kpiFilter}|${loading}|${filteredTasks.length}|${taskTypeOptions.join(",")}`,
-          actions: (
-            <button
-              type="button"
-              onClick={() => void load()}
-              disabled={loading}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              Refresh
-            </button>
-          ),
-          filtersContent: (
-            <>
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68] text-xs">From date</span>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className={filterFieldClass}
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68] text-xs">To date</span>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className={filterFieldClass}
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68] text-xs">Priority</span>
-                <select
-                  value={priorityFilter}
-                  onChange={(e) => setPriorityFilter(e.target.value)}
-                  className={filterFieldClass}
-                >
-                  <option value="all">All</option>
-                  <option value="urgent">Urgent</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-[#334E68] text-xs">Task type</span>
-                <select
-                  value={taskTypeFilter}
-                  onChange={(e) => setTaskTypeFilter(e.target.value)}
-                  className={filterFieldClass}
-                >
-                  <option value="all">All types</option>
-                  {taskTypeOptions.map((taskType) => (
-                    <option key={taskType} value={taskType}>
-                      {taskType.replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          ),
+          search:
+            pageTab === "cases"
+              ? {
+                  value: searchQuery,
+                  onChange: setSearchQuery,
+                  placeholder: "Search ref or customer…",
+                }
+              : undefined,
+          activeFilterCount: pageTab === "cases" ? activeFilterCount : 0,
+          onClearFilters: pageTab === "cases" ? resetFilters : undefined,
+          meta:
+            pageTab === "cases"
+              ? loading
+                ? "Loading…"
+                : `${filteredTasks.length} task(s)`
+              : CASES_PAGE_TABS.find((t) => t.id === pageTab)?.label,
+          syncKey: `${pageTab}|${searchQuery}|${dateFrom}|${dateTo}|${priorityFilter}|${taskTypeFilter}|${kpiFilter}|${loading}|${filteredTasks.length}|${taskTypeOptions.join(",")}`,
+          actions:
+            pageTab === "cases" ? (
+              <button
+                type="button"
+                onClick={() => void load()}
+                disabled={loading}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+            ) : undefined,
+          filtersContent:
+            pageTab === "cases" ? (
+              <>
+                <label className="block text-sm">
+                  <span className="font-medium text-[#334E68] text-xs">From date</span>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className={filterFieldClass}
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-[#334E68] text-xs">To date</span>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className={filterFieldClass}
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-[#334E68] text-xs">Priority</span>
+                  <select
+                    value={priorityFilter}
+                    onChange={(e) => setPriorityFilter(e.target.value)}
+                    className={filterFieldClass}
+                  >
+                    <option value="all">All</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-[#334E68] text-xs">Task type</span>
+                  <select
+                    value={taskTypeFilter}
+                    onChange={(e) => setTaskTypeFilter(e.target.value)}
+                    className={filterFieldClass}
+                  >
+                    <option value="all">All types</option>
+                    {taskTypeOptions.map((taskType) => (
+                      <option key={taskType} value={taskType}>
+                        {taskType.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : undefined,
         }
       : { title: "My Active Cases", icon: ClipboardList },
   );
@@ -339,6 +378,36 @@ function MyActiveCasesContent() {
         onStageResolved={handleStageResolvedWithReload}
       />
 
+      <div className="flex flex-wrap items-center gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
+        {CASES_PAGE_TABS.map((tab) => {
+          const Icon = tab.icon;
+          const active = pageTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setPageTab(tab.id)}
+              className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-semibold transition ${
+                active
+                  ? "bg-[#009877] text-white shadow-sm"
+                  : "text-[#486581] hover:bg-[#F5F7FA] hover:text-[#102A43]"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          );
+        })}
+        <p className="ml-auto hidden px-2 text-[11px] text-[#829AB1] sm:block">
+          Tabs open here — no page redirect
+        </p>
+      </div>
+
+      {pageTab === "pipeline" ? <KanbanView embedded /> : null}
+      {pageTab === "workload" ? <WorkloadView embedded /> : null}
+
+      {pageTab === "cases" ? (
+        <>
       <details className="bg-white rounded-[10px] border border-[#D9E1EA] group">
         <summary className="list-none cursor-pointer px-3 py-2 text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
           Internal team notes
@@ -440,8 +509,8 @@ function MyActiveCasesContent() {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                      <span className="rounded-full bg-[#F5F7FA] border border-[#D9E1EA] px-2 py-0.5 uppercase text-[#486581]">
-                        {task.status}
+                      <span className="rounded-full bg-[#F5F7FA] border border-[#D9E1EA] px-2 py-0.5 text-[#486581]">
+                        {formatTaskStatusLabel(task.status)}
                       </span>
                       <span className="rounded-full bg-[#B87333]/12 px-2 py-0.5 uppercase text-[#9C4F17]">
                         {task.priority}
@@ -457,6 +526,8 @@ function MyActiveCasesContent() {
           </div>
         )}
       </div>
+        </>
+      ) : null}
     </div>
   );
 }

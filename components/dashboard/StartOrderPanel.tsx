@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { Check, ChevronDown, Plus, Trash2, X } from "lucide-react";
+import toast from "react-hot-toast";
 import {
   CheckoutShell,
   VisamentOrderSummary,
@@ -9,6 +11,13 @@ import {
   checkoutLabelClass,
   type VisamentSummaryApplicant,
 } from "@/components/checkout/CheckoutShell";
+import { OTPInput } from "@/components/OTPInput";
+import {
+  listCustomerApplications,
+  requestApplicantEmailOtp,
+  verifyApplicantEmailOtp,
+  type CustomerApplicationSummary,
+} from "@/lib/api";
 
 export type StartOrderServiceOption = {
   id: string;
@@ -20,6 +29,8 @@ export type StartOrderServiceOption = {
   categoryName?: string;
   /** Journey/backend mapping id (e.g. new-oci). Selection UI uses unique `id` so all catalog rows show. */
   journeyId?: string | null;
+  /** Live catalog `service_type` (e.g. e_oci). */
+  serviceType?: string | null;
   /** Live catalog Service.pk — preferred when creating applications. */
   catalogId?: number | string | null;
 };
@@ -30,14 +41,20 @@ export type StartOrderApplicant = {
   email: string;
   mobile: string;
   applyingFrom: string;
+  emailVerified?: boolean;
+  emailVerificationToken?: string;
 };
 
 type StartOrderPanelProps = {
   services: StartOrderServiceOption[];
   selectedServiceId: string | null;
   showAllServicesInitially?: boolean;
+  /** When false, hide the resume list (e.g. starting a new service from navbar). */
+  showExistingApplications?: boolean;
   primaryApplicant: StartOrderApplicant;
   extraApplicants: StartOrderApplicant[];
+  /** Logged-in account email — same-email applicants skip OTP. */
+  accountEmail?: string;
   apiLoading?: boolean;
   error?: string | null;
   onPrimaryChange: (patch: Partial<StartOrderApplicant>) => void;
@@ -66,12 +83,29 @@ function formatMoney(amount: number): string {
   return `£${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}`;
 }
 
+function emailsMatch(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase() && Boolean(a.trim());
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function applicantNeedsEmailOtp(applicant: StartOrderApplicant, accountEmail?: string): boolean {
+  const email = applicant.email.trim();
+  if (!email || !isValidEmail(email)) return false;
+  if (accountEmail && emailsMatch(email, accountEmail)) return false;
+  return !(applicant.emailVerified && applicant.emailVerificationToken);
+}
+
 export function StartOrderPanel({
   services,
   selectedServiceId,
   showAllServicesInitially = false,
+  showExistingApplications = true,
   primaryApplicant,
   extraApplicants,
+  accountEmail,
   apiLoading,
   error,
   onPrimaryChange,
@@ -90,6 +124,43 @@ export function StartOrderPanel({
     [primaryApplicant.id]: selectedServiceId ? [selectedServiceId] : [],
   }));
   const [touched, setTouched] = useState({ name: false, email: false });
+  const [otpTarget, setOtpTarget] = useState<{
+    applicantId: string;
+    email: string;
+    fullName: string;
+    mobile: string;
+    isPrimary: boolean;
+  } | null>(null);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpSent, setOtpSent] = useState(false);
+  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
+  const [existingApps, setExistingApps] = useState<CustomerApplicationSummary[]>([]);
+  const [existingAppsLoading, setExistingAppsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!showExistingApplications) {
+      setExistingApps([]);
+      setExistingAppsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setExistingAppsLoading(true);
+    listCustomerApplications()
+      .then((rows) => {
+        if (!cancelled) setExistingApps(rows.slice(0, 8));
+      })
+      .catch(() => {
+        if (!cancelled) setExistingApps([]);
+      })
+      .finally(() => {
+        if (!cancelled) setExistingAppsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showExistingApplications]);
 
   const serviceGroups = useMemo(() => {
     const map = new Map<string, { key: string; label: string; services: StartOrderServiceOption[]; rank: number }>();
@@ -121,27 +192,86 @@ export function StartOrderPanel({
 
   const resolveOptionId = (serviceKey: string | null | undefined): string | null => {
     if (!serviceKey) return null;
+    const normalized = serviceKey.trim().toLowerCase().replace(/[\s-]+/g, "_");
     const direct = services.find((s) => s.id === serviceKey);
     if (direct) return direct.id;
-    const byJourney = services.find((s) => s.journeyId === serviceKey);
-    if (byJourney) return byJourney.id;
+    const byJourneyExact = services.find((s) => s.journeyId === serviceKey);
+    if (byJourneyExact) return byJourneyExact.id;
+    const byTypeOrJourney = services.find((s) => {
+      const journey = String(s.journeyId || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      const type = String(s.serviceType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      const idNorm = String(s.id || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      const nameNorm = String(s.name || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      return (
+        journey === normalized ||
+        type === normalized ||
+        idNorm === normalized ||
+        nameNorm === normalized ||
+        nameNorm === `e_${normalized}` ||
+        (normalized === "e_oci" && (type === "e_oci" || journey === "e_oci" || nameNorm.includes("e_oci")))
+      );
+    });
+    if (byTypeOrJourney) return byTypeOrJourney.id;
     return serviceKey;
   };
 
-  // Prefill URL/preselected service for primary — still keep all options visible.
+  const isServiceSelected = (selectedIds: string[], serviceId: string): boolean => {
+    if (selectedIds.includes(serviceId)) return true;
+    const row = services.find((s) => s.id === serviceId);
+    if (!row) return false;
+    const aliases = new Set(
+      [
+        row.id,
+        row.journeyId,
+        row.serviceType,
+        String(row.journeyId || "").replace(/-/g, "_"),
+        String(row.serviceType || "").replace(/_/g, "-"),
+      ]
+        .filter(Boolean)
+        .map((value) => String(value)),
+    );
+    return selectedIds.some((id) => aliases.has(id) || aliases.has(String(id).replace(/-/g, "_")) || aliases.has(String(id).replace(/_/g, "-")));
+  };
+
   useEffect(() => {
     const optionId = resolveOptionId(selectedServiceId);
     if (!optionId || optionId === "undecided") return;
     setApplicantServices((current) => {
       const prev = current[primaryApplicant.id] || [];
-      if (prev.includes(optionId)) return current;
-      const withoutAlias = prev.filter((id) => id !== selectedServiceId);
+      if (prev.includes(optionId) || isServiceSelected(prev, optionId)) {
+        // Normalize aliases to the live option id.
+        if (prev.includes(optionId)) return current;
+        const cleaned = prev.filter((id) => id !== selectedServiceId && id !== String(selectedServiceId || "").replace(/-/g, "_"));
+        return {
+          ...current,
+          [primaryApplicant.id]: [...cleaned, optionId],
+        };
+      }
+      const withoutAlias = prev.filter(
+        (id) =>
+          id !== selectedServiceId &&
+          id !== String(selectedServiceId || "").replace(/-/g, "_") &&
+          id !== String(selectedServiceId || "").replace(/_/g, "-"),
+      );
       return {
         ...current,
         [primaryApplicant.id]: [...withoutAlias, optionId],
       };
     });
   }, [selectedServiceId, primaryApplicant.id, services]);
+
+  // Keep the category containing the preselected service expanded.
+  useEffect(() => {
+    const optionId = resolveOptionId(selectedServiceId);
+    if (!optionId || !serviceGroups.length) return;
+    const group = serviceGroups.find((g) => g.services.some((s) => s.id === optionId || isServiceSelected([optionId], s.id)));
+    if (!group) return;
+    const expandKey = `${primaryApplicant.id}:${group.key}`;
+    setExpandedCategories((current) => {
+      if (current[expandKey]) return current;
+      return { ...current, [expandKey]: true };
+    });
+  }, [selectedServiceId, serviceGroups, primaryApplicant.id, services]);
 
   useEffect(() => {
     setApplicantServices((current) => {
@@ -161,7 +291,6 @@ export function StartOrderPanel({
   }, [allApplicants, activeApplicantId, primaryApplicant.id]);
 
   useEffect(() => {
-    // Keep category tabs closed by default; only clean up stale keys when applicants/groups change.
     if (!serviceGroups.length) return;
     setExpandedCategories((current) => {
       const valid = new Set<string>();
@@ -184,12 +313,10 @@ export function StartOrderPanel({
   }, [serviceGroups, allApplicants]);
 
   const primarySelectedServices = applicantServices[primaryApplicant.id] || [];
-  const currentServiceId = primarySelectedServices[0] || selectedServiceId || services[0]?.id || "";
+  const currentServiceId = primarySelectedServices[0] || selectedServiceId || "";
   const onSelectServiceRef = useRef(onSelectService);
   onSelectServiceRef.current = onSelectService;
 
-  // Sync parent journey selection once when the primary cart service changes — do not
-  // depend on onSelectService identity (parent often passes an inline function).
   useEffect(() => {
     if (!currentServiceId || currentServiceId === "undecided") return;
     const row = services.find((s) => s.id === currentServiceId);
@@ -250,10 +377,132 @@ export function StartOrderPanel({
     });
   };
 
+  const patchEmailField = (isPrimary: boolean, applicantId: string, email: string) => {
+    const sameAsAccount = Boolean(accountEmail && emailsMatch(email, accountEmail));
+    const patch: Partial<StartOrderApplicant> = {
+      email,
+      emailVerified: sameAsAccount,
+      emailVerificationToken: "",
+    };
+    if (isPrimary) onPrimaryChange(patch);
+    else onUpdateApplicant(applicantId, patch);
+  };
+
+  const openOtpModal = async (applicant: StartOrderApplicant, isPrimary: boolean) => {
+    const email = applicant.email.trim();
+    if (!isValidEmail(email)) {
+      toast.error("Enter a valid email before verifying.");
+      return;
+    }
+    if (accountEmail && emailsMatch(email, accountEmail)) {
+      const patch = { emailVerified: true, emailVerificationToken: "" };
+      if (isPrimary) onPrimaryChange(patch);
+      else onUpdateApplicant(applicant.id, patch);
+      toast.success("This email matches your account.");
+      return;
+    }
+
+    setOtpTarget({
+      applicantId: applicant.id,
+      email,
+      fullName: applicant.fullName,
+      mobile: applicant.mobile,
+      isPrimary,
+    });
+    setOtpError(null);
+    setOtpSent(false);
+    setDevOtpHint(null);
+    setOtpSending(true);
+    try {
+      const result = await requestApplicantEmailOtp({
+        email,
+        fullName: applicant.fullName,
+        mobile: applicant.mobile,
+      });
+      if (result.already_owned) {
+        const patch = { emailVerified: true, emailVerificationToken: "" };
+        if (isPrimary) onPrimaryChange(patch);
+        else onUpdateApplicant(applicant.id, patch);
+        setOtpTarget(null);
+        toast.success("This email matches your account.");
+        return;
+      }
+      setOtpSent(true);
+      if (result.otp) setDevOtpHint(result.otp);
+      toast.success("Verification code sent.");
+    } catch (err) {
+      setOtpTarget(null);
+      toast.error(err instanceof Error ? err.message : "Could not send verification code.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleOtpComplete = useCallback(
+    async (otp: string) => {
+      if (!otpTarget || otpVerifying) return;
+      setOtpVerifying(true);
+      setOtpError(null);
+      try {
+        const result = await verifyApplicantEmailOtp({
+          email: otpTarget.email,
+          otp,
+          fullName: otpTarget.fullName,
+          mobile: otpTarget.mobile,
+        });
+        const patch: Partial<StartOrderApplicant> = {
+          emailVerified: true,
+          emailVerificationToken: result.verification_token || "",
+        };
+        if (otpTarget.isPrimary) onPrimaryChange(patch);
+        else onUpdateApplicant(otpTarget.applicantId, patch);
+        setOtpTarget(null);
+        toast.success("Email verified.");
+      } catch (err) {
+        setOtpError(err instanceof Error ? err.message : "Invalid OTP.");
+      } finally {
+        setOtpVerifying(false);
+      }
+    },
+    [otpTarget, otpVerifying, onPrimaryChange, onUpdateApplicant],
+  );
+
   const nameError = touched.name && !primaryApplicant.fullName.trim();
   const emailError =
     touched.email &&
-    (!primaryApplicant.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(primaryApplicant.email.trim()));
+    (!primaryApplicant.email.trim() || !isValidEmail(primaryApplicant.email.trim()));
+
+  const renderEmailStatus = (applicant: StartOrderApplicant, isPrimary: boolean) => {
+    const email = applicant.email.trim();
+    const sameAsAccount = Boolean(accountEmail && emailsMatch(email, accountEmail));
+    const verified = Boolean(applicant.emailVerified) || sameAsAccount;
+    const needsOtp = applicantNeedsEmailOtp(applicant, accountEmail);
+
+    return (
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        {verified ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+            <Check className="h-3 w-3" strokeWidth={3} />
+            {sameAsAccount ? "Your account email" : "Email verified"}
+          </span>
+        ) : email && isValidEmail(email) ? (
+          <button
+            type="button"
+            disabled={apiLoading || otpSending}
+            onClick={() => openOtpModal(applicant, isPrimary)}
+            className="text-[11px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
+          >
+            {otpSending && otpTarget?.applicantId === applicant.id ? "Sending…" : "Verify email"}
+          </button>
+        ) : (
+          <p className="text-[11px] text-[#829AB1]">We&apos;ll send a verification code to this email.</p>
+        )}
+        {needsOtp && email && isValidEmail(email) ? (
+          <span className="text-[11px] font-medium text-amber-700">Verification required to continue</span>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderApplicantFields = (
     applicant: StartOrderApplicant,
@@ -311,16 +560,12 @@ export function StartOrderPanel({
           onBlur={() => {
             if (opts.isPrimary) setTouched((t) => ({ ...t, email: true }));
           }}
-          onChange={(e) =>
-            opts.isPrimary
-              ? onPrimaryChange({ email: e.target.value })
-              : onUpdateApplicant(applicant.id, { email: e.target.value })
-          }
+          onChange={(e) => patchEmailField(opts.isPrimary, applicant.id, e.target.value)}
         />
         {opts.isPrimary && emailError ? (
           <p className="mt-1 text-[11px] font-medium text-[#E11D48]">Valid email is required</p>
         ) : (
-          <p className="mt-1 text-[11px] text-[#829AB1]">We&apos;ll send a verification code to this email.</p>
+          renderEmailStatus(applicant, opts.isPrimary)
         )}
       </div>
       <div>
@@ -364,7 +609,7 @@ export function StartOrderPanel({
 
             if (isSingle) {
               const service = group.services[0];
-              const checked = selected.includes(service.id);
+              const checked = isServiceSelected(selected, service.id);
               return (
                 <button
                   key={`${applicant.id}-${service.id}`}
@@ -392,58 +637,46 @@ export function StartOrderPanel({
               );
             }
 
-            const groupSelectedCount = group.services.filter((s) => selected.includes(s.id)).length;
+            const groupSelectedCount = group.services.filter((s) => isServiceSelected(selected, s.id)).length;
             return (
               <div
                 key={`${applicant.id}-${group.key}`}
-                className={`overflow-hidden rounded-xl border ${
-                  open ? "border-[#1A56DB]/50" : "border-[#D7E4F4]"
-                }`}
+                className="overflow-hidden rounded-xl border border-[#D7E4F4] bg-white"
               >
                 <button
                   type="button"
+                  disabled={apiLoading}
                   onClick={() =>
                     setExpandedCategories((current) => ({
                       ...current,
                       [expandKey]: !current[expandKey],
                     }))
                   }
-                  className={`flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left ${
-                    open ? "bg-[#EFF6FF]" : "bg-white hover:bg-[#F8FBFF]"
-                  }`}
+                  className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left"
                 >
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-[#0F1F3D]">{group.label}</p>
-                    {groupSelectedCount ? (
-                      <p className="text-[11px] text-[#1A56DB]">{groupSelectedCount} selected</p>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {groupSelectedCount ? (
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1A56DB] text-white">
-                        <Check className="h-3 w-3" strokeWidth={3} />
-                      </span>
-                    ) : null}
-                    <ChevronDown
-                      className={`h-4 w-4 text-[#627D98] transition-transform ${open ? "rotate-180" : ""}`}
-                    />
-                  </div>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-semibold text-[#0F1F3D]">{group.label}</span>
+                    <span className="text-[11px] text-[#829AB1]">
+                      {group.services.length} services
+                      {groupSelectedCount ? ` · ${groupSelectedCount} selected` : ""}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 text-[#829AB1] transition ${open ? "rotate-180" : ""}`}
+                  />
                 </button>
-
                 {open ? (
-                  <div className="grid gap-2 border-t border-[#DCE7F5] bg-white p-2.5 sm:grid-cols-2">
+                  <div className="space-y-1 border-t border-[#EEF2F7] bg-[#F8FBFF] p-2">
                     {group.services.map((service) => {
-                      const checked = selected.includes(service.id);
+                      const checked = isServiceSelected(selected, service.id);
                       return (
                         <button
                           key={`${applicant.id}-${service.id}`}
                           type="button"
                           disabled={apiLoading}
                           onClick={() => toggleApplicantService(applicant.id, service.id)}
-                          className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition ${
-                            checked
-                              ? "border-[#1A56DB] bg-[#1A56DB] text-white"
-                              : "border-[#E1E7EF] bg-white text-[#102A43] hover:border-[#1A56DB]/40"
+                          className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition ${
+                            checked ? "bg-[#1A56DB] text-white" : "hover:bg-white"
                           }`}
                         >
                           <span className="flex min-w-0 items-center gap-2">
@@ -475,82 +708,189 @@ export function StartOrderPanel({
   };
 
   return (
-    <CheckoutShell
-      title="Start your order"
-      currentStep={0}
-      summary={
-        <VisamentOrderSummary applicants={summaryApplicants} totalLabel={formatMoney(orderTotal)} />
-      }
-      form={
-        <div className="space-y-5">
-          {renderApplicantFields(primaryApplicant, { isPrimary: true, indexLabel: "Applicant 1" })}
-          {renderServiceChooser(primaryApplicant)}
-
-          {extraApplicants.map((applicant, index) => (
-            <div key={applicant.id} className="rounded-2xl border border-[#D7E4F4] bg-[#F8FBFF] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <p className="text-[14px] font-semibold text-[#0F1F3D]">Applicant {index + 2}</p>
-                <button
-                  type="button"
-                  onClick={() => onRemoveApplicant(applicant.id)}
-                  className="inline-flex items-center gap-1 text-[12px] font-medium text-[#E11D48]"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Remove
-                </button>
+    <>
+      <CheckoutShell
+        title="Start your order"
+        currentStep={0}
+        summary={
+          <VisamentOrderSummary applicants={summaryApplicants} totalLabel={formatMoney(orderTotal)} />
+        }
+        form={
+          <div className="space-y-5">
+            {showExistingApplications && (existingAppsLoading || existingApps.length) ? (
+              <div className="rounded-2xl border border-[#D7E4F4] bg-[#F8FBFF] p-4">
+                <p className="text-[13px] font-semibold text-[#0F1F3D]">Your applications</p>
+                <p className="mt-0.5 text-[11px] text-[#829AB1]">
+                  Cases on your account — including ones you started for verified co-applicants.
+                </p>
+                {existingAppsLoading ? (
+                  <p className="mt-2 text-[12px] text-[#829AB1]">Loading…</p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {existingApps.map((app) => (
+                      <li
+                        key={app.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#E4EDF8] bg-white px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-[12px] font-semibold text-[#0F1F3D]">
+                            {app.service_name || app.service_type || "Application"}
+                          </p>
+                          <p className="truncate text-[11px] text-[#829AB1]">
+                            {app.reference_number}
+                            {app.customer_name ? ` · ${app.customer_name}` : ""}
+                            {app.application_status ? ` · ${app.application_status}` : ""}
+                          </p>
+                        </div>
+                        <Link
+                          href={`/dashboard/document-audit?reference=${encodeURIComponent(app.reference_number)}&resume=1`}
+                          className="shrink-0 text-[11px] font-semibold text-[#1A56DB] hover:underline"
+                        >
+                          Continue
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              {renderApplicantFields(applicant, { isPrimary: false, indexLabel: `Applicant ${index + 2}` })}
-              {renderServiceChooser(applicant)}
+            ) : null}
+
+            {renderApplicantFields(primaryApplicant, { isPrimary: true, indexLabel: "Applicant 1" })}
+            {renderServiceChooser(primaryApplicant)}
+
+            {extraApplicants.map((applicant, index) => (
+              <div key={applicant.id} className="rounded-2xl border border-[#D7E4F4] bg-[#F8FBFF] p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-[14px] font-semibold text-[#0F1F3D]">Applicant {index + 2}</p>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveApplicant(applicant.id)}
+                    className="inline-flex items-center gap-1 text-[12px] font-medium text-[#E11D48]"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
+                  </button>
+                </div>
+                {renderApplicantFields(applicant, { isPrimary: false, indexLabel: `Applicant ${index + 2}` })}
+                {renderServiceChooser(applicant)}
+              </div>
+            ))}
+
+            <div className="flex flex-col gap-3 border-t border-[#EEF2F7] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={onAddApplicant}
+                disabled={apiLoading}
+                className="inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
+              >
+                <Plus className="h-4 w-4" />
+                Add Applicant
+              </button>
+
+              <button
+                type="button"
+                disabled={apiLoading || primarySelectedServices.length === 0}
+                onClick={() => {
+                  setTouched({ name: true, email: true });
+                  if (!primaryApplicant.fullName.trim() || !primaryApplicant.email.trim()) return;
+                  const incomplete = extraApplicants.find(
+                    (row) => !row.fullName.trim() || !row.email.trim(),
+                  );
+                  if (incomplete) return;
+                  const withoutServices = allApplicants.find(
+                    (row) => !(applicantServices[row.id] || []).length,
+                  );
+                  if (withoutServices) return;
+                  const unverified = allApplicants.find((row) => applicantNeedsEmailOtp(row, accountEmail));
+                  if (unverified) {
+                    toast.error(`Verify ${unverified.email || "applicant email"} before continuing.`);
+                    return;
+                  }
+                  onContinue(
+                    allApplicants.map((applicant) => ({
+                      applicant,
+                      serviceIds: applicantServices[applicant.id] || [],
+                    })),
+                  );
+                }}
+                className="inline-flex w-full items-center justify-center rounded-xl bg-[#1A56DB] px-10 py-3 text-[14px] font-semibold text-white transition hover:bg-[#1648B5] disabled:cursor-not-allowed disabled:bg-[#C5D0DE] sm:w-auto sm:min-w-[200px]"
+              >
+                {apiLoading ? "Please wait…" : "Continue"}
+              </button>
             </div>
-          ))}
 
-          <div className="flex flex-col gap-3 border-t border-[#EEF2F7] pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="button"
-              onClick={onAddApplicant}
-              disabled={apiLoading}
-              className="inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
-            >
-              <Plus className="h-4 w-4" />
-              Add Applicant
-            </button>
+            {extraApplicants.some((row) => !(applicantServices[row.id] || []).length) ? (
+              <p className="text-[12px] font-medium text-[#E11D48]">
+                Each applicant needs at least one service selected.
+              </p>
+            ) : null}
 
-            <button
-              type="button"
-              disabled={apiLoading || primarySelectedServices.length === 0}
-              onClick={() => {
-                setTouched({ name: true, email: true });
-                if (!primaryApplicant.fullName.trim() || !primaryApplicant.email.trim()) return;
-                const incomplete = extraApplicants.find(
-                  (row) => !row.fullName.trim() || !row.email.trim(),
-                );
-                if (incomplete) return;
-                const withoutServices = allApplicants.find(
-                  (row) => !(applicantServices[row.id] || []).length,
-                );
-                if (withoutServices) return;
-                onContinue(
-                  allApplicants.map((applicant) => ({
-                    applicant,
-                    serviceIds: applicantServices[applicant.id] || [],
-                  })),
-                );
-              }}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-[#1A56DB] px-10 py-3 text-[14px] font-semibold text-white transition hover:bg-[#1648B5] disabled:cursor-not-allowed disabled:bg-[#C5D0DE] sm:w-auto sm:min-w-[200px]"
-            >
-              {apiLoading ? "Please wait…" : "Continue"}
-            </button>
+            {error ? <p className="text-[13px] font-medium text-rose-600">{error}</p> : null}
           </div>
+        }
+      />
 
-          {extraApplicants.some((row) => !(applicantServices[row.id] || []).length) ? (
-            <p className="text-[12px] font-medium text-[#E11D48]">
-              Each applicant needs at least one service selected.
-            </p>
-          ) : null}
+      {otpTarget ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0F1F3D]/45 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl sm:p-6">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[16px] font-semibold text-[#0F1F3D]">Verify applicant email</p>
+                <p className="mt-1 text-[13px] text-[#829AB1]">
+                  Enter the 6-digit code sent to{" "}
+                  <span className="font-semibold text-[#0F1F3D]">{otpTarget.email}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOtpTarget(null)}
+                className="rounded-lg p-1 text-[#829AB1] hover:bg-slate-100"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
 
-          {error ? <p className="text-[13px] font-medium text-rose-600">{error}</p> : null}
+            <div className="mt-5 flex justify-center">
+              <OTPInput onComplete={handleOtpComplete} error={Boolean(otpError)} />
+            </div>
+            {otpError ? <p className="mt-3 text-center text-[12px] font-medium text-[#E11D48]">{otpError}</p> : null}
+            {devOtpHint ? (
+              <p className="mt-2 text-center text-[11px] text-amber-700">Dev OTP: {devOtpHint}</p>
+            ) : null}
+            {otpVerifying ? <p className="mt-3 text-center text-[12px] text-[#829AB1]">Verifying…</p> : null}
+
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                disabled={otpSending}
+                onClick={() =>
+                  openOtpModal(
+                    {
+                      id: otpTarget.applicantId,
+                      fullName: otpTarget.fullName,
+                      email: otpTarget.email,
+                      mobile: otpTarget.mobile,
+                      applyingFrom: "United Kingdom",
+                    },
+                    otpTarget.isPrimary,
+                  )
+                }
+                className="text-[12px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
+              >
+                {otpSending ? "Sending…" : otpSent ? "Resend code" : "Send code"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setOtpTarget(null)}
+                className="rounded-xl border border-[#D7E4F4] px-4 py-2 text-[13px] font-semibold text-[#0F1F3D]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
-      }
-    />
+      ) : null}
+    </>
   );
 }

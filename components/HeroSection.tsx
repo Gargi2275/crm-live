@@ -1,10 +1,9 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform, type MotionValue } from "framer-motion";
+import { motion, useReducedMotion, useScroll, useTransform, type MotionValue } from "framer-motion";
 import {
   ArrowRight,
   BookUser,
-  ChevronDown,
   IdCard,
   Plane,
   Stamp,
@@ -30,6 +29,7 @@ const BLURB_BY_CATEGORY: Record<string, string> = {
   evisa: "Tourist e-Visa options",
   passport: "Indian passport renewal",
   apostille: "Document legalisation",
+  other: "Extra travel & document help",
 };
 
 function startHrefForService(service: CatalogService): string {
@@ -193,7 +193,9 @@ export default function HeroSection() {
     >();
 
     for (const service of visible) {
-      const key = service.category || "other";
+      const rawKey = service.category || "other";
+      const key =
+        rawKey === "pan_card" || rawKey === "uncategorized" ? "other" : rawKey;
       const existing = byCategory.get(key);
       const option = {
         label: service.name,
@@ -206,7 +208,11 @@ export default function HeroSection() {
       } else {
         byCategory.set(key, {
           key,
-          label: service.categoryName || key.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+          label:
+            key === "other"
+              ? "Others"
+              : service.categoryName ||
+                key.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
           blurb: BLURB_BY_CATEGORY[key] || service.description || "Start your application",
           icon: ICON_BY_CATEGORY[key] || Sparkles,
           options: [option],
@@ -214,7 +220,7 @@ export default function HeroSection() {
       }
     }
 
-    const preferred = ["oci", "evisa", "passport", "apostille"];
+    const preferred = ["oci", "passport", "evisa", "apostille", "other"];
     const rows = Array.from(byCategory.values());
     rows.sort((a, b) => {
       const ai = preferred.indexOf(a.key);
@@ -227,14 +233,15 @@ export default function HeroSection() {
     return rows;
   }, [services]);
 
-  const [activeGroup, setActiveGroup] = useState<ServiceKey>("oci");
+  const [activeGroup, setActiveGroup] = useState<ServiceKey | null>("oci");
   const [selectedOptions, setSelectedOptions] = useState<Record<ServiceKey, string>>({});
 
   useEffect(() => {
     if (!serviceGroups.length) return;
-    setActiveGroup((current) =>
-      serviceGroups.some((g) => g.key === current) ? current : serviceGroups[0].key,
-    );
+    setActiveGroup((current) => {
+      if (current == null) return null;
+      return serviceGroups.some((g) => g.key === current) ? current : serviceGroups[0].key;
+    });
     setSelectedOptions((prev) => {
       const next = { ...prev };
       for (const group of serviceGroups) {
@@ -246,11 +253,12 @@ export default function HeroSection() {
     });
   }, [serviceGroups]);
 
-  const active = serviceGroups.find((g) => g.key === activeGroup) ?? serviceGroups[0];
-  const continueHref =
-    active?.options.find((o) => o.label === selectedOptions[active.key])?.href ??
-    active?.options[0]?.href ??
-    "/services";
+  const active = serviceGroups.find((g) => g.key === activeGroup) ?? null;
+  const selectedLabel =
+    (active && selectedOptions[active.key]) || active?.options[0]?.label || "";
+  const selectedOption =
+    active?.options.find((o) => o.label === selectedLabel) ?? active?.options[0];
+  const continueHref = selectedOption?.href ?? "/services";
 
   return (
     <section
@@ -342,83 +350,97 @@ export default function HeroSection() {
               <p className="mt-4 text-sm font-normal text-[#7f92a6]">Loading services…</p>
             ) : (
               <>
-                <div className="mt-4 grid grid-cols-2 gap-2.5">
+                <div className="mt-4 grid grid-cols-2 gap-2">
                   {serviceGroups.map((group) => {
                     const Icon = group.icon;
                     const selected = activeGroup === group.key;
+                    const groupSelectedLabel =
+                      selectedOptions[group.key] || group.options[0]?.label || "";
                     return (
-                      <button
+                      <div
                         key={group.key}
-                        type="button"
-                        onClick={() => setActiveGroup(group.key)}
-                        className={`rounded-xl border px-3 py-3.5 text-left transition ${
-                          selected
-                            ? "border-primary bg-[#ecf6ff] shadow-[0_0_0_1px_rgba(51,161,253,0.25)]"
-                            : "border-[#e8f0f8] bg-white hover:border-[#c8ddf5]"
-                        }`}
+                        className={selected ? "col-span-2" : undefined}
                       >
-                        <span className="flex items-start gap-2.5">
-                          <span
-                            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                              selected ? "bg-primary text-white" : "bg-[#ecf6ff] text-accent"
-                            }`}
-                          >
-                            <Icon className="h-4 w-4" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block text-[14px] font-normal text-dark">{group.label}</span>
-                            <span className="mt-0.5 block text-[11px] font-normal leading-snug text-[#7f92a6]">
-                              {group.blurb}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveGroup((current) => (current === group.key ? null : group.key))
+                          }
+                          className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                            selected
+                              ? "border-primary bg-[#ecf6ff] shadow-[0_0_0_1px_rgba(51,161,253,0.25)]"
+                              : "border-[#e8f0f8] bg-white hover:border-[#c8ddf5]"
+                          }`}
+                          aria-expanded={selected}
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <span
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                                selected ? "bg-primary text-white" : "bg-[#ecf6ff] text-accent"
+                              }`}
+                            >
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[13px] font-semibold text-dark">
+                                {group.label}
+                              </span>
+                              {selected ? (
+                                <span className="mt-0.5 block text-[11px] text-[#7f92a6]">
+                                  {group.blurb}
+                                </span>
+                              ) : null}
                             </span>
                           </span>
-                        </span>
-                      </button>
+                        </button>
+
+                        {selected ? (
+                          <div className="mt-2 rounded-xl border border-[#e8f0f8] bg-[#f7fbff] p-3">
+                            <div className="flex flex-wrap gap-2">
+                              {group.options.map((opt) => {
+                                const isOptSelected = groupSelectedLabel === opt.label;
+                                return (
+                                  <button
+                                    key={opt.serviceType || opt.label}
+                                    type="button"
+                                    onClick={() =>
+                                      setSelectedOptions((prev) => ({
+                                        ...prev,
+                                        [group.key]: opt.label,
+                                      }))
+                                    }
+                                    title={opt.price}
+                                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                      isOptSelected
+                                        ? "border-primary bg-white text-primary shadow-sm"
+                                        : "border-[#e8f0f8] bg-white text-[#627d98] hover:border-primary/40 hover:text-primary"
+                                    }`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="mt-3 flex flex-wrap items-center gap-3">
+                              <Link href={continueHref}>
+                                <span className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-btn transition-colors hover:bg-accent">
+                                  Get started
+                                  <ArrowRight className="h-4 w-4" />
+                                </span>
+                              </Link>
+                              <p className="text-xs text-[#829AB1]">
+                                {groupSelectedLabel}
+                                {group.options.find((o) => o.label === groupSelectedLabel)?.price
+                                  ? ` · ${group.options.find((o) => o.label === groupSelectedLabel)?.price}`
+                                  : ""}
+                              </p>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
-
-                {active ? (
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={active.key}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      transition={{ duration: 0.18 }}
-                      className="mt-4 rounded-xl bg-[#f7fbff] p-3.5"
-                    >
-                      <label className="block text-[11px] font-normal uppercase tracking-[0.08em] text-textMuted">
-                        Select service
-                      </label>
-                      <div className="relative mt-2">
-                        <select
-                          value={selectedOptions[active.key] || active.options[0]?.label || ""}
-                          onChange={(e) =>
-                            setSelectedOptions((prev) => ({
-                              ...prev,
-                              [active.key]: e.target.value,
-                            }))
-                          }
-                          className="w-full appearance-none rounded-xl border border-[#dce8f5] bg-white py-3 pl-3.5 pr-10 text-[13px] font-normal text-dark outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                        >
-                          {active.options.map((opt) => (
-                            <option key={opt.label} value={opt.label}>
-                              {opt.label} · {opt.price}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7f92a6]" />
-                      </div>
-
-                      <Link href={continueHref} className="mt-3 block">
-                        <span className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-dark px-4 py-3 text-[14px] font-normal text-white transition hover:bg-primary">
-                          Continue with {active.label}
-                          <ArrowRight className="h-4 w-4" />
-                        </span>
-                      </Link>
-                    </motion.div>
-                  </AnimatePresence>
-                ) : null}
               </>
             )}
           </div>

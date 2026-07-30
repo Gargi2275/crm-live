@@ -3,6 +3,67 @@ import { adminAuthenticatedFetch } from "@/lib/admin-auth";
 export type RefundStatus = "none" | "pending" | "credit_note";
 export type ScheduleChange = "none" | "minor" | "major";
 export type PaymentMode = "card" | "bank_transfer" | "cash";
+export type EasyFlyLedgerMethod = "cash" | "card" | "bank_transfer" | "payment_link" | "other";
+
+export const EASYFLY_PAYMENT_MODE_OPTIONS: { value: PaymentMode; label: string }[] = [
+  { value: "card", label: "Card" },
+  { value: "bank_transfer", label: "Bank Transfer" },
+  { value: "cash", label: "Cash" },
+];
+
+export const EASYFLY_LEDGER_METHOD_OPTIONS: { value: EasyFlyLedgerMethod; label: string }[] = [
+  { value: "cash", label: "Cash" },
+  { value: "card", label: "Card" },
+  { value: "bank_transfer", label: "Bank Transfer" },
+  { value: "payment_link", label: "Payment Link" },
+  { value: "other", label: "Other" },
+];
+
+/** Color chips for EasyFly payment method selectors / badges. */
+export function easyflyPaymentMethodChipClass(method: string, selected = false): string {
+  const base =
+    "inline-flex items-center justify-center rounded-[10px] border px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1";
+  const map: Record<string, { idle: string; active: string; ring: string }> = {
+    card: {
+      idle: "border-[#93C5FD] bg-[#EFF6FF] text-[#1D4ED8] hover:bg-[#DBEAFE]",
+      active: "border-[#2563EB] bg-[#2563EB] text-white shadow-sm",
+      ring: "focus-visible:ring-[#93C5FD]",
+    },
+    bank_transfer: {
+      idle: "border-[#C4B5FD] bg-[#F5F3FF] text-[#6D28D9] hover:bg-[#EDE9FE]",
+      active: "border-[#7C3AED] bg-[#7C3AED] text-white shadow-sm",
+      ring: "focus-visible:ring-[#C4B5FD]",
+    },
+    cash: {
+      idle: "border-[#6EE7B7] bg-[#ECFDF5] text-[#047857] hover:bg-[#D1FAE5]",
+      active: "border-[#059669] bg-[#059669] text-white shadow-sm",
+      ring: "focus-visible:ring-[#6EE7B7]",
+    },
+    payment_link: {
+      idle: "border-[#FCD34D] bg-[#FFFBEB] text-[#B45309] hover:bg-[#FEF3C7]",
+      active: "border-[#D97706] bg-[#D97706] text-white shadow-sm",
+      ring: "focus-visible:ring-[#FCD34D]",
+    },
+    other: {
+      idle: "border-[#CBD5E1] bg-[#F8FAFC] text-[#475569] hover:bg-[#F1F5F9]",
+      active: "border-[#475569] bg-[#475569] text-white shadow-sm",
+      ring: "focus-visible:ring-[#CBD5E1]",
+    },
+  };
+  const style = map[method] || map.other;
+  return `${base} ${selected ? style.active : style.idle} ${style.ring}`;
+}
+
+export function easyflyPaymentMethodBadgeClass(method: string): string {
+  const map: Record<string, string> = {
+    card: "border-[#93C5FD] bg-[#DBEAFE] text-[#1E40AF]",
+    bank_transfer: "border-[#C4B5FD] bg-[#EDE9FE] text-[#5B21B6]",
+    cash: "border-[#6EE7B7] bg-[#D1FAE5] text-[#065F46]",
+    payment_link: "border-[#FCD34D] bg-[#FEF3C7] text-[#92400E]",
+    other: "border-[#CBD5E1] bg-[#F1F5F9] text-[#334155]",
+  };
+  return `inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${map[method] || map.other}`;
+}
 
 export type EasyFlyAttachmentKey =
   | "invoice"
@@ -27,7 +88,7 @@ export type EasyFlyPaymentLedgerEntry = {
   booking: number;
   date: string;
   amount: string;
-  method: "cash" | "card" | "bank_transfer" | "payment_link" | "other";
+  method: EasyFlyLedgerMethod;
   proofUploaded: boolean;
   proofUrl: string;
   proofFileName: string;
@@ -46,7 +107,7 @@ type EasyFlyPaymentLedgerEntryApi = {
   booking: number;
   date: string;
   amount: string;
-  method: "cash" | "card" | "bank_transfer" | "payment_link" | "other";
+  method: EasyFlyLedgerMethod;
   proof_uploaded: boolean;
   proof_url: string;
   proof_file_name: string;
@@ -72,6 +133,7 @@ export type EasyFlyBooking = {
   returnDate: string;
   amountPaid: number;
   amountReceived: number;
+  payAgreed: number;
   amountDue: number;
   extraAmount: number;
   paymentDueDate: string | null;
@@ -113,6 +175,7 @@ type EasyFlyBookingApi = {
   return_date: string;
   amount_paid: number;
   amount_received: number;
+  pay_agreed?: number;
   amount_due: number;
   extra_amount?: number;
   payment_due_date: string | null;
@@ -203,6 +266,7 @@ const toBooking = (booking: EasyFlyBookingApi): EasyFlyBooking => ({
   returnDate: booking.return_date,
   amountPaid: booking.amount_paid,
   amountReceived: booking.amount_received,
+  payAgreed: Number(booking.pay_agreed ?? 0),
   amountDue: booking.amount_due,
   extraAmount: Number(booking.extra_amount ?? 0),
   paymentDueDate: booking.payment_due_date ?? null,
@@ -469,6 +533,8 @@ export type EasyFlyStaffRevenueEntry = {
   supplier: string;
   amountPaid: string;
   amountReceived: string;
+  payAgreed: string;
+  govtFees: string;
   paymentMode: PaymentMode;
   receiptUploaded: boolean;
   receiptUrl: string;
@@ -489,6 +555,8 @@ type EasyFlyStaffRevenueEntryApi = {
   supplier: string;
   amount_paid: string;
   amount_received: string;
+  pay_agreed?: string;
+  govt_fees?: string;
   payment_mode: PaymentMode;
   receipt_uploaded: boolean;
   receipt_url: string;
@@ -509,6 +577,8 @@ const toStaffRevenueEntry = (entry: EasyFlyStaffRevenueEntryApi): EasyFlyStaffRe
   supplier: entry.supplier,
   amountPaid: entry.amount_paid,
   amountReceived: entry.amount_received,
+  payAgreed: entry.pay_agreed ?? "0",
+  govtFees: entry.govt_fees ?? "0",
   paymentMode: entry.payment_mode,
   receiptUploaded: entry.receipt_uploaded,
   receiptUrl: entry.receipt_url,
@@ -528,6 +598,8 @@ export const createEasyFlyStaffRevenueEntry = async (body: {
   supplier: string;
   amountPaid: string;
   amountReceived: string;
+  payAgreed?: string;
+  govtFees?: string;
   paymentMode: PaymentMode;
   notes?: string;
   receiptFile?: File | null;
@@ -538,6 +610,8 @@ export const createEasyFlyStaffRevenueEntry = async (body: {
   formData.append("supplier", body.supplier);
   formData.append("amount_paid", body.amountPaid);
   formData.append("amount_received", body.amountReceived);
+  formData.append("pay_agreed", body.payAgreed ?? "0");
+  formData.append("govt_fees", body.govtFees ?? "0");
   formData.append("payment_mode", body.paymentMode);
   if (body.notes) formData.append("notes", body.notes);
   if (body.receiptFile) formData.append("receipt_file", body.receiptFile);

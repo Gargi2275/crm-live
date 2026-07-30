@@ -90,6 +90,24 @@ section {
 	color: #062747;
 }
 
+@keyframes dashboard-particle-float {
+	0%,
+	100% {
+		transform: translate3d(0, 0, 0);
+		opacity: 0.3;
+	}
+	50% {
+		transform: translate3d(0, -18px, 0);
+		opacity: 0.85;
+	}
+}
+
+.dashboard-particle {
+	animation-name: dashboard-particle-float;
+	animation-timing-function: ease-in-out;
+	animation-iteration-count: infinite;
+}
+
 /* Stable thin scrollbar — always reserved so it does not flicker in/out. */
 html::-webkit-scrollbar {
 	width: 10px;

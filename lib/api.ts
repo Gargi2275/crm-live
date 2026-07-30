@@ -639,6 +639,7 @@ export const createApplication = async (
     applicantEmail?: string;
     applicantMobile?: string;
     applyingFrom?: string;
+    applicantEmailVerificationToken?: string;
   },
 ): Promise<CreateApplicationResponse> => {
   try {
@@ -654,6 +655,9 @@ export const createApplication = async (
     if (options?.applicantEmail) body.applicant_email = options.applicantEmail;
     if (options?.applicantMobile) body.applicant_mobile = options.applicantMobile;
     if (options?.applyingFrom) body.applying_from = options.applyingFrom;
+    if (options?.applicantEmailVerificationToken) {
+      body.applicant_email_verification_token = options.applicantEmailVerificationToken;
+    }
 
     const response = await authenticatedFetch(`${API_BASE_URL}/applications/create/`, {
       method: 'POST',
@@ -670,6 +674,79 @@ export const createApplication = async (
     throw new Error(error instanceof Error ? error.message : 'Could not start your application. Please try again.');
   }
 }
+
+export type ApplicantEmailOtpResponse = {
+  email: string;
+  otp_expires_in_minutes?: number;
+  already_owned?: boolean;
+  otp?: string;
+  verification_token?: string;
+  expires_in_seconds?: number;
+};
+
+export const requestApplicantEmailOtp = async (payload: {
+  email: string;
+  fullName?: string;
+  mobile?: string;
+}): Promise<ApplicantEmailOtpResponse> => {
+  const response = await authenticatedFetch(`${API_BASE_URL}/applications/applicant-email/request-otp/`, {
+    method: 'POST',
+    body: JSON.stringify({
+      email: payload.email,
+      full_name: payload.fullName || '',
+      mobile: payload.mobile || '',
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as ApplicantEmailOtpResponse;
+};
+
+export const verifyApplicantEmailOtp = async (payload: {
+  email: string;
+  otp: string;
+  fullName?: string;
+  mobile?: string;
+}): Promise<ApplicantEmailOtpResponse> => {
+  const response = await authenticatedFetch(`${API_BASE_URL}/applications/applicant-email/verify-otp/`, {
+    method: 'POST',
+    body: JSON.stringify({
+      email: payload.email,
+      otp: payload.otp,
+      full_name: payload.fullName || '',
+      mobile: payload.mobile || '',
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as ApplicantEmailOtpResponse;
+};
+
+export type CustomerApplicationSummary = {
+  id: number;
+  reference_number: string;
+  service_name?: string;
+  service_type?: string;
+  application_status?: string;
+  customer_name?: string;
+  notes?: string;
+  created_by?: number | null;
+  created_at?: string;
+};
+
+export const listCustomerApplications = async (): Promise<CustomerApplicationSummary[]> => {
+  const response = await authenticatedFetch(`${API_BASE_URL}/applications/`, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  const data = raw?.data ?? raw;
+  return Array.isArray(data) ? (data as CustomerApplicationSummary[]) : [];
+};
 
 export const createApostillePreCheck = async (payload: ApostillePreCheckPayload): Promise<ApostillePreCheckResponse> => {
   try {

@@ -17,6 +17,8 @@ import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeConte
 export default function RevenuePage() {
   const { adminUser } = useAdminAuth();
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+  const [kpiFilter, setKpiFilter] = useState<"all" | "conversion" | "weekly" | "pending">("all");
+  const [staffPeriod, setStaffPeriod] = useState<"today" | "30d" | "total">("total");
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -72,6 +74,22 @@ export default function RevenuePage() {
     [dashboardData?.staff_members],
   );
 
+  const filteredServiceRows = useMemo(() => {
+    if (kpiFilter === "pending") return serviceRows.filter((row) => row.revenue <= 0);
+    if (kpiFilter === "weekly" || kpiFilter === "conversion") return serviceRows.filter((row) => row.revenue > 0);
+    return serviceRows;
+  }, [kpiFilter, serviceRows]);
+
+  const filteredStaffRows = useMemo(() => {
+    if (staffPeriod === "today") {
+      return staffRevenueRows.filter((staff) => Number(staff.revenue_30d || 0) > 0);
+    }
+    if (staffPeriod === "30d") {
+      return staffRevenueRows.filter((staff) => Number(staff.revenue_30d || 0) > 0);
+    }
+    return staffRevenueRows.filter((staff) => Number(staff.revenue_total || 0) > 0 || true);
+  }, [staffPeriod, staffRevenueRows]);
+
   if (isOwnRevenue) {
     const staffRevenue = staffKpiSnapshot;
     return (
@@ -86,24 +104,45 @@ export default function RevenuePage() {
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-3">
+          <button
+            type="button"
+            onClick={() => setStaffPeriod("today")}
+            aria-pressed={staffPeriod === "today"}
+            className={`bg-white border rounded-[12px] p-3 text-left transition ${
+              staffPeriod === "today" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+            }`}
+          >
             <p className="text-xs text-[#627D98]">Today</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">
               {formatInr(Number(staffRevenue?.revenue_today || 0))}
             </p>
-          </div>
-          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-3">
+          </button>
+          <button
+            type="button"
+            onClick={() => setStaffPeriod("30d")}
+            aria-pressed={staffPeriod === "30d"}
+            className={`bg-white border rounded-[12px] p-3 text-left transition ${
+              staffPeriod === "30d" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+            }`}
+          >
             <p className="text-xs text-[#627D98]">Last 30 days</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">
               {formatInr(Number(staffRevenue?.revenue_30d || 0))}
             </p>
-          </div>
-          <div className="bg-white border border-[#D9E1EA] rounded-[12px] p-3">
+          </button>
+          <button
+            type="button"
+            onClick={() => setStaffPeriod("total")}
+            aria-pressed={staffPeriod === "total"}
+            className={`bg-white border rounded-[12px] p-3 text-left transition ${
+              staffPeriod === "total" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+            }`}
+          >
             <p className="text-xs text-[#627D98]">All time</p>
             <p className="mt-1 text-lg font-heading font-semibold text-[#102A43]">
               {formatInr(Number(staffRevenue?.revenue_total || 0))}
             </p>
-          </div>
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -160,18 +199,39 @@ export default function RevenuePage() {
       className="space-y-4 font-body max-w-[1300px] mx-auto"
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        <button
+          type="button"
+          onClick={() => setKpiFilter((current) => (current === "conversion" ? "all" : "conversion"))}
+          aria-pressed={kpiFilter === "conversion"}
+          className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left transition ${
+            kpiFilter === "conversion" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+          }`}
+        >
           <p className="text-xs text-[#627D98]">Conversion</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><TrendingUp className="w-4 h-4 text-[#009877]" />{adminKpiSnapshot?.conversion ?? healthMetrics?.conversion ?? "0%"}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        </button>
+        <button
+          type="button"
+          onClick={() => setKpiFilter((current) => (current === "weekly" ? "all" : "weekly"))}
+          aria-pressed={kpiFilter === "weekly"}
+          className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left transition ${
+            kpiFilter === "weekly" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+          }`}
+        >
           <p className="text-xs text-[#627D98]">Weekly collections</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><BarChart3 className="w-4 h-4 text-[#0B69B7]" />{formatInr(weeklyCollections)}</p>
-        </div>
-        <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-3">
+        </button>
+        <button
+          type="button"
+          onClick={() => setKpiFilter((current) => (current === "pending" ? "all" : "pending"))}
+          aria-pressed={kpiFilter === "pending"}
+          className={`bg-white border-[0.5px] rounded-[12px] p-3 text-left transition ${
+            kpiFilter === "pending" ? "border-[#009877] ring-1 ring-[#009877]/25 bg-[#009877]/5" : "border-[#D9E1EA] hover:bg-[#F8FAFC]"
+          }`}
+        >
           <p className="text-xs text-[#627D98]">Pending payments</p>
           <p className="mt-1 text-lg font-heading font-semibold text-[#102A43] inline-flex items-center gap-2"><Landmark className="w-4 h-4 text-[#9C4F17]" />{formatInr(Number(healthMetrics?.pending_payments || 0))}</p>
-        </div>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -222,13 +282,21 @@ export default function RevenuePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              {serviceRows.map((row) => (
-                <tr key={row.service}>
-                  <td className="px-4 py-2.5">{row.service}</td>
-                  <td className="px-4 py-2.5">{row.share.toFixed(1)}%</td>
-                  <td className="px-4 py-2.5">{formatInr(row.revenue)}</td>
+              {filteredServiceRows.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-4 py-8 text-center text-[#627D98]">
+                    No services match this KPI filter.
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                filteredServiceRows.map((row) => (
+                  <tr key={row.service}>
+                    <td className="px-4 py-2.5">{row.service}</td>
+                    <td className="px-4 py-2.5">{row.share.toFixed(1)}%</td>
+                    <td className="px-4 py-2.5">{formatInr(row.revenue)}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -252,14 +320,14 @@ export default function RevenuePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-              {staffRevenueRows.length === 0 ? (
+              {filteredStaffRows.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-4 text-[#627D98]">
                     No staff revenue data yet.
                   </td>
                 </tr>
               ) : (
-                staffRevenueRows.map((staff) => (
+                filteredStaffRows.map((staff) => (
                   <tr key={staff.id}>
                     <td className="px-4 py-2.5 font-medium text-[#102A43]">{staff.name}</td>
                     <td className="px-4 py-2.5 capitalize">{String(staff.role || "").replace(/_/g, " ")}</td>

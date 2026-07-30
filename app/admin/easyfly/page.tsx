@@ -5,9 +5,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   deleteEasyFlyBooking,
+  easyflyPaymentMethodBadgeClass,
+  EASYFLY_PAYMENT_MODE_OPTIONS,
   listEasyFlyBookings,
   type EasyFlyBooking,
   type EasyFlyPermissions,
+  type PaymentMode,
 } from "@/lib/easyfly";
 import toast from "react-hot-toast";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
@@ -48,6 +51,14 @@ function scheduleTone(status: ScheduleChange) {
   if (status === "none") return "neutral";
   if (status === "minor") return "warning";
   return "danger";
+}
+
+function paymentModeLabel(mode: PaymentMode | string): string {
+  const match = EASYFLY_PAYMENT_MODE_OPTIONS.find((option) => option.value === mode);
+  if (match) return match.label;
+  return String(mode || "—")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function BookingTag({ label, tone }: { label: string; tone: "neutral" | "success" | "warning" | "danger" | "purple" }) {
@@ -122,8 +133,11 @@ type KpiFilter =
   | "supplier_paid"
   | "client_received"
   | "client_pending"
-  | "extra_paid"
+  | "cash"
+  | "online"
   | "earnings";
+
+type PaymentChannelFilter = "all" | "cash" | "online";
 
 function StatCard({
   label,
@@ -157,10 +171,18 @@ function StatCard({
 }
 
 const getPaymentPending = (booking: EasyFlyBooking) =>
-  Math.max(0, booking.amountDue || booking.amountPaid - booking.amountReceived);
+  Math.max(0, booking.amountDue || (booking.payAgreed || 0) - booking.amountReceived);
 
 const getEarnings = (booking: EasyFlyBooking) =>
   Math.max(0, booking.amountReceived - booking.amountPaid);
+
+const isCashPayment = (mode: PaymentMode | string | null | undefined) =>
+  String(mode || "").toLowerCase() === "cash";
+
+const isOnlinePayment = (mode: PaymentMode | string | null | undefined) => {
+  const key = String(mode || "").toLowerCase();
+  return key === "card" || key === "bank_transfer";
+};
 
 const bookingDateValue = (createdAt: string) => (createdAt || "").slice(0, 10);
 
@@ -175,8 +197,10 @@ const matchesKpiFilter = (booking: EasyFlyBooking, kpiFilter: KpiFilter) => {
       return booking.amountReceived > 0;
     case "client_pending":
       return getPaymentPending(booking) > 0;
-    case "extra_paid":
-      return (booking.extraAmount || 0) > 0;
+    case "cash":
+      return isCashPayment(booking.paymentMode);
+    case "online":
+      return isOnlinePayment(booking.paymentMode);
     case "earnings":
       return getEarnings(booking) > 0;
     default:
@@ -199,6 +223,7 @@ export default function EasyFlyBookingsPage() {
   const [depTo, setDepTo] = useState("");
   const [bookedFrom, setBookedFrom] = useState("");
   const [bookedTo, setBookedTo] = useState("");
+  const [paymentChannelFilter, setPaymentChannelFilter] = useState<PaymentChannelFilter>("all");
   const [kpiFilter, setKpiFilter] = useState<KpiFilter>(() =>
     searchParams.get("defaultTab") === "pending" ? "client_pending" : "all",
   );
@@ -255,6 +280,10 @@ export default function EasyFlyBookingsPage() {
       const bookedOn = bookingDateValue(booking.createdAt);
       const matchesBookedFrom = !bookedFrom || bookedOn >= bookedFrom;
       const matchesBookedTo = !bookedTo || bookedOn <= bookedTo;
+      const matchesPaymentChannel =
+        paymentChannelFilter === "all" ||
+        (paymentChannelFilter === "cash" && isCashPayment(booking.paymentMode)) ||
+        (paymentChannelFilter === "online" && isOnlinePayment(booking.paymentMode));
 
       return (
         matchesSearch &&
@@ -263,10 +292,21 @@ export default function EasyFlyBookingsPage() {
         matchesFrom &&
         matchesTo &&
         matchesBookedFrom &&
-        matchesBookedTo
+        matchesBookedTo &&
+        matchesPaymentChannel
       );
     });
-  }, [airlineFilter, baseRows, bookedFrom, bookedTo, depFrom, depTo, search, supplierFilter]);
+  }, [
+    airlineFilter,
+    baseRows,
+    bookedFrom,
+    bookedTo,
+    depFrom,
+    depTo,
+    paymentChannelFilter,
+    search,
+    supplierFilter,
+  ]);
 
   const filteredRows = useMemo(() => {
     const rows = chromeFilteredRows.filter((booking) => matchesKpiFilter(booking, kpiFilter));
@@ -291,9 +331,28 @@ export default function EasyFlyBookingsPage() {
     const amountPaid = chromeFilteredRows.reduce((sum, booking) => sum + booking.amountPaid, 0);
     const amountReceived = chromeFilteredRows.reduce((sum, booking) => sum + booking.amountReceived, 0);
     const pendingPayments = chromeFilteredRows.reduce((sum, booking) => sum + getPaymentPending(booking), 0);
-    const extraPaid = chromeFilteredRows.reduce((sum, booking) => sum + (booking.extraAmount || 0), 0);
+    const totalCash = chromeFilteredRows.reduce(
+      (sum, booking) => sum + (isCashPayment(booking.paymentMode) ? booking.amountReceived : 0),
+      0,
+    );
+    const totalOnline = chromeFilteredRows.reduce(
+      (sum, booking) => sum + (isOnlinePayment(booking.paymentMode) ? booking.amountReceived : 0),
+      0,
+    );
+    const cashCount = chromeFilteredRows.filter((booking) => isCashPayment(booking.paymentMode)).length;
+    const onlineCount = chromeFilteredRows.filter((booking) => isOnlinePayment(booking.paymentMode)).length;
     const earnings = chromeFilteredRows.reduce((sum, booking) => sum + getEarnings(booking), 0);
-    return { totalBookings, amountPaid, amountReceived, pendingPayments, extraPaid, earnings };
+    return {
+      totalBookings,
+      amountPaid,
+      amountReceived,
+      pendingPayments,
+      totalCash,
+      totalOnline,
+      cashCount,
+      onlineCount,
+      earnings,
+    };
   }, [chromeFilteredRows]);
 
   const toggleKpiFilter = (key: KpiFilter) => {
@@ -323,6 +382,7 @@ export default function EasyFlyBookingsPage() {
     setDepTo("");
     setBookedFrom("");
     setBookedTo("");
+    setPaymentChannelFilter("all");
   }, []);
 
   const activeFilterCount =
@@ -331,7 +391,8 @@ export default function EasyFlyBookingsPage() {
     (depFrom ? 1 : 0) +
     (depTo ? 1 : 0) +
     (bookedFrom ? 1 : 0) +
-    (bookedTo ? 1 : 0);
+    (bookedTo ? 1 : 0) +
+    (paymentChannelFilter !== "all" ? 1 : 0);
 
   useSetAdminPageChrome({
     title: isStaffDashboard ? "My EasyFly Dashboard" : "EasyFly Bookings",
@@ -343,7 +404,7 @@ export default function EasyFlyBookingsPage() {
     },
     activeFilterCount,
     onClearFilters: clearFilters,
-    syncKey: `${search}|${supplierFilter}|${airlineFilter}|${depFrom}|${depTo}|${bookedFrom}|${bookedTo}|${kpiFilter}|${loading}|${permissions?.can_create_booking ? 1 : 0}|${isStaffDashboard ? 1 : 0}`,
+    syncKey: `${search}|${supplierFilter}|${airlineFilter}|${depFrom}|${depTo}|${bookedFrom}|${bookedTo}|${paymentChannelFilter}|${kpiFilter}|${loading}|${permissions?.can_create_booking ? 1 : 0}|${isStaffDashboard ? 1 : 0}`,
     actions: permissions?.can_create_booking ? (
       <button
         type="button"
@@ -356,6 +417,18 @@ export default function EasyFlyBookingsPage() {
     ) : undefined,
     filtersContent: (
       <>
+        <label className="block text-sm">
+          <span className="text-xs font-semibold text-[#486581]">Payment</span>
+          <select
+            value={paymentChannelFilter}
+            onChange={(e) => setPaymentChannelFilter(e.target.value as PaymentChannelFilter)}
+            className={filterFieldClass}
+          >
+            <option value="all">All (Cash + Online)</option>
+            <option value="cash">Cash only</option>
+            <option value="online">Online only (Card / Bank)</option>
+          </select>
+        </label>
         <label className="block text-sm">
           <span className="text-xs font-semibold text-[#486581]">Supplier</span>
           <select
@@ -429,7 +502,7 @@ export default function EasyFlyBookingsPage() {
   return (
     <div className="mx-auto max-w-[1560px] space-y-5 font-body">
       <section
-        className={`grid gap-3 ${showFinancials ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" : "grid-cols-1 sm:grid-cols-2"}`}
+        className={`grid gap-3 ${showFinancials ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7" : "grid-cols-1 sm:grid-cols-2"}`}
       >
         <StatCard
           label="Total Bookings"
@@ -440,30 +513,37 @@ export default function EasyFlyBookingsPage() {
         {showFinancials ? (
           <>
             <StatCard
-              label="Supplier Paid"
+              label="Supplier Fees"
               value={formatInr(stats.amountPaid)}
               active={kpiFilter === "supplier_paid"}
               onClick={() => toggleKpiFilter("supplier_paid")}
             />
             <StatCard
-              label="Client Received"
+              label="Paid"
               value={formatInr(stats.amountReceived)}
               active={kpiFilter === "client_received"}
               onClick={() => toggleKpiFilter("client_received")}
             />
             <StatCard
-              label="Client Pending"
+              label="Pending"
               value={formatInr(stats.pendingPayments)}
               accent="text-[#8D5E12]"
               active={kpiFilter === "client_pending"}
               onClick={() => toggleKpiFilter("client_pending")}
             />
             <StatCard
-              label="Extra Paid"
-              value={formatInr(stats.extraPaid)}
-              accent="text-[#1E40AF]"
-              active={kpiFilter === "extra_paid"}
-              onClick={() => toggleKpiFilter("extra_paid")}
+              label="Total Cash"
+              value={formatInr(stats.totalCash)}
+              accent="text-[#047857]"
+              active={kpiFilter === "cash"}
+              onClick={() => toggleKpiFilter("cash")}
+            />
+            <StatCard
+              label="Online"
+              value={formatInr(stats.totalOnline)}
+              accent="text-[#1D4ED8]"
+              active={kpiFilter === "online"}
+              onClick={() => toggleKpiFilter("online")}
             />
             <StatCard
               label="Earnings"
@@ -532,20 +612,20 @@ export default function EasyFlyBookingsPage() {
                     <p className="mt-1 font-medium text-[#102A43]">{formatDate(booking.createdAt)}</p>
                   </div>
                   <div className="rounded-[12px] bg-[#F8FAFC] p-3">
-                    <p className="text-xs text-[#627D98]">Supplier Paid</p>
+                    <p className="text-xs text-[#627D98]">Supplier Fees</p>
                     <p className="mt-1 font-medium text-[#102A43]">{formatInr(booking.amountPaid)}</p>
                   </div>
                   <div className="rounded-[12px] bg-[#F8FAFC] p-3">
-                    <p className="text-xs text-[#627D98]">Client Received</p>
+                    <p className="text-xs text-[#627D98]">Paid</p>
                     <p className="mt-1 font-medium text-[#102A43]">{formatInr(booking.amountReceived)}</p>
                   </div>
                   <div className="rounded-[12px] bg-[#F8FAFC] p-3">
-                    <p className="text-xs text-[#627D98]">Client Pending</p>
+                    <p className="text-xs text-[#627D98]">Pending</p>
                     <p className="mt-1 font-medium text-[#8D5E12]">{formatInr(paymentPending)}</p>
                   </div>
                   <div className="rounded-[12px] bg-[#F8FAFC] p-3">
-                    <p className="text-xs text-[#627D98]">Extra Paid</p>
-                    <p className="mt-1 font-medium text-[#1E40AF]">{formatInr(booking.extraAmount || 0)}</p>
+                    <p className="text-xs text-[#627D98]">Pay Agreed</p>
+                    <p className="mt-1 font-medium text-[#1E40AF]">{formatInr(booking.payAgreed || 0)}</p>
                   </div>
                   <div className="rounded-[12px] bg-[#F8FAFC] p-3 col-span-2">
                     <p className="text-xs text-[#627D98]">Earnings</p>
@@ -554,6 +634,9 @@ export default function EasyFlyBookingsPage() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className={easyflyPaymentMethodBadgeClass(booking.paymentMode)}>
+                    {paymentModeLabel(booking.paymentMode)}
+                  </span>
                   <BookingTag label={booking.scheduleChange === "none" ? "No schedule change" : booking.scheduleChange === "minor" ? "Minor change" : "Major change"} tone={scheduleTone(booking.scheduleChange)} />
                   <div className="flex items-center gap-1.5">
                     <DocumentStatus icon={<FileText className="h-3.5 w-3.5" />} label="Invoice" uploaded={booking.docs.invoice} />
@@ -589,12 +672,13 @@ export default function EasyFlyBookingsPage() {
 
         {/* Desktop table */}
         <div className="hidden lg:block overflow-x-auto">
-          <table className="w-full min-w-[1260px] text-sm">
+          <table className="w-full min-w-[1360px] text-sm">
             <thead className="bg-[#F5F7FA] text-[#486581]">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Booking</th>
                 <th className="px-4 py-3 text-left font-semibold">Dates</th>
                 <th className="px-4 py-3 text-left font-semibold">Amounts</th>
+                <th className="px-4 py-3 text-left font-semibold">Payment</th>
                 <th className="px-4 py-3 text-left font-semibold">Status</th>
                 <th className="px-4 py-3 text-left font-semibold">Docs</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
@@ -624,12 +708,17 @@ export default function EasyFlyBookingsPage() {
                     </td>
                     <td className="px-4 py-4">
                       <div className="space-y-1 text-xs">
-                        <p>Supplier paid: <span className="font-semibold text-[#102A43]">{formatInr(booking.amountPaid)}</span></p>
-                        <p>Client received: <span className="font-semibold text-[#102A43]">{formatInr(booking.amountReceived)}</span></p>
-                        <p>Client pending: <span className="font-semibold text-[#8D5E12]">{formatInr(paymentPending)}</span></p>
-                        <p>Extra paid: <span className="font-semibold text-[#1E40AF]">{formatInr(booking.extraAmount || 0)}</span></p>
+                        <p>Pay agreed: <span className="font-semibold text-[#102A43]">{formatInr(booking.payAgreed || 0)}</span></p>
+                        <p>Paid: <span className="font-semibold text-[#102A43]">{formatInr(booking.amountReceived)}</span></p>
+                        <p>Pending: <span className="font-semibold text-[#8D5E12]">{formatInr(paymentPending)}</span></p>
+                        <p>Supplier fees: <span className="font-semibold text-[#1E40AF]">{formatInr(booking.amountPaid)}</span></p>
                         <p>Earnings: <span className="font-semibold text-[#006F57]">{formatInr(earnings)}</span></p>
                       </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={easyflyPaymentMethodBadgeClass(booking.paymentMode)}>
+                        {paymentModeLabel(booking.paymentMode)}
+                      </span>
                     </td>
                     <td className="px-4 py-4 space-y-2">
                       <BookingTag label={booking.refundStatus === "none" ? "No refund" : booking.refundStatus === "pending" ? "Refund pending" : "Credit note"} tone={statusTone(booking.refundStatus)} />
@@ -665,7 +754,7 @@ export default function EasyFlyBookingsPage() {
 
               {!loading && filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-[#7B8794]">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-[#7B8794]">
                     No bookings match the selected filters.
                   </td>
                 </tr>

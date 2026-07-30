@@ -20,7 +20,6 @@ import {
   Workflow,
   Activity,
   Layers,
-  Tags,
   Plane,
   FolderArchive,
   UserCog,
@@ -34,6 +33,9 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
+import { WorkloadView } from "@/components/console/workload/WorkloadView";
+import { KanbanView } from "@/components/console/kanban/KanbanView";
+import { canEmbedAdminHref, DashboardEmbedPanel } from "@/components/console/DashboardEmbedPanel";
 import {
   XAxis,
   YAxis,
@@ -59,6 +61,7 @@ import {
   patchAdminTask,
   patchAdminApplication,
   staffIdsMatch,
+  formatTaskStatusLabel,
   type AdminApplication,
   type AdminDashboardOverview,
   type AdminTaskItem,
@@ -66,6 +69,9 @@ import {
 } from "@/lib/admin-auth";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
+import { SlideOverPanel } from "@/components/console/kanban/SlideOverPanel";
+import { useAdminCaseSlideOver } from "@/components/console/kanban/useAdminCaseSlideOver";
+import { subscribeOpenAdminCase } from "@/lib/admin-open-case";
 
 type DashboardKpiKey =
   | "all"
@@ -212,11 +218,13 @@ const KPI_DETAIL_LINKS: Record<Exclude<DashboardKpiKey, "all">, { href: string; 
   pending: { href: "/admin/reports?type=pending_payments", label: "Pending report" },
 };
 
-type DashTab = "overview" | "cases" | "money" | "ops";
+type DashTab = "overview" | "cases" | "money" | "ops" | "workload" | "pipeline";
 
 const DASH_TABS: Array<{ id: DashTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "cases", label: "Cases" },
+  { id: "workload", label: "Workload" },
+  { id: "pipeline", label: "Pipeline" },
   { id: "money", label: "Money" },
   { id: "ops", label: "Ops & setup" },
 ];
@@ -248,8 +256,7 @@ const CONSOLE_LINKS: Array<{
     items: [
       { href: "/admin/team-performance", label: "Performance", icon: Activity, hint: "Accuracy" },
       { href: "/admin/staff", label: "Staff", icon: Briefcase, hint: "People" },
-      { href: "/admin/services", label: "Services", icon: Layers, hint: "Catalog" },
-      { href: "/admin/categories", label: "Categories", icon: Tags, hint: "Grouping" },
+      { href: "/admin/services", label: "Services & Categories", icon: Layers, hint: "Catalog" },
       { href: "/admin/blog", label: "Blog", icon: Newspaper, hint: "Content" },
     ],
   },
@@ -271,7 +278,77 @@ export default function ConsoleDashboard() {
   const [pendingServiceFilter, setPendingServiceFilter] = useState<string | null>(null);
   const [dashTab, setDashTab] = useState<DashTab>("overview");
   const [caseStatusFilter, setCaseStatusFilter] = useState<string | null>(null);
+  const [staffTaskKpi, setStaffTaskKpi] = useState<"all" | "pending" | "assigned" | "completed">("all");
+  const [embeddedPage, setEmbeddedPage] = useState<{ href: string; label: string } | null>(null);
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+
+  const openDashTab = useCallback((tab: DashTab) => {
+    setActiveKpi("all");
+    setPendingServiceFilter(null);
+    setEmbeddedPage(null);
+    setDashTab(tab);
+    if (tab !== "cases") setCaseStatusFilter(null);
+  }, []);
+
+  // Workload / Pipeline tabs: prefer native in-page views (not generic embed).
+  const openNativeDashTab = useCallback((tab: "workload" | "pipeline") => {
+    setActiveKpi("all");
+    setPendingServiceFilter(null);
+    setCaseStatusFilter(null);
+    setEmbeddedPage(null);
+    setDashTab(tab);
+  }, []);
+
+  const openAdminInDash = useCallback((href: string, label: string) => {
+    setActiveKpi("all");
+    setPendingServiceFilter(null);
+    setCaseStatusFilter(null);
+
+    const path = href.split("?")[0] || href;
+    const ownRevenue = isStaffOwnRevenueDashboard(dashboardData, adminUser?.role);
+
+    // Workload / Pipeline: stay on dashboard (native tabs for admins, embed for staff home).
+    if (path === "/admin/workload" || path === "/admin/kanban") {
+      if (ownRevenue) {
+        setEmbeddedPage({ href: path, label });
+        return;
+      }
+      setEmbeddedPage(null);
+      setDashTab(path === "/admin/workload" ? "workload" : "pipeline");
+      return;
+    }
+    if (canEmbedAdminHref(href)) {
+      setDashTab("ops");
+      setEmbeddedPage({ href, label });
+      return;
+    }
+    router.push(href);
+  }, [router, dashboardData, adminUser?.role]);
+
+  const {
+    selectedCase,
+    selectedCaseDetails,
+    selectedCaseDocuments,
+    detailsLoading,
+    detailsError,
+    documentsLoading,
+    documentsError,
+    openCaseByApplicationId,
+    closeCase,
+    handleStageResolved,
+    isOpen,
+  } = useAdminCaseSlideOver();
+
+  useEffect(() => {
+    if (embeddedPage?.href?.split("?")[0] === "/admin/my-cases") return;
+    return subscribeOpenAdminCase((detail) => {
+      void openCaseByApplicationId(detail.applicationId, {
+        reference: detail.reference,
+        customer: detail.customer,
+      });
+    });
+  }, [openCaseByApplicationId, embeddedPage?.href]);
+
   const [applications, setApplications] = useState<AdminApplication[]>([]);
   const [taskItems, setTaskItems] = useState<AdminTaskItem[]>([]);
   const [staffBadge, setStaffBadge] = useState<string | null>(null);
@@ -415,7 +492,7 @@ export default function ConsoleDashboard() {
       reference: task.application_reference,
       notes: app?.notes || "",
       title: `${task.task_type.replace(/_/g, " ")} - ${task.customer_name || "Customer"}`,
-      subtitle: `Status: ${task.status} • Priority: ${task.priority} • ${task.application_reference}`,
+      subtitle: `Status: ${formatTaskStatusLabel(task.status)} • Priority: ${task.priority} • ${task.application_reference}`,
     };
   });
 }, [taskItems, applications]);
@@ -432,8 +509,10 @@ const handleOpenCase = (taskId: number) => {
     toast.error("Application not found for this task.");
     return;
   }
-  // task.application is confirmed as the application ID from the API
-  router.push(`/admin/my-cases?applicationId=${encodeURIComponent(String(task.application))}`);
+  void openCaseByApplicationId(task.application, {
+    reference: task.application_reference,
+    customer: task.customer_name,
+  });
 };
 
 
@@ -627,6 +706,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
 
   const toggleKpi = (key: Exclude<DashboardKpiKey, "all">) => {
     setPendingServiceFilter(null);
+    setEmbeddedPage(null);
     setActiveKpi((current) => (current === key ? "all" : key));
   };
 
@@ -636,59 +716,73 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
 
   useSetAdminPageChrome({
     title: isOwnRevenueDashboard ? "My Dashboard" : "FlyOCI Console",
-    subtitle: isOwnRevenueDashboard ? undefined : `${roleLabel} · site overview`,
+    subtitle: isOwnRevenueDashboard
+      ? "Your assigned cases & attributed revenue"
+      : embeddedPage
+        ? `Open on dashboard · ${embeddedPage.label}`
+        : dashTab !== "overview"
+          ? DASH_TABS.find((t) => t.id === dashTab)?.label
+          : `${roleLabel} · site overview`,
     icon: LayoutDashboard,
-    syncKey: `${isOwnRevenueDashboard}|${loading}|${authReady}|${isBootstrapped}|${activeKpi}|${pendingServiceFilter}|${dashTab}|${caseStatusFilter}|${applications.length}`,
+    syncKey: `${isOwnRevenueDashboard}|${loading}|${authReady}|${isBootstrapped}|${activeKpi}|${pendingServiceFilter}|${dashTab}|${caseStatusFilter}|${embeddedPage?.href || ""}|${applications.length}`,
     meta:
       loading
         ? "Loading…"
         : activeKpi !== "all"
           ? `${displayedApplications.length} matches`
-          : dashTab !== "overview"
-            ? DASH_TABS.find((t) => t.id === dashTab)?.label
-            : undefined,
+          : embeddedPage
+            ? embeddedPage.label
+            : dashTab !== "overview"
+              ? DASH_TABS.find((t) => t.id === dashTab)?.label
+              : undefined,
     actions: (
       <>
         {!isOwnRevenueDashboard ? (
           <>
-            <Link
-              href="/admin/kanban"
+            <button
+              type="button"
+              onClick={() => openNativeDashTab("pipeline")}
               className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]"
             >
               Open pipeline
-            </Link>
+            </button>
             {(isOpsView || isStaffConsoleRole) && (
-              <Link
-                href="/admin/my-cases"
+              <button
+                type="button"
+                onClick={() => openAdminInDash("/admin/my-cases", "My cases")}
                 className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
               >
                 My cases
-              </Link>
+              </button>
             )}
-            <Link
-              href="/admin/workload"
+            <button
+              type="button"
+              onClick={() => openNativeDashTab("workload")}
               className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
             >
               Workload
-            </Link>
-            <Link
-              href="/admin/alerts"
+            </button>
+            <button
+              type="button"
+              onClick={() => openAdminInDash("/admin/alerts", "Alerts")}
               className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
             >
               Alerts
-            </Link>
-            <Link
-              href="/admin/reports"
+            </button>
+            <button
+              type="button"
+              onClick={() => openAdminInDash("/admin/reports", "Reports")}
               className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
             >
               Reports
-            </Link>
-            <Link
-              href="/admin/billing"
+            </button>
+            <button
+              type="button"
+              onClick={() => openAdminInDash("/admin/billing", "Billing")}
               className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
             >
               Billing
-            </Link>
+            </button>
           </>
         ) : null}
         <button
@@ -719,12 +813,12 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
       other: "Open task",
     };
     const nextAction = status === "blocked"
-      ? "Resolve blocker"
+      ? "Follow up (waiting)"
       : nextActionMap[String(task.task_type || "").toLowerCase()] || "Open task";
     const blocker = isClosedOut
       ? "None"
       : status === "blocked"
-        ? "Waiting on correction or escalation"
+        ? "Waiting on correction or customer"
         : priority === "urgent"
           ? "SLA pressure"
           : priority === "high"
@@ -762,13 +856,13 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                 isCompleted
                   ? "bg-[#009877]/20 text-[#006F57] font-semibold"
                   : status === "blocked"
-                    ? "bg-[#DC2626]/12 text-[#B42318]"
+                    ? "bg-[#B87333]/12 text-[#9C4F17]"
                     : status === "in_progress"
                       ? "bg-[#33A1FD]/12 text-[#0B69B7]"
                       : "bg-[#009877]/12 text-[#006F57]"
               }`}
             >
-              {isCompleted ? "✓ Completed" : task.status}
+              {isCompleted ? "✓ Completed" : formatTaskStatusLabel(task.status)}
             </span>
             <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[#9C4F17]">{task.priority}</span>
             <span className="rounded-full bg-[#33A1FD]/12 px-2.5 py-1 text-[#0B69B7]">{task.assigned_staff_name || "Unassigned"}</span>
@@ -814,7 +908,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
       paid_cases_30d: 0,
     };
     const myAssignedTasks = taskItems.filter((task) => staffIdsMatch(task.assigned_staff, adminUser?.id));
-    const recentCases = [...myAssignedTasks]
+    const pendingCases = [...myAssignedTasks]
       .filter((task) => pendingTaskStatuses.has(String(task.status || "").toLowerCase()))
       .sort((a, b) => {
         const left = new Date(a.deadline || a.updated_at || a.created_at || 0).getTime();
@@ -822,34 +916,108 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
         return left - right;
       })
       .slice(0, 8);
+    const completedCases = staffTaskSummary.recentCompletions;
+    const shownCases =
+      staffTaskKpi === "completed"
+        ? completedCases
+        : staffTaskKpi === "assigned"
+          ? myAssignedTasks.slice(0, 8)
+          : pendingCases;
 
     return (
       <div className="animate-in fade-in zoom-in-95 duration-500 max-w-[1300px] mx-auto space-y-4 font-body">
+        <SlideOverPanel
+          isOpen={isOpen}
+          onClose={closeCase}
+          caseData={selectedCase}
+          details={selectedCaseDetails}
+          documents={selectedCaseDocuments}
+          detailsLoading={detailsLoading}
+          detailsError={detailsError}
+          documentsLoading={documentsLoading}
+          documentsError={documentsError}
+          onStageResolved={handleStageResolved}
+        />
+        {embeddedPage ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
+              <button
+                type="button"
+                onClick={() => setEmbeddedPage(null)}
+                className="rounded-[8px] px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+              >
+                My dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => openAdminInDash("/admin/my-cases", "My cases")}
+                className={`rounded-[8px] px-3 py-1.5 text-xs font-semibold ${
+                  embeddedPage.href.startsWith("/admin/my-cases")
+                    ? "bg-[#009877] text-white shadow-sm"
+                    : "text-[#486581] hover:bg-[#F5F7FA]"
+                }`}
+              >
+                My cases
+              </button>
+              <button
+                type="button"
+                onClick={() => openAdminInDash("/admin/kanban", "Pipeline")}
+                className={`rounded-[8px] px-3 py-1.5 text-xs font-semibold ${
+                  embeddedPage.href.startsWith("/admin/kanban")
+                    ? "bg-[#009877] text-white shadow-sm"
+                    : "text-[#486581] hover:bg-[#F5F7FA]"
+                }`}
+              >
+                Pipeline
+              </button>
+              <p className="ml-auto hidden px-2 text-[11px] text-[#829AB1] sm:block">
+                Tabs open here — no page redirect
+              </p>
+            </div>
+            <DashboardEmbedPanel href={embeddedPage.href} />
+          </div>
+        ) : null}
+        {!embeddedPage ? (
+        <>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[#486581] text-sm">{roleLabel} · your cases and revenue only</p>
-          <div className="flex flex-wrap gap-2">
-            <Link href="/admin/my-cases" className="inline-flex items-center rounded-[8px] bg-[#009877] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]">
-              Open my cases
-            </Link>
-            <Link href="/admin/kanban" className="inline-flex items-center rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]">
+          <div className="flex flex-wrap items-center gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
+            <button
+              type="button"
+              className="rounded-[8px] bg-[#009877] px-3 py-1.5 text-xs font-semibold text-white shadow-sm"
+            >
+              My dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => openAdminInDash("/admin/my-cases", "My cases")}
+              className="rounded-[8px] px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+            >
+              My cases
+            </button>
+            <button
+              type="button"
+              onClick={() => openAdminInDash("/admin/kanban", "Pipeline")}
+              className="rounded-[8px] px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+            >
               Pipeline
-            </Link>
+            </button>
           </div>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
-          <div className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5">
+          <button type="button" onClick={() => setStaffTaskKpi((c) => (c === "pending" ? "all" : "pending"))} className={`rounded-[10px] border bg-white px-3 py-2.5 text-left ${staffTaskKpi === "pending" ? "border-[#009877] ring-1 ring-[#009877]/25" : "border-[#D9E1EA]"}`}>
             <p className="text-[11px] text-[#627D98]">Pending</p>
             <p className="mt-0.5 text-xl font-heading font-semibold text-[#9C4F17]">{staffTaskSummary.pending}</p>
-          </div>
-          <div className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5">
+          </button>
+          <button type="button" onClick={() => setStaffTaskKpi((c) => (c === "assigned" ? "all" : "assigned"))} className={`rounded-[10px] border bg-white px-3 py-2.5 text-left ${staffTaskKpi === "assigned" ? "border-[#009877] ring-1 ring-[#009877]/25" : "border-[#D9E1EA]"}`}>
             <p className="text-[11px] text-[#627D98]">Assigned</p>
             <p className="mt-0.5 text-xl font-heading font-semibold text-[#102A43]">{staffTaskSummary.assigned}</p>
-          </div>
-          <div className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5">
+          </button>
+          <button type="button" onClick={() => setStaffTaskKpi((c) => (c === "completed" ? "all" : "completed"))} className={`rounded-[10px] border bg-white px-3 py-2.5 text-left ${staffTaskKpi === "completed" ? "border-[#009877] ring-1 ring-[#009877]/25" : "border-[#D9E1EA]"}`}>
             <p className="text-[11px] text-[#627D98]">Completed</p>
             <p className="mt-0.5 text-xl font-heading font-semibold text-[#006F57]">{staffTaskSummary.completed}</p>
-          </div>
+          </button>
           <div className="rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5">
             <p className="text-[11px] text-[#627D98]">Revenue today</p>
             <p className="mt-0.5 text-lg font-heading font-semibold text-[#B87333]">₹{Number(staffRevenue.revenue_today || 0).toLocaleString("en-IN")}</p>
@@ -872,30 +1040,31 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
             <h2 className="text-base font-heading font-semibold text-[#102A43] flex items-center gap-2">
               <ClipboardList className="w-4 h-4 text-[#0B69B7]" />
-              Recent cases
+              {staffTaskKpi === "completed" ? "Recently completed" : staffTaskKpi === "assigned" ? "Assigned cases" : "Recent cases"}
             </h2>
-            <Link href="/admin/my-cases" className="text-sm font-semibold text-[#0B69B7] hover:underline">
+            <button type="button" onClick={() => openAdminInDash("/admin/my-cases", "My cases")} className="text-sm font-semibold text-[#0B69B7] hover:underline">
               View all my cases
-            </Link>
+            </button>
           </div>
-          {recentCases.length === 0 ? (
-            <p className="text-sm text-[#627D98]">No pending cases assigned to you.</p>
+          {shownCases.length === 0 ? (
+            <p className="text-sm text-[#627D98]">No cases for this KPI filter.</p>
           ) : (
             <div className="space-y-2">
-              {recentCases.map((task) => renderStaffTaskCard(task, true))}
+              {shownCases.map((task) => renderStaffTaskCard(task, staffTaskKpi !== "completed"))}
             </div>
           )}
         </div>
 
+        {staffTaskKpi !== "completed" ? (
         <div className="bg-white rounded-[10px] border border-[#D9E1EA] p-4">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
             <h2 className="text-base font-heading font-semibold text-[#102A43] flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-[#006F57]" />
               Recently completed
             </h2>
-            <Link href="/admin/my-cases" className="text-sm font-semibold text-[#0B69B7] hover:underline">
+            <button type="button" onClick={() => openAdminInDash("/admin/my-cases", "My cases")} className="text-sm font-semibold text-[#0B69B7] hover:underline">
               View all completed
-            </Link>
+            </button>
           </div>
           {staffTaskSummary.recentCompletions.length === 0 ? (
             <p className="text-sm text-[#627D98]">No completed tasks yet. Tasks auto-complete when you submit audit or advance the case.</p>
@@ -905,6 +1074,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
             </div>
           )}
         </div>
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 bg-white rounded-[10px] border border-[#D9E1EA] p-4">
@@ -953,12 +1123,26 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
             )}
           </div>
         </div>
+        </>
+        ) : null}
       </div>
     );
   }
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 max-w-[1500px] mx-auto space-y-4 font-body">
+      <SlideOverPanel
+        isOpen={isOpen}
+        onClose={closeCase}
+        caseData={selectedCase}
+        details={selectedCaseDetails}
+        documents={selectedCaseDocuments}
+        detailsLoading={detailsLoading}
+        detailsError={detailsError}
+        documentsLoading={documentsLoading}
+        documentsError={documentsError}
+        onStageResolved={handleStageResolved}
+      />
       {!isOwnRevenueDashboard && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-2">
           <StatCard
@@ -1065,20 +1249,24 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Link
-                href={KPI_DETAIL_LINKS[activeKpi].href}
+              <button
+                type="button"
+                onClick={() =>
+                  openAdminInDash(KPI_DETAIL_LINKS[activeKpi].href, KPI_DETAIL_LINKS[activeKpi].label)
+                }
                 className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B69B7] hover:underline"
               >
                 {KPI_DETAIL_LINKS[activeKpi].label}
                 <ExternalLink className="h-3 w-3" />
-              </Link>
+              </button>
               {activeKpi === "pending" ? (
-                <Link
-                  href="/admin/billing"
+                <button
+                  type="button"
+                  onClick={() => openAdminInDash("/admin/billing", "Billing")}
                   className="text-xs font-semibold text-[#0B69B7] hover:underline"
                 >
                   Open billing →
-                </Link>
+                </button>
               ) : null}
               <button
                 type="button"
@@ -1155,7 +1343,10 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                         key={app.id}
                         className="cursor-pointer hover:bg-[#F8FCFF]"
                         onClick={() =>
-                          router.push(`/admin/my-cases?applicationId=${encodeURIComponent(String(app.id))}`)
+                          openAdminInDash(
+                            `/admin/my-cases?applicationId=${encodeURIComponent(String(app.id))}`,
+                            "My cases",
+                          )
                         }
                       >
                         <td className="px-3 py-2.5 font-medium text-[#102A43]">{app.reference_number}</td>
@@ -1204,14 +1395,13 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
         <section className="space-y-3">
           <div className="flex flex-wrap items-center gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
             {DASH_TABS.map((tab) => {
-              const active = dashTab === tab.id;
+              const active = !embeddedPage && dashTab === tab.id;
               return (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => {
-                    setDashTab(tab.id);
-                    if (tab.id !== "cases") setCaseStatusFilter(null);
+                    openDashTab(tab.id);
                   }}
                   className={`rounded-[8px] px-3 py-1.5 text-xs font-semibold transition ${
                     active
@@ -1223,23 +1413,42 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                 </button>
               );
             })}
+            {embeddedPage ? (
+              <span className="rounded-[8px] bg-[#0B69B7] px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+                {embeddedPage.label}
+              </span>
+            ) : null}
             <p className="ml-auto hidden px-2 text-[11px] text-[#829AB1] sm:block">
-              Click any KPI, chart, row, or chip for detail
+              Tabs and shortcuts open here — no page redirect
             </p>
           </div>
 
-          {dashTab === "overview" ? (
+          {embeddedPage ? (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setEmbeddedPage(null)}
+                className="text-sm font-semibold text-[#0B69B7] hover:underline"
+              >
+                ← Back to {DASH_TABS.find((t) => t.id === dashTab)?.label || "dashboard"}
+              </button>
+              <DashboardEmbedPanel href={embeddedPage.href} />
+            </div>
+          ) : null}
+
+          {!embeddedPage && dashTab === "overview" ? (
             <>
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
                 <div className="rounded-[10px] border border-[#D9E1EA] bg-white p-3.5 lg:col-span-8">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <h2 className="text-sm font-heading font-semibold text-[#102A43]">Revenue · 7 days</h2>
-                    <Link
-                      href="/admin/reports?type=revenue"
+                    <button
+                      type="button"
+                      onClick={() => openAdminInDash("/admin/reports?type=revenue", "Reports")}
                       className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0B69B7] hover:underline"
                     >
                       Full report <ExternalLink className="h-3 w-3" />
-                    </Link>
+                    </button>
                   </div>
                   <div className="h-[220px]">
                     <ResponsiveContainer width="100%" height="100%">
@@ -1261,7 +1470,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                           radius={[4, 4, 0, 0]}
                           name="3-day avg"
                           cursor="pointer"
-                          onClick={() => router.push("/admin/reports?type=revenue")}
+                          onClick={() => openAdminInDash("/admin/reports?type=revenue", "Reports")}
                         />
                         <Line
                           type="monotone"
@@ -1269,11 +1478,11 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                           stroke="#009877"
                           strokeWidth={2.5}
                           name="Actual"
-                          dot={{ r: 3, cursor: "pointer", onClick: () => router.push("/admin/reports?type=revenue") }}
+                          dot={{ r: 3, cursor: "pointer", onClick: () => openAdminInDash("/admin/reports?type=revenue", "Reports") }}
                           activeDot={{
                             r: 5,
                             cursor: "pointer",
-                            onClick: () => router.push("/admin/reports?type=revenue"),
+                            onClick: () => openAdminInDash("/admin/reports?type=revenue", "Reports"),
                           }}
                         />
                       </ComposedChart>
@@ -1284,12 +1493,13 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                 <div className="rounded-[10px] border border-[#D9E1EA] bg-white p-3.5 lg:col-span-4">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-sm font-heading font-semibold text-[#102A43]">Revenue by service</h2>
-                    <Link
-                      href="/admin/reports?type=service_mix"
+                    <button
+                      type="button"
+                      onClick={() => openAdminInDash("/admin/reports?type=service_mix", "Reports")}
                       className="text-[11px] font-semibold text-[#0B69B7] hover:underline"
                     >
                       Mix →
-                    </Link>
+                    </button>
                   </div>
                   {serviceRevenueRows.length === 0 ? (
                     <p className="py-8 text-center text-sm text-[#627D98]">No revenue yet.</p>
@@ -1302,7 +1512,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                           <li key={row.name}>
                             <button
                               type="button"
-                              onClick={() => router.push("/admin/reports?type=service_mix")}
+                              onClick={() => openAdminInDash("/admin/reports?type=service_mix", "Reports")}
                               className="w-full text-left"
                             >
                               <div className="mb-1 flex items-center justify-between gap-2 text-xs">
@@ -1342,15 +1552,20 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Link
-                        href="/admin/reports?type=pipeline_sla"
+                      <button
+                        type="button"
+                        onClick={() => openAdminInDash("/admin/reports?type=pipeline_sla", "Reports")}
                         className="text-xs font-semibold text-[#0B69B7] hover:underline"
                       >
                         SLA report
-                      </Link>
-                      <Link href="/admin/kanban" className="text-xs font-semibold text-[#0B69B7] hover:underline">
-                        Kanban →
-                      </Link>
+                      </button>
+                      <button
+                        type="button"
+                      onClick={() => openNativeDashTab("pipeline")}
+                      className="text-xs font-semibold text-[#0B69B7] hover:underline"
+                    >
+                      Kanban →
+                    </button>
                     </div>
                   </div>
                   {pipelineOverview.length === 0 ? (
@@ -1371,7 +1586,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                             <tr
                               key={item.stage}
                               className="cursor-pointer hover:bg-[#F8FCFF]"
-                              onClick={() => router.push("/admin/kanban")}
+                              onClick={() => openNativeDashTab("pipeline")}
                             >
                               <td className="px-2.5 py-2 font-medium text-[#102A43]">{item.stage}</td>
                               <td className="px-2.5 py-2 text-right text-[#334E68]">{item.openCases}</td>
@@ -1398,7 +1613,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     <h2 className="text-sm font-heading font-semibold text-[#102A43]">Recent cases</h2>
                     <button
                       type="button"
-                      onClick={() => setDashTab("cases")}
+                      onClick={() => openDashTab("cases")}
                       className="text-xs font-semibold text-[#0B69B7] hover:underline"
                     >
                       All cases →
@@ -1415,8 +1630,9 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                               key={app.id}
                               className="cursor-pointer hover:bg-[#F8FCFF]"
                               onClick={() =>
-                                router.push(
+                                openAdminInDash(
                                   `/admin/my-cases?applicationId=${encodeURIComponent(String(app.id))}`,
+                                  "My cases",
                                 )
                               }
                             >
@@ -1441,8 +1657,9 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
               </div>
 
               <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-xs">
-                <Link
-                  href="/admin/alerts"
+                <button
+                  type="button"
+                  onClick={() => openAdminInDash("/admin/alerts", "Alerts")}
                   className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#F0D2A8] bg-[#FFF8F1] px-2.5 py-1.5 font-semibold text-[#9C4F17] hover:bg-[#FFF1E0]"
                 >
                   <AlertTriangle className="h-3.5 w-3.5" />
@@ -1450,44 +1667,48 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                   {Number(alertsSummary?.critical || 0) > 0
                     ? ` · ${alertsSummary?.critical} critical`
                     : ""}
-                </Link>
-                <Link
-                  href="/admin/reports?type=audit"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openAdminInDash("/admin/reports?type=audit", "Reports")}
                   className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-[#F8FAFC] px-2.5 py-1.5 font-semibold text-[#486581] hover:border-[#009877]/40 hover:text-[#102A43]"
                 >
                   Audit success {healthExtras.auditSuccess}
-                </Link>
-                <Link
-                  href="/admin/reports?type=pipeline_sla"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openAdminInDash("/admin/reports?type=pipeline_sla", "Reports")}
                   className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-[#F8FAFC] px-2.5 py-1.5 font-semibold text-[#486581] hover:border-[#009877]/40 hover:text-[#102A43]"
                 >
                   Avg process {healthExtras.avgProcessing}
-                </Link>
-                <Link
-                  href="/admin/team-performance"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openAdminInDash("/admin/team-performance", "Performance")}
                   className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-[#F8FAFC] px-2.5 py-1.5 font-semibold text-[#486581] hover:border-[#009877]/40 hover:text-[#102A43]"
                 >
                   CSAT {healthExtras.csat}
-                </Link>
+                </button>
                 {isFounderView ? (
-                  <Link
-                    href="/admin/security"
+                  <button
+                    type="button"
+                    onClick={() => openAdminInDash("/admin/security", "Security")}
                     className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#F2C7C3] bg-[#FFF1F0] px-2.5 py-1.5 font-semibold text-[#B42318] hover:bg-[#FFE8E6]"
                   >
                     Failed logins {failedLogins}
-                  </Link>
+                  </button>
                 ) : null}
                 <div className="ml-auto flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setDashTab("money")}
+                    onClick={() => openDashTab("money")}
                     className="font-semibold text-[#0B69B7] hover:underline"
                   >
                     Money tab →
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDashTab("ops")}
+                    onClick={() => openDashTab("ops")}
                     className="font-semibold text-[#0B69B7] hover:underline"
                   >
                     Ops & setup →
@@ -1497,7 +1718,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
             </>
           ) : null}
 
-          {dashTab === "cases" ? (
+          {!embeddedPage && dashTab === "cases" ? (
             <div className="space-y-3">
               <div className="rounded-[10px] border border-[#D9E1EA] bg-white p-3.5">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1508,18 +1729,27 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Link href="/admin/kanban" className="text-xs font-semibold text-[#0B69B7] hover:underline">
+                    <button
+                      type="button"
+                      onClick={() => openNativeDashTab("pipeline")}
+                      className="text-xs font-semibold text-[#0B69B7] hover:underline"
+                    >
                       Pipeline →
-                    </Link>
-                    <Link href="/admin/workload" className="text-xs font-semibold text-[#0B69B7] hover:underline">
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openNativeDashTab("workload")}
+                      className="text-xs font-semibold text-[#0B69B7] hover:underline"
+                    >
                       Workload →
-                    </Link>
-                    <Link
-                      href="/admin/reports?type=leads"
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openAdminInDash("/admin/reports?type=leads", "Reports")}
                       className="text-xs font-semibold text-[#0B69B7] hover:underline"
                     >
                       Leads report →
-                    </Link>
+                    </button>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1575,8 +1805,9 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                             key={app.id}
                             className="cursor-pointer hover:bg-[#F8FCFF]"
                             onClick={() =>
-                              router.push(
+                              openAdminInDash(
                                 `/admin/my-cases?applicationId=${encodeURIComponent(String(app.id))}`,
+                                "My cases",
                               )
                             }
                           >
@@ -1605,7 +1836,11 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
             </div>
           ) : null}
 
-          {dashTab === "money" ? (
+          {!embeddedPage && dashTab === "workload" ? <WorkloadView embedded /> : null}
+
+          {!embeddedPage && dashTab === "pipeline" ? <KanbanView embedded /> : null}
+
+          {!embeddedPage && dashTab === "money" ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                 {[
@@ -1648,9 +1883,13 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                       >
                         Filter KPI
                       </button>
-                      <Link href={card.href} className="font-semibold text-[#0B69B7] hover:underline">
+                      <button
+                        type="button"
+                        onClick={() => openAdminInDash(card.href, card.label.includes("ticket") ? "Revenue" : "Reports")}
+                        className="font-semibold text-[#0B69B7] hover:underline"
+                      >
                         Detail →
-                      </Link>
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1660,12 +1899,13 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                 <div className="rounded-[10px] border border-[#D9E1EA] bg-white p-3.5">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-sm font-heading font-semibold text-[#102A43]">Pending by service</h2>
-                    <Link
-                      href="/admin/billing"
+                    <button
+                      type="button"
+                      onClick={() => openAdminInDash("/admin/billing", "Billing")}
                       className="text-xs font-semibold text-[#0B69B7] hover:underline"
                     >
                       Billing →
-                    </Link>
+                    </button>
                   </div>
                   {pendingByService.length === 0 ? (
                     <p className="py-6 text-center text-sm text-[#627D98]">Nothing pending.</p>
@@ -1695,12 +1935,13 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                 <div className="rounded-[10px] border border-[#D9E1EA] bg-white p-3.5">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-sm font-heading font-semibold text-[#102A43]">Top services</h2>
-                    <Link
-                      href="/admin/reports?type=service_mix"
+                    <button
+                      type="button"
+                      onClick={() => openAdminInDash("/admin/reports?type=service_mix", "Reports")}
                       className="text-xs font-semibold text-[#0B69B7] hover:underline"
                     >
                       Service mix →
-                    </Link>
+                    </button>
                   </div>
                   {serviceRevenueRows.length === 0 ? (
                     <p className="py-6 text-center text-sm text-[#627D98]">No revenue yet.</p>
@@ -1708,13 +1949,14 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     <ul className="space-y-2">
                       {serviceRevenueRows.map((row) => (
                         <li key={row.name}>
-                          <Link
-                            href="/admin/reports?type=service_mix"
-                            className="flex items-center justify-between gap-2 rounded-[8px] border border-[#D9E1EA] px-3 py-2 text-xs hover:bg-[#F8FCFF]"
+                          <button
+                            type="button"
+                            onClick={() => openAdminInDash("/admin/reports?type=service_mix", "Reports")}
+                            className="flex w-full items-center justify-between gap-2 rounded-[8px] border border-[#D9E1EA] px-3 py-2 text-left text-xs hover:bg-[#F8FCFF]"
                           >
                             <span className="font-semibold text-[#102A43]">{row.name}</span>
                             <span className="font-semibold text-[#486581]">{formatInr(row.amount)}</span>
-                          </Link>
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -1723,35 +1965,23 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Link
-                  href="/admin/billing"
-                  className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-3 py-2 text-xs font-semibold text-white hover:bg-[#007B61]"
-                >
+                <button type="button" onClick={() => openAdminInDash("/admin/billing", "Billing")} className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-3 py-2 text-xs font-semibold text-white hover:bg-[#007B61]">
                   <CreditCard className="h-3.5 w-3.5" /> Billing
-                </Link>
-                <Link
-                  href="/admin/revenue"
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
-                >
+                </button>
+                <button type="button" onClick={() => openAdminInDash("/admin/revenue", "Revenue")} className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]">
                   <Landmark className="h-3.5 w-3.5" /> Revenue
-                </Link>
-                <Link
-                  href="/admin/reports"
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
-                >
+                </button>
+                <button type="button" onClick={() => openAdminInDash("/admin/reports", "Reports")} className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]">
                   <PieChartIcon className="h-3.5 w-3.5" /> All reports
-                </Link>
-                <Link
-                  href="/admin/easyfly/revenue"
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
-                >
+                </button>
+                <button type="button" onClick={() => openAdminInDash("/admin/easyfly/revenue", "EasyFly revenue")} className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]">
                   <Plane className="h-3.5 w-3.5" /> EasyFly revenue
-                </Link>
+                </button>
               </div>
             </div>
           ) : null}
 
-          {dashTab === "ops" ? (
+          {!embeddedPage && dashTab === "ops" ? (
             <div className="space-y-4">
               {CONSOLE_LINKS.map((group) => (
                 <div key={group.group} className="rounded-[10px] border border-[#D9E1EA] bg-white p-3.5">
@@ -1760,10 +1990,11 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     {group.items.map((item) => {
                       const Icon = item.icon;
                       return (
-                        <Link
+                        <button
                           key={item.href}
-                          href={item.href}
-                          className="flex items-start gap-2.5 rounded-[10px] border border-[#D9E1EA] px-3 py-2.5 transition hover:border-[#009877]/40 hover:bg-[#F8FCFF]"
+                          type="button"
+                          onClick={() => openAdminInDash(item.href, item.label)}
+                          className="flex items-start gap-2.5 rounded-[10px] border border-[#D9E1EA] px-3 py-2.5 text-left transition hover:border-[#009877]/40 hover:bg-[#F8FCFF]"
                         >
                           <span className="mt-0.5 rounded-lg bg-[#009877]/10 p-1.5 text-[#009877]">
                             <Icon className="h-3.5 w-3.5" />
@@ -1772,7 +2003,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                             <span className="block text-xs font-semibold text-[#102A43]">{item.label}</span>
                             <span className="block text-[11px] text-[#829AB1]">{item.hint}</span>
                           </span>
-                        </Link>
+                        </button>
                       );
                     })}
                   </div>
@@ -1787,9 +2018,9 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
         <div className="bg-white rounded-[10px] border-[0.5px] border-[#D9E1EA] p-4">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <h2 className="text-base font-heading font-semibold text-[#102A43]">My Assigned Tasks</h2>
-            <Link href="/admin/my-cases" className="text-sm font-semibold text-[#0B69B7] hover:underline">
+            <button type="button" onClick={() => openAdminInDash("/admin/my-cases", "My cases")} className="text-sm font-semibold text-[#0B69B7] hover:underline">
               My cases →
-            </Link>
+            </button>
           </div>
           <div className="space-y-2">
             {taskItems.filter(
@@ -1821,7 +2052,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     </div>
                     <div className="flex gap-2 flex-wrap justify-end">
                       <span className="rounded-full bg-[#009877]/12 px-2.5 py-1 text-[11px] text-[#006F57]">
-                        {task.status}
+                        {formatTaskStatusLabel(task.status)}
                       </span>
                       <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[11px] text-[#9C4F17]">
                         {task.priority}

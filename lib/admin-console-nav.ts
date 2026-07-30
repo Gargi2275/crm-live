@@ -51,9 +51,17 @@ export function canAccessAdminRoute(
   role?: string | null,
 ): boolean {
   if ((role || "").toLowerCase() === "admin") return true;
+  if (!permissions) return false;
+  // Combined Roles & Permissions page — allow if either module is granted.
+  if (href === "/admin/roles" || href.startsWith("/admin/roles") || href.startsWith("/admin/permissions")) {
+    return Boolean(permissions.roles || permissions.permissions);
+  }
+  // Combined Services & Categories page — allow if either module is granted.
+  if (href === "/admin/services" || href.startsWith("/admin/services") || href.startsWith("/admin/categories")) {
+    return Boolean(permissions.services || permissions.categories);
+  }
   const moduleKey = resolveAdminRouteModuleKey(href);
   if (!moduleKey) return false;
-  if (!permissions) return false;
   return Boolean(permissions[moduleKey]);
 }
 
@@ -66,8 +74,14 @@ export function canAccessAdminPathname(
   if (pathname === "/admin" || pathname.startsWith("/admin/login") || pathname.startsWith("/admin/reset-password")) {
     return true;
   }
+  if (!permissions) return false;
+  if (pathname.startsWith("/admin/roles") || pathname.startsWith("/admin/permissions")) {
+    return Boolean(permissions.roles || permissions.permissions);
+  }
+  if (pathname.startsWith("/admin/services") || pathname.startsWith("/admin/categories")) {
+    return Boolean(permissions.services || permissions.categories);
+  }
   const moduleKey = resolveAdminRouteModuleKey(pathname);
   if (!moduleKey) return false;
-  if (!permissions) return false;
   return Boolean(permissions[moduleKey]);
 }

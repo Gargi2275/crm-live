@@ -18,6 +18,7 @@ import {
   titleForAdminPath,
   useAdminPageChrome,
 } from "@/components/console/AdminPageChromeContext";
+import { dispatchOpenAdminCase } from "@/lib/admin-open-case";
 
 export function TopHeader({
   mobileOpen = false,
@@ -116,11 +117,21 @@ export function TopHeader({
     setShowNotificationMenu(false);
     const applicationId = notification.application_id;
     const isStaffRole = ["case_processor", "reviewer", "support_agent"].includes(adminUser?.role || "");
-    if (applicationId && isStaffRole) {
-      router.push(`/admin/my-cases?applicationId=${encodeURIComponent(String(applicationId))}`);
-      return;
-    }
     if (applicationId) {
+      const openedInPlace = dispatchOpenAdminCase({ applicationId: Number(applicationId) });
+      if (openedInPlace) return;
+      if (isStaffRole) {
+        if (pathname?.startsWith("/admin/my-cases")) {
+          router.replace(`/admin/my-cases?applicationId=${encodeURIComponent(String(applicationId))}`);
+          return;
+        }
+        router.push(`/admin/my-cases?applicationId=${encodeURIComponent(String(applicationId))}`);
+        return;
+      }
+      if (pathname?.startsWith("/admin/kanban")) {
+        router.replace(`/admin/kanban?applicationId=${encodeURIComponent(String(applicationId))}`);
+        return;
+      }
       router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(applicationId))}`);
       return;
     }
@@ -358,26 +369,41 @@ export function TopHeader({
                 setShowNotificationMenu(false);
                 setFiltersOpen(false);
               }}
-              className="inline-flex items-center gap-2 rounded-[12px] px-1 py-1 hover:bg-[#F5F7FA] transition-colors"
+              className="inline-flex items-center gap-2 rounded-[12px] px-1 sm:px-1.5 py-1 hover:bg-[#F5F7FA] transition-colors"
               aria-label="Profile menu"
             >
-              <div className="w-8 h-8 sm:w-9 sm:h-9 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[#009877]/30">
+              <div className="hidden sm:flex min-w-0 max-w-[200px] md:max-w-[280px] lg:max-w-[340px] items-center gap-2 rounded-[10px] border border-[#009877]/35 bg-[#E6F7F2] px-2.5 py-1.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] md:text-sm font-heading font-bold text-[#006F57] leading-tight">
+                    Welcome,{" "}
+                    <span className="text-[#102A43]">
+                      {adminUser?.full_name || adminUser?.username || "Staff"}
+                    </span>
+                  </p>
+                  <p className="mt-0.5">
+                    <span className="inline-flex max-w-full truncate rounded-full bg-[#009877] px-2 py-0.5 text-[10px] md:text-[11px] font-bold uppercase tracking-wide text-white">
+                      {roleLabel}
+                    </span>
+                  </p>
+                </div>
+              </div>
+              <div className="w-8 h-8 sm:w-9 sm:h-9 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[#009877]/30 shrink-0">
                 <User className="w-4 h-4" />
               </div>
             </button>
 
             {showProfileMenu && (
-              <div className="absolute right-0 mt-2 w-[220px] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-30">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-[#009877]/12 text-[#006F57] rounded-full flex items-center justify-center border border-[#009877]/30 shrink-0 text-sm font-bold font-heading">
-                    {adminUser?.full_name?.charAt(0)?.toUpperCase() ?? "S"}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[15px] font-semibold text-[#102A43] font-heading truncate">
+              <div className="absolute right-0 mt-2 w-[240px] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-30">
+                <div className="mb-3 rounded-[10px] border border-[#009877]/30 bg-[#E6F7F2] px-3 py-2.5">
+                  <p className="text-[15px] font-heading font-bold text-[#006F57] truncate">
+                    Welcome,{" "}
+                    <span className="text-[#102A43]">
                       {adminUser?.full_name || adminUser?.username || "Staff"}
-                    </p>
-                    <p className="text-sm text-[#627D98] truncate">{roleLabel}</p>
-                  </div>
+                    </span>
+                  </p>
+                  <span className="mt-1.5 inline-flex rounded-full bg-[#009877] px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+                    {roleLabel}
+                  </span>
                 </div>
                 <div className="border-t border-[#E5EAF0] pt-2">
                   <button

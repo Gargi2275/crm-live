@@ -158,7 +158,7 @@ import { ConsoleProvider } from "@/components/console/ConsoleContext";
 import { AdminPageChromeProvider } from "@/components/console/AdminPageChromeContext";
 import { Toaster } from "react-hot-toast";
 import { AdminAuthProvider, useAdminAuth } from "@/context/AdminAuthContext";
-import { getAdminMyPermissions, getConsoleHomePath } from "@/lib/admin-auth";
+import { getAdminMyPermissions, getConsoleHomePath, getPostLoginPath } from "@/lib/admin-auth";
 import { canAccessAdminPathname } from "@/lib/admin-console-nav";
 
 export default function ConsoleLayout({
@@ -233,8 +233,12 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
 
     setAccessChecked(false);
 
-    if (scope === "easyfly_only" && !pathname?.startsWith("/admin/easyfly")) {
-      router.replace("/admin/easyfly");
+    if (scope === "easyfly_only") {
+      if (!pathname?.startsWith("/admin/easyfly")) {
+        router.replace(getPostLoginPath(role, scope));
+        return;
+      }
+      setAccessChecked(true);
       return;
     }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { Breadcrumb } from "@/components/console/Breadcrumb";
 import { StatCard } from "@/components/ui/console/StatCard";
 import { ShieldAlert, Users, FileLock, KeyRound, Check, X, AlertTriangle } from "lucide-react";
@@ -25,23 +26,80 @@ const PERMISSIONS = [
   { name: "View Analytics", values: [true, true, true, false, false] },
 ];
 
+type SecurityKpi = "all" | "failed" | "sessions" | "files" | "otp";
+
 export default function SecurityPage() {
+  const [kpiFilter, setKpiFilter] = useState<SecurityKpi>("all");
+
   useSetAdminPageChrome({
     title: "Security",
     icon: ShieldAlert,
-    syncKey: "security",
+    syncKey: `security|${kpiFilter}`,
   });
+
+  const filteredLogs = useMemo(() => {
+    if (kpiFilter === "failed") {
+      return AUDIT_LOGS.filter((row) => row.flag || /failed login/i.test(row.action));
+    }
+    if (kpiFilter === "files") {
+      return AUDIT_LOGS.filter((row) => /download|file/i.test(row.action));
+    }
+    if (kpiFilter === "otp") {
+      return AUDIT_LOGS.filter((row) => /otp|whatsapp/i.test(row.action));
+    }
+    if (kpiFilter === "sessions") {
+      return AUDIT_LOGS.filter((row) => !row.flag);
+    }
+    return AUDIT_LOGS;
+  }, [kpiFilter]);
+
+  const toggleKpi = (key: SecurityKpi) => {
+    setKpiFilter((current) => (current === key ? "all" : key));
+  };
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 max-w-7xl mx-auto font-body">
       <Breadcrumb />
 
-      {/* Security Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <StatCard title="Failed Logins (24h)" value="12" trend="+3" isPositive={false} icon={ShieldAlert} colorClass="text-red-600" bgClass="bg-red-100" />
-        <StatCard title="Active Sessions" value="28" icon={Users} colorClass="text-blue-600" bgClass="bg-blue-100" />
-        <StatCard title="File Accesses (24h)" value="1,842" icon={FileLock} colorClass="text-purple-600" bgClass="bg-purple-100" />
-        <StatCard title="OTPs Sent" value="345" icon={KeyRound} colorClass="text-orange-600" bgClass="bg-orange-100" />
+        <StatCard
+          title="Failed Logins (24h)"
+          value="12"
+          trend="+3"
+          isPositive={false}
+          icon={ShieldAlert}
+          colorClass="text-red-600"
+          bgClass="bg-red-100"
+          active={kpiFilter === "failed"}
+          onClick={() => toggleKpi("failed")}
+        />
+        <StatCard
+          title="Active Sessions"
+          value="28"
+          icon={Users}
+          colorClass="text-blue-600"
+          bgClass="bg-blue-100"
+          active={kpiFilter === "sessions"}
+          onClick={() => toggleKpi("sessions")}
+        />
+        <StatCard
+          title="File Accesses (24h)"
+          value="1,842"
+          icon={FileLock}
+          colorClass="text-purple-600"
+          bgClass="bg-purple-100"
+          active={kpiFilter === "files"}
+          onClick={() => toggleKpi("files")}
+        />
+        <StatCard
+          title="OTPs Sent"
+          value="345"
+          icon={KeyRound}
+          colorClass="text-orange-600"
+          bgClass="bg-orange-100"
+          active={kpiFilter === "otp"}
+          onClick={() => toggleKpi("otp")}
+        />
       </div>
 
       <div className="bg-white rounded-[12px] shadow-sm border-[0.5px] border-[#D9E1EA] p-5 mb-8">
@@ -66,11 +124,10 @@ export default function SecurityPage() {
         </div>
       </div>
 
-      {/* Audit Log Table */}
       <div className="bg-white rounded-[12px] shadow-sm border-[0.5px] border-[#D9E1EA] overflow-hidden mb-8">
         <div className="p-5 border-b border-[0.5px] border-[#D9E1EA] flex justify-between items-center">
           <h2 className="text-lg font-heading font-semibold text-[#102A43]">System Audit Log</h2>
-          <button className="text-sm font-heading font-medium text-[#009877] hover:text-[#007B61]">Export CSV</button>
+          <span className="text-xs text-[#627D98]">{filteredLogs.length} events</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -79,66 +136,67 @@ export default function SecurityPage() {
                 <th className="px-5 py-3">Timestamp</th>
                 <th className="px-5 py-3">User / System</th>
                 <th className="px-5 py-3">Action</th>
-                <th className="px-5 py-3">Target Details</th>
-                <th className="px-5 py-3 text-center">Status</th>
+                <th className="px-5 py-3">Target</th>
+                <th className="px-5 py-3">Flag</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0]">
-              {AUDIT_LOGS.map((log) => (
-                <tr 
-                  key={log.id} 
-                  className={cn(
-                    "transition-colors",
-                    log.flag ? "bg-red-50/50 hover:bg-red-50" : "hover:bg-[#F8FAFC]"
-                  )}
-                >
-                  <td className="px-5 py-3 text-[#627D98] whitespace-nowrap">{log.time}</td>
-                  <td className="px-5 py-3 font-medium text-[#102A43]">{log.user}</td>
-                  <td className="px-5 py-3 text-[#334E68]">{log.action}</td>
-                  <td className="px-5 py-3 text-[#486581]">{log.target}</td>
-                  <td className="px-5 py-3 text-center">
-                    {log.flag ? (
-                      <span className="inline-flex items-center gap-1 bg-[#B42318]/12 text-[#B42318] font-medium px-2.5 py-0.5 rounded-full text-xs">
-                        <AlertTriangle className="w-3.5 h-3.5" /> Suspicious
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 bg-[#33A1FD]/12 text-[#0B69B7] font-medium px-2.5 py-0.5 rounded-full text-xs">
-                        Standard
-                      </span>
-                    )}
+              {filteredLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-8 text-center text-[#627D98]">
+                    No audit events for this KPI filter.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredLogs.map((log) => (
+                  <tr key={log.id} className={cn(log.flag && "bg-[#FFF1F0]/60")}>
+                    <td className="px-5 py-3 text-[#627D98]">{log.time}</td>
+                    <td className="px-5 py-3 font-medium text-[#102A43]">{log.user}</td>
+                    <td className="px-5 py-3 text-[#334E68]">{log.action}</td>
+                    <td className="px-5 py-3 text-[#486581]">{log.target}</td>
+                    <td className="px-5 py-3">
+                      {log.flag ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#B42318]">
+                          <AlertTriangle className="h-3.5 w-3.5" /> Flagged
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[#829AB1]">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Role Permissions Matrix */}
       <div className="bg-white rounded-[12px] shadow-sm border-[0.5px] border-[#D9E1EA] overflow-hidden">
         <div className="p-5 border-b border-[0.5px] border-[#D9E1EA]">
-          <h2 className="text-lg font-heading font-semibold text-[#102A43]">Role Permissions Base Matrix</h2>
+          <h2 className="text-lg font-heading font-semibold text-[#102A43]">Role permission matrix</h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-center">
-            <thead className="bg-[#F5F7FA] text-[#486581] font-heading font-medium">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-[#F5F7FA] text-[#486581]">
               <tr>
-                <th className="px-5 py-3 text-left w-1/3">Permission</th>
+                <th className="px-5 py-3">Permission</th>
                 {ROLES.map((role) => (
-                  <th key={role} className="px-5 py-3">{role}</th>
+                  <th key={role} className="px-5 py-3 text-center">
+                    {role}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0]">
-              {PERMISSIONS.map((perm, idx) => (
-                <tr key={idx} className="hover:bg-[#F8FAFC] transition-colors">
-                  <td className="px-5 py-3 text-left font-medium text-[#102A43]">{perm.name}</td>
-                  {perm.values.map((hasPerm, jdx) => (
-                    <td key={jdx} className="px-5 py-3">
-                      {hasPerm ? (
-                        <Check className="w-5 h-5 text-green-500 mx-auto" />
+              {PERMISSIONS.map((permission) => (
+                <tr key={permission.name}>
+                  <td className="px-5 py-3 font-medium text-[#102A43]">{permission.name}</td>
+                  {permission.values.map((allowed, index) => (
+                    <td key={`${permission.name}-${ROLES[index]}`} className="px-5 py-3 text-center">
+                      {allowed ? (
+                        <Check className="mx-auto h-4 w-4 text-[#009877]" />
                       ) : (
-                        <X className="w-5 h-5 text-red-500 mx-auto opacity-50" />
+                        <X className="mx-auto h-4 w-4 text-[#B42318]" />
                       )}
                     </td>
                   ))}
@@ -147,23 +205,6 @@ export default function SecurityPage() {
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div className="mt-6 space-y-2">
-        <details className="bg-white border border-[#D9E1EA] rounded-[12px] p-3 group">
-          <summary className="list-none cursor-pointer text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
-            Security escalation protocol
-            <span className="text-[#627D98] group-open:rotate-180 transition-transform">⌄</span>
-          </summary>
-          <p className="mt-2 text-sm text-[#486581]">Suspicious access triggers session kill, forced OTP reset, and incident assignment to Ops Manager within 10 minutes.</p>
-        </details>
-        <details className="bg-white border border-[#D9E1EA] rounded-[12px] p-3 group">
-          <summary className="list-none cursor-pointer text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
-            Data retention and audit readiness
-            <span className="text-[#627D98] group-open:rotate-180 transition-transform">⌄</span>
-          </summary>
-          <p className="mt-2 text-sm text-[#486581]">All file access events and status edits are retained for compliance review and monthly audit export cycles.</p>
-        </details>
       </div>
     </div>
   );

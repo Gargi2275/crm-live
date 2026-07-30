@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, RefreshCw } from "lucide-react";
+import { Activity, BarChart3, RefreshCw, Table2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { TeamPerformanceGrid } from "@/components/console/TeamPerformanceGrid";
+import { TeamPerformanceCharts } from "@/components/console/TeamPerformanceCharts";
 import {
   getAdminDashboardOverview,
   type AdminDashboardOverview,
@@ -23,11 +24,14 @@ const TEAM_PERIOD_OPTIONS: { key: TeamPerformancePeriod; label: string }[] = [
   { key: "all", label: "All time" },
 ];
 
+type ViewTab = "table" | "graphs";
+
 export default function AdminTeamPerformancePage() {
   const { adminUser } = useAdminAuth();
   const role = adminUser?.role;
   const canView = role === "admin" || role === "ops_manager";
 
+  const [viewTab, setViewTab] = useState<ViewTab>("table");
   const [teamPeriod, setTeamPeriod] = useState<TeamPerformancePeriod>("month");
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +72,7 @@ export default function AdminTeamPerformancePage() {
           icon: Activity,
           activeFilterCount,
           onClearFilters: clearFilters,
-          syncKey: `${loading}|${teamPeriod}|${periodLabel}|${dashboardData ? "loaded" : "empty"}`,
+          syncKey: `${loading}|${teamPeriod}|${periodLabel}|${viewTab}|${dashboardData ? "loaded" : "empty"}`,
           meta: loading ? "Loading…" : `${dashboardData?.staff_members?.length ?? 0} staff`,
           actions: (
             <button
@@ -122,18 +126,68 @@ export default function AdminTeamPerformancePage() {
   const revenueNote = dashboardData?.staff_revenue_summary?.attribution_note;
 
   return (
-    <div className="mx-auto max-w-[1500px] space-y-4 font-body">
+    <div className="mx-auto max-w-[1500px] space-y-3 font-body">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-[10px] border border-[#D9E1EA] bg-white p-1">
+          <button
+            type="button"
+            onClick={() => setViewTab("table")}
+            className={`inline-flex items-center gap-1.5 rounded-[8px] px-3.5 py-1.5 text-xs font-semibold transition ${
+              viewTab === "table"
+                ? "bg-[#1A56DB] text-white shadow-sm"
+                : "text-[#486581] hover:bg-[#F5F7FA]"
+            }`}
+          >
+            <Table2 className="h-3.5 w-3.5" />
+            Table
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewTab("graphs")}
+            className={`inline-flex items-center gap-1.5 rounded-[8px] px-3.5 py-1.5 text-xs font-semibold transition ${
+              viewTab === "graphs"
+                ? "bg-[#1A56DB] text-white shadow-sm"
+                : "text-[#486581] hover:bg-[#F5F7FA]"
+            }`}
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            Graphs
+          </button>
+        </div>
+
+        <label className="inline-flex items-center gap-2 text-xs text-[#486581]">
+          <span className="font-semibold">Period</span>
+          <select
+            value={teamPeriod}
+            onChange={(e) => setTeamPeriod(e.target.value as TeamPerformancePeriod)}
+            className="rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43]"
+            disabled={loading}
+          >
+            {TEAM_PERIOD_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       {loading && !dashboardData ? (
         <div className="flex items-center justify-center py-20">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#D9E1EA] border-t-[#009877]" />
         </div>
-      ) : (
+      ) : viewTab === "table" ? (
         <>
           <TeamPerformanceGrid
             staffMembers={staffMembers}
             periodLabel={periodLabel}
             teamPeriod={teamPeriod}
           />
+          {revenueNote ? <p className="text-xs text-[#627D98] px-1">{revenueNote}</p> : null}
+        </>
+      ) : (
+        <>
+          <TeamPerformanceCharts staffMembers={staffMembers} periodLabel={periodLabel} />
           {revenueNote ? <p className="text-xs text-[#627D98] px-1">{revenueNote}</p> : null}
         </>
       )}

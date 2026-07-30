@@ -120,26 +120,31 @@ export function useAdminPageChrome() {
 /**
  * Register the current page's title, search, filters, and actions into the top navbar.
  * Clears automatically on unmount / route change.
+ * Pass `{ enabled: false }` when embedding the view inside another page that owns chrome.
  */
-export function useSetAdminPageChrome(config: AdminPageChromeConfig | null) {
+export function useSetAdminPageChrome(
+  config: AdminPageChromeConfig | null,
+  options?: { enabled?: boolean },
+) {
   const ctx = useContext(AdminPageChromeContext);
   const setChrome = ctx?.setChrome;
   const claimChromeOwner = ctx?.claimChromeOwner;
   const configRef = useRef(config);
   configRef.current = config;
   const ownerIdRef = useRef(0);
+  const enabled = options?.enabled !== false;
 
   // Primitive signature only — avoids depending on ctx object identity (which changes
   // whenever chrome state updates and would otherwise clear→reset in a loop).
   const signature = chromeSignature(config);
 
   useLayoutEffect(() => {
-    if (!setChrome || !claimChromeOwner) return;
+    if (!enabled || !setChrome || !claimChromeOwner) return;
     const ownerId = claimChromeOwner();
     ownerIdRef.current = ownerId;
     setChrome(configRef.current, ownerId);
     return () => setChrome(null, ownerId);
-  }, [setChrome, claimChromeOwner, signature]);
+  }, [setChrome, claimChromeOwner, signature, enabled]);
 }
 
 /** Fallback titles when a page has not registered chrome yet */
@@ -150,13 +155,13 @@ export const ADMIN_ROUTE_TITLES: { match: (path: string) => boolean; title: stri
   { match: (p) => p.startsWith("/admin/workload"), title: "Workload" },
   { match: (p) => p.startsWith("/admin/team-performance"), title: "Performance" },
   { match: (p) => p.startsWith("/admin/staff"), title: "Staff" },
-  { match: (p) => p.startsWith("/admin/services"), title: "Services" },
-  { match: (p) => p.startsWith("/admin/categories"), title: "Categories" },
+  { match: (p) => p.startsWith("/admin/services"), title: "Services & Categories" },
+  { match: (p) => p.startsWith("/admin/categories"), title: "Services & Categories" },
   { match: (p) => p.startsWith("/admin/origin-countries"), title: "Origin countries" },
   { match: (p) => p.startsWith("/admin/blog"), title: "Blog" },
   { match: (p) => p.startsWith("/admin/homepage"), title: "Homepage settings" },
-  { match: (p) => p.startsWith("/admin/roles"), title: "Roles" },
-  { match: (p) => p.startsWith("/admin/permissions"), title: "Permissions" },
+  { match: (p) => p.startsWith("/admin/roles"), title: "Roles & Permissions" },
+  { match: (p) => p.startsWith("/admin/permissions"), title: "Roles & Permissions" },
   { match: (p) => p.startsWith("/admin/team"), title: "Team overview" },
   { match: (p) => p.startsWith("/admin/easyfly/action"), title: "EasyFly Actions" },
   { match: (p) => p.startsWith("/admin/easyfly/schedule"), title: "Schedule Changes" },
@@ -182,4 +187,23 @@ export const ADMIN_ROUTE_TITLES: { match: (path: string) => boolean; title: stri
 export function titleForAdminPath(pathname: string): string {
   const hit = ADMIN_ROUTE_TITLES.find((row) => row.match(pathname));
   return hit?.title ?? "Admin";
+}
+
+/**
+ * Nest under the dashboard (or any host page) so child views can call
+ * useSetAdminPageChrome without overwriting the host page chrome.
+ */
+export function AdminChromeIsolation({ children }: { children: ReactNode }) {
+  const chromeRef = useRef<AdminPageChromeConfig | null>(null);
+  const value = useMemo<AdminPageChromeContextValue>(
+    () => ({
+      chrome: null,
+      chromeRef,
+      setChrome: () => undefined,
+      claimChromeOwner: () => -1,
+    }),
+    [],
+  );
+
+  return <AdminPageChromeContext.Provider value={value}>{children}</AdminPageChromeContext.Provider>;
 }

@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { ProgressStepper } from "@/components/ProgressStepper";
 import { Button } from "@/components/ui/Button";
+import { useEVisa } from "@/context/EVisaContext";
 import { eVisaApi } from "@/lib/api-client";
 import {
   clearStripeReturnParams,
@@ -33,6 +34,7 @@ export default function EVisaPaymentPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const caseNumber = (searchParams.get("case") || searchParams.get("reference") || "").trim();
+  const { updateData } = useEVisa();
 
   const [serviceName, setServiceName] = useState("Indian e-Visa assistance");
   const [amountMinor, setAmountMinor] = useState<number | null>(null);
@@ -46,6 +48,14 @@ export default function EVisaPaymentPage() {
   const docsUrl = (resolvedCase: string, url?: string) => {
     if (url && url.startsWith("/")) return url;
     return `/indian-e-visa/upload?case=${encodeURIComponent(resolvedCase)}`;
+  };
+
+  const markPaidLocally = (resolvedCase: string) => {
+    updateData({
+      fileNumber: resolvedCase,
+      hasPaid: true,
+      isEmailConfirmed: true,
+    });
   };
 
   useEffect(() => {
@@ -63,7 +73,11 @@ export default function EVisaPaymentPage() {
         const app = resume.data.application_data;
         setServiceName(app.service_name || "Indian e-Visa assistance");
         setPaymentConfirmed(Boolean(app.payment_confirmed));
+        if (app.email_confirmed) {
+          updateData({ isEmailConfirmed: true, fileNumber: caseNumber });
+        }
         if (app.payment_confirmed) {
+          markPaidLocally(caseNumber);
           const next = docsUrl(caseNumber);
           setUploadUrl(next);
           router.replace(next);
@@ -76,6 +90,7 @@ export default function EVisaPaymentPage() {
     };
 
     void loadCase();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseNumber, router]);
 
   useEffect(() => {
@@ -89,20 +104,42 @@ export default function EVisaPaymentPage() {
     void (async () => {
       setPaying(true);
       setError("");
-      try {
-        const response = await eVisaApi.paymentConfirm(resolvedCase, {
+
+      const confirmOnce = () =>
+        eVisaApi.paymentConfirm(resolvedCase, {
+          stripe_session_id: sessionId,
           payment_intent_id: sessionId,
         });
+
+      try {
+        const response = await confirmOnce();
         if (!active) return;
         clearStripeReturnParams();
         setPaymentConfirmed(true);
+        markPaidLocally(resolvedCase);
         const next = docsUrl(resolvedCase, response.data.upload_url);
         setUploadUrl(next);
-        // After payment → documents (simple)
         router.replace(next);
-      } catch (e) {
-        if (!active) return;
-        setError(e instanceof Error ? e.message : "Payment verification failed.");
+      } catch {
+        // Stripe can lag briefly after redirect — retry once.
+        try {
+          await new Promise((r) => setTimeout(r, 1500));
+          const response = await confirmOnce();
+          if (!active) return;
+          clearStripeReturnParams();
+          setPaymentConfirmed(true);
+          markPaidLocally(resolvedCase);
+          const next = docsUrl(resolvedCase, response.data.upload_url);
+          setUploadUrl(next);
+          router.replace(next);
+        } catch (retryError) {
+          if (!active) return;
+          setError(
+            retryError instanceof Error
+              ? retryError.message
+              : "Payment verification failed. If you were charged, refresh this page or open your case again.",
+          );
+        }
       } finally {
         if (active) setPaying(false);
       }
@@ -111,6 +148,7 @@ export default function EVisaPaymentPage() {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseNumber, router]);
 
   const displayAmount = useMemo(() => {
@@ -191,7 +229,7 @@ export default function EVisaPaymentPage() {
                   <Button
                     onClick={() =>
                       router.push(
-                        uploadUrl || `/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}`
+                        uploadUrl || `/indian-e-visa/upload?case=${encodeURIComponent(caseNumber)}`,
                       )
                     }
                   >

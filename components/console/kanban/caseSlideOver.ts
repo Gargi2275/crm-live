@@ -5,7 +5,15 @@ import {
   type AdminApplication,
   type AdminApplicationDocument,
 } from "@/lib/admin-auth";
-import { type PipelineCase } from "@/lib/kanban";
+import {
+  displayServiceLabel,
+  isApplicationFullyPaid,
+  isPassportRenewalService,
+  normalizeServiceCategory,
+  resolvePipelinePaymentStatus,
+  stageAfterPayment,
+  type PipelineCase,
+} from "@/lib/kanban";
 
 export type AdminKanbanCase = PipelineCase & {
   applicationId: number;
@@ -39,16 +47,6 @@ const toStage = (rawStage?: string): PipelineCase["stage"] => {
   return STAGE_ALIAS[normalized] || "NEW_LEAD";
 };
 
-const normalizeServiceType = (serviceType?: string, caseType?: string): PipelineCase["serviceType"] => {
-  const normalized = (serviceType || "").toLowerCase();
-  const normalizedCaseType = (caseType || "").toLowerCase();
-  if (normalizedCaseType.includes("apostille")) return "Apostille";
-  if (normalized.includes("apostille")) return "Apostille";
-  if (normalized.includes("passport")) return "Passport Renewal";
-  if (normalized.includes("visa")) return "E-Visa";
-  return "OCI";
-};
-
 export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["stage"] => {
   const rawStage = String(item.stage || item.current_stage || item.kanban_stage || "").trim().toUpperCase().replace(/\s+/g, "_");
   const auditResult = String(item.audit_result || "").toLowerCase();
@@ -57,14 +55,18 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
   const serviceHint = String(item.service_type || item.service_name || "").toLowerCase();
   const quoteStatus = String((item as { quote_status?: string }).quote_status || "").trim().toUpperCase();
   const isEVisaCase = serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
-  const isPassportCase = serviceHint.includes("passport");
+  const isPassportCase = isPassportRenewalService(item.service_type, item.service_name);
   const isApostilleCase = serviceHint.includes("apostille") || String(item.case_type || "").toLowerCase().includes("apostille");
   const hasDocuments = Number(item.document_count || 0) > 0;
   const quotedFee = Number.parseFloat(String((item as { quoted_fee?: string | number | null }).quoted_fee ?? ""));
   const hasQuotedFee = Number.isFinite(quotedFee) && quotedFee > 0;
-  const paymentConfirmed =
-    Boolean((item as { payment_confirmed?: boolean }).payment_confirmed) || fullPaymentStatus === "paid";
+  const paymentConfirmed = isApplicationFullyPaid(item);
   const finalCompleted = Boolean((item as { final_submission_completed?: boolean }).final_submission_completed);
+
+  // Paid cases must never remain on Payment Pending (all services including apostille).
+  if (paymentConfirmed) {
+    return stageAfterPayment(rawStage, hasDocuments);
+  }
 
   if (isApostilleCase) {
     const kanbanStage = String(item.kanban_stage || item.stage || "").trim().toUpperCase().replace(/\s+/g, "_");
@@ -89,10 +91,10 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
     if (applicationStatus === "processing" || finalCompleted) {
       return "REVIEW_PENDING";
     }
-    if (applicationStatus === "final_submission_pending" || (paymentConfirmed && !finalCompleted)) {
+    if (applicationStatus === "final_submission_pending") {
       return "FORM_FILLING";
     }
-    if ((applicationStatus === "payment_pending" || applicationStatus === "approved" || hasQuotedFee) && !paymentConfirmed) {
+    if (applicationStatus === "payment_pending" || applicationStatus === "approved" || hasQuotedFee) {
       return "PAYMENT_PENDING";
     }
     if (applicationStatus === "rejected" || rawStage === "CORRECTION_REQUESTED") {
@@ -104,7 +106,7 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
     return (STAGE_ALIAS[rawStage] || "ASSESSMENT_PENDING") as PipelineCase["stage"];
   }
 
-  // Passport legacy quote states → PAYMENT_PENDING (docs) / NEW_LEAD (no docs).
+  // Passport renewal legacy quote states → PAYMENT_PENDING (docs) / NEW_LEAD (no docs).
   if (
     isPassportCase &&
     (rawStage === "INITIAL_REVIEW" || rawStage === "PASSPORT_QUOTE_PENDING" || applicationStatus === "pending_quote" || quoteStatus === "PENDING_QUOTE")
@@ -118,7 +120,11 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
 
   const backendStage = String(item.stage || "").trim();
   if (backendStage) {
-    return toStage(backendStage);
+    const mapped = toStage(backendStage);
+    if (mapped === "ASSESSMENT_COMPLETED" || mapped === "PAYMENT_PENDING") {
+      return "PAYMENT_PENDING";
+    }
+    return mapped;
   }
 
   if (rawStage === "CORRECTION_REQUESTED" || applicationStatus === "correction_requested" || applicationStatus === "reuploaded_pending_review") {
@@ -153,7 +159,7 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
   if (rawStage === "REGISTERED" || applicationStatus === "draft") return "NEW_LEAD";
   if (["SUBMITTED", "DELIVERED"].includes(rawStage)) return rawStage as PipelineCase["stage"];
   if (rawStage === "REVIEW_PENDING" || rawStage === "READY_FOR_SUBMISSION") return rawStage as PipelineCase["stage"];
-  if (fullPaymentStatus === "paid") return "FORM_FILLING";
+  if (fullPaymentStatus === "paid") return stageAfterPayment(rawStage, hasDocuments);
   if (auditResult === "green" && ["pending", "created"].includes(fullPaymentStatus)) return "PAYMENT_PENDING";
   if (rawStage === "PAYMENT_PENDING" || applicationStatus === "payment_pending") return "PAYMENT_PENDING";
   if (rawStage === "FORM_FILLING" || rawStage === "IN_PREPARATION") return "FORM_FILLING";
@@ -183,26 +189,14 @@ const getNextAction = (stage: PipelineCase["stage"]): string => {
   return map[stage] || "No action defined";
 };
 
-const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"] => {
-  if (
-    item.full_payment_status === "paid"
-    || item.audit_payment_status === "paid"
-    || Boolean((item as { payment_confirmed?: boolean }).payment_confirmed)
-  ) {
-    return "Paid";
-  }
-  if (item.audit_payment_status === "created" || item.full_payment_status === "created") {
-    return "Prepaid";
-  }
-  return "Pending";
-};
+const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"] =>
+  resolvePipelinePaymentStatus(item);
 
 export const adminApplicationToKanbanCase = (item: AdminApplication): AdminKanbanCase => {
   const createdAt = item.created_at || new Date().toISOString();
   const ageHours = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60)));
-  const st = String(item.service_type || "").toLowerCase();
-  const ct = String(item.case_type || "").toLowerCase();
-  const isApostille = st.includes("apostille") || ct.includes("apostille");
+  const serviceCategory = normalizeServiceCategory(item.service_type, item.case_type, item.service_name);
+  const isApostille = serviceCategory === "Apostille";
   const displayId =
     isApostille && (item.file_number || "").trim()
       ? String(item.file_number).trim()
@@ -217,7 +211,8 @@ export const adminApplicationToKanbanCase = (item: AdminApplication): AdminKanba
     auditResult: String(item.audit_result || ""),
     id: displayId,
     customer: item.customer_name || `Customer ${item.id}`,
-    serviceType: normalizeServiceType(item.service_type, item.case_type),
+    serviceType: displayServiceLabel(item),
+    serviceCategory,
     country: "",
     flag: "",
     amount: 0,
@@ -242,7 +237,7 @@ export type AdminCaseSlideOverPayload = {
 export async function loadAdminCaseSlideOver(applicationId: number): Promise<AdminCaseSlideOverPayload> {
   const details = await getAdminApplicationDetails(applicationId);
   let caseData = adminApplicationToKanbanCase(details);
-  const isApostilleCase = caseData.serviceType === "Apostille";
+  const isApostilleCase = caseData.serviceCategory === "Apostille" || caseData.serviceType.toLowerCase().includes("apostille");
 
   if (isApostilleCase) {
     let mergedDetails: AdminApplication | null = details;

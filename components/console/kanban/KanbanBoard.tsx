@@ -5,7 +5,17 @@ import { DndContext, DragOverlay, closestCorners, useSensor, useSensors, Pointer
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanCard } from "./KanbanCard";
 import { SlideOverPanel } from "./SlideOverPanel";
-import { KANBAN_COLUMNS, type PipelineCase } from "@/lib/kanban";
+import {
+  KANBAN_COLUMNS,
+  displayServiceLabel,
+  isApplicationFullyPaid,
+  isPassportRenewalService,
+  matchesServiceFilter,
+  normalizeServiceCategory,
+  resolvePipelinePaymentStatus,
+  stageAfterPayment,
+  type PipelineCase,
+} from "@/lib/kanban";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   getAdminApostilleDetail,
@@ -78,16 +88,6 @@ const toStage = (rawStage?: string): PipelineCase["stage"] => {
   return STAGE_ALIAS[normalized] || "NEW_LEAD";
 };
 
-const normalizeServiceType = (serviceType?: string, caseType?: string): PipelineCase["serviceType"] => {
-  const normalized = (serviceType || "").toLowerCase();
-  const normalizedCaseType = (caseType || "").toLowerCase();
-  if (normalizedCaseType.includes("apostille")) return "Apostille";
-  if (normalized.includes("apostille")) return "Apostille";
-  if (normalized.includes("passport")) return "Passport Renewal";
-  if (normalized.includes("visa")) return "E-Visa";
-  return "OCI";
-};
-
 const getStageBadgeClass = (stage: PipelineCase["stage"]) => {
   switch (stage) {
     case "NEW_LEAD":
@@ -123,13 +123,45 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
   const applicationStatus = String(item.application_status || "").toLowerCase();
   const fullPaymentStatus = String(item.full_payment_status || "").toLowerCase();
   const serviceHint = String(item.service_type || item.service_name || "").toLowerCase();
-  const quoteStatus = String((item as any).quote_status || "").trim().toUpperCase();
+  const quoteStatus = String((item as { quote_status?: string }).quote_status || "").trim().toUpperCase();
   const isEVisaCase = serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
-  const isPassportCase = serviceHint.includes("passport");
+  const isPassportCase = isPassportRenewalService(item.service_type, item.service_name);
+  const isApostilleCase =
+    serviceHint.includes("apostille") || String(item.case_type || "").toLowerCase().includes("apostille");
   const hasDocuments = Number(item.document_count || 0) > 0;
+  const paymentConfirmed = isApplicationFullyPaid(item);
 
-  // Passport legacy quote states → PAYMENT_PENDING (docs) / NEW_LEAD (no docs).
-  // Run before trusting backend stage so old PASSPORT_QUOTE_PENDING rows alias correctly.
+  // Paid cases must never fall back to Payment Pending / New Lead (all services).
+  if (paymentConfirmed) {
+    return stageAfterPayment(rawStage, hasDocuments);
+  }
+
+  if (isApostilleCase) {
+    const kanbanStage = String(item.kanban_stage || item.stage || "").trim().toUpperCase().replace(/\s+/g, "_");
+    const quotedFee = Number.parseFloat(String((item as { quoted_fee?: string | number | null }).quoted_fee ?? ""));
+    const hasQuotedFee = Number.isFinite(quotedFee) && quotedFee > 0;
+    const finalCompleted = Boolean((item as { final_submission_completed?: boolean }).final_submission_completed);
+    if (kanbanStage === "DELIVERED" || applicationStatus === "completed" || applicationStatus === "dispatched") {
+      return "DELIVERED";
+    }
+    if (kanbanStage === "SUBMITTED" || applicationStatus === "submitted") return "SUBMITTED";
+    if (kanbanStage === "READY_FOR_SUBMISSION") return "READY_FOR_SUBMISSION";
+    if (kanbanStage === "FORM_FILLING") return "FORM_FILLING";
+    if (kanbanStage === "REVIEW_PENDING" || applicationStatus === "processing" || finalCompleted) {
+      return "REVIEW_PENDING";
+    }
+    if (applicationStatus === "final_submission_pending") return "FORM_FILLING";
+    if (applicationStatus === "payment_pending" || applicationStatus === "approved" || hasQuotedFee) {
+      return "PAYMENT_PENDING";
+    }
+    if (applicationStatus === "rejected" || rawStage === "CORRECTION_REQUESTED") return "DOCUMENTS_REQUIRED";
+    if (applicationStatus === "under_review" || rawStage === "INITIAL_REVIEW" || rawStage === "ASSESSMENT_PENDING") {
+      return "ASSESSMENT_PENDING";
+    }
+    return (STAGE_ALIAS[rawStage] || "ASSESSMENT_PENDING") as PipelineCase["stage"];
+  }
+
+  // Passport renewal legacy quote states → PAYMENT_PENDING
   if (
     isPassportCase &&
     (
@@ -139,7 +171,7 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
       quoteStatus === "PENDING_QUOTE"
     )
   ) {
-    return hasDocuments ? "PAYMENT_PENDING" : "NEW_LEAD";
+    return "PAYMENT_PENDING";
   }
 
   if (
@@ -153,14 +185,14 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
   }
 
   // Assessment approved + unpaid full service → Payment Pending (never Assessment Completed).
-  if (auditResult === "green" && fullPaymentStatus !== "paid" && applicationStatus !== "paid") {
+  if (auditResult === "green") {
     return "PAYMENT_PENDING";
   }
 
   const backendStage = String(item.stage || "").trim();
   if (backendStage) {
     const mapped = toStage(backendStage);
-    if (mapped === "ASSESSMENT_COMPLETED" && fullPaymentStatus !== "paid") {
+    if (mapped === "ASSESSMENT_COMPLETED" || mapped === "PAYMENT_PENDING") {
       return "PAYMENT_PENDING";
     }
     return mapped;
@@ -226,11 +258,11 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
     return rawStage as PipelineCase["stage"];
   }
 
-  if (fullPaymentStatus === "paid") {
-    return "FORM_FILLING";
+  if (fullPaymentStatus === "paid" || paymentConfirmed) {
+    return stageAfterPayment(rawStage, hasDocuments);
   }
 
-  if (auditResult === "green" && ["pending", "created"].includes(fullPaymentStatus)) {
+  if (auditResult === "green" && ["pending", "created"].includes(fullPaymentStatus) && !paymentConfirmed) {
     return "PAYMENT_PENDING";
   }
 
@@ -274,22 +306,14 @@ const getNextAction = (stage: PipelineCase["stage"]): string => {
   return map[stage] || "No action defined";
 };
 
-const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"] => {
-  if (item.full_payment_status === "paid" || item.audit_payment_status === "paid") {
-    return "Paid";
-  }
-  if (item.audit_payment_status === "created" || item.full_payment_status === "created") {
-    return "Prepaid";
-  }
-  return "Pending";
-};
+const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"] =>
+  resolvePipelinePaymentStatus(item);
 
 const toKanbanCase = (item: AdminApplication): KanbanCase => {
   const createdAt = item.created_at || new Date().toISOString();
   const ageHours = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60)));
-  const st = String(item.service_type || "").toLowerCase();
-  const ct = String(item.case_type || "").toLowerCase();
-  const isApostille = st.includes("apostille") || ct.includes("apostille");
+  const serviceCategory = normalizeServiceCategory(item.service_type, item.case_type, item.service_name);
+  const isApostille = serviceCategory === "Apostille";
   const displayId =
     isApostille && (item.file_number || "").trim()
       ? String(item.file_number).trim()
@@ -304,7 +328,8 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
     auditResult: String(item.audit_result || ""),
     id: displayId,
     customer: item.customer_name || `Customer ${item.id}`,
-    serviceType: normalizeServiceType(item.service_type, item.case_type),
+    serviceType: displayServiceLabel(item),
+    serviceCategory,
     country: "",
     flag: "",
     amount: 0,
@@ -499,7 +524,16 @@ export function KanbanBoard({
   }, [cases]);
 
   const moveCase = (caseId: string, stage: PipelineCase["stage"]) => {
-    setCases((prev) => prev.map((item) => (item.id === caseId ? { ...item, stage } : item)));
+    setCases((prev) =>
+      prev.map((item) => {
+        if (item.id !== caseId) return item;
+        const nextStage =
+          item.paymentStatus === "Paid" && stage === "PAYMENT_PENDING"
+            ? stageAfterPayment(item.stage, true)
+            : stage;
+        return { ...item, stage: nextStage, nextAction: getNextAction(nextStage) };
+      }),
+    );
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -517,36 +551,41 @@ export function KanbanBoard({
 
       if (!targetStage) return;
 
-      moveCase(caseId, targetStage);
-      const columnTitle = KANBAN_COLUMNS.find((col) => col.id === targetStage)?.title;
-
       const targetCase = cases.find((item) => item.id === caseId);
+      const resolvedTarget =
+        targetCase?.paymentStatus === "Paid" && targetStage === "PAYMENT_PENDING"
+          ? stageAfterPayment(targetCase.stage, true)
+          : targetStage;
+
+      moveCase(caseId, resolvedTarget);
+      const columnTitle = KANBAN_COLUMNS.find((col) => col.id === resolvedTarget)?.title;
+
       if (!targetCase) {
         toast.success(`${active.id} moved to ${columnTitle}`);
         return;
       }
 
-      setColumnLoading((prev) => ({ ...prev, [targetStage]: true }));
-      setColumnErrors((prev) => ({ ...prev, [targetStage]: null }));
+      setColumnLoading((prev) => ({ ...prev, [resolvedTarget]: true }));
+      setColumnErrors((prev) => ({ ...prev, [resolvedTarget]: null }));
       try {
-        await updateAdminApplicationStage(targetCase.applicationId, targetStage, {
-          correctionCause: targetStage === "DOCUMENTS_REQUIRED" ? "customer_error" : undefined,
+        await updateAdminApplicationStage(targetCase.applicationId, resolvedTarget, {
+          correctionCause: resolvedTarget === "DOCUMENTS_REQUIRED" ? "customer_error" : undefined,
         });
         toast.success(`${active.id} moved to ${columnTitle}`);
       } catch (error) {
         moveCase(caseId, previousStage);
         const message = error instanceof Error ? error.message : "Failed to update stage.";
-        setColumnErrors((prev) => ({ ...prev, [targetStage]: message }));
+        setColumnErrors((prev) => ({ ...prev, [resolvedTarget]: message }));
         toast.error(message);
       } finally {
-        setColumnLoading((prev) => ({ ...prev, [targetStage]: false }));
+        setColumnLoading((prev) => ({ ...prev, [resolvedTarget]: false }));
       }
     }
   };
 
   const handleCardClick = async (caseItem: KanbanCase) => {
     const requestId = ++detailsRequestRef.current;
-    const isApostilleCase = caseItem.serviceType === "Apostille";
+    const isApostilleCase = caseItem.serviceCategory === "Apostille" || caseItem.serviceType.toLowerCase().includes("apostille");
     setSelectedCase(caseItem);
     setSelectedCaseDetails(null);
     setSelectedCaseDocuments([]);
@@ -662,7 +701,11 @@ export function KanbanBoard({
         .join(" ")
         .toLowerCase()
         .includes(q);
-    const byService = serviceFilter === "All" || item.serviceType === serviceFilter;
+    const byService = matchesServiceFilter(
+      item.serviceCategory || normalizeServiceCategory(undefined, undefined, item.serviceType),
+      item.serviceType,
+      serviceFilter,
+    );
     const byStaff = staffFilter === "All" || (staffFilter === "Unassigned" ? !item.assignedTo : item.assignedTo === staffFilter);
     const ageDays = ageInDays(item.createdAt);
     const byAgeing = ageingFilter === "Any" || (ageingFilter === "3d+" && ageDays >= 3) || (ageingFilter === "5d+" && ageDays >= 5) || (ageingFilter === "7d+" && ageDays >= 7);
@@ -670,7 +713,7 @@ export function KanbanBoard({
     const status = String(item.applicationStatus || "").toLowerCase();
     const stage = item.stage;
     const isClosed = stage === "SUBMITTED" || stage === "DELIVERED";
-    const isEVisa = item.serviceType === "E-Visa";
+    const isEVisa = item.serviceCategory === "E-Visa" || item.serviceType.toLowerCase().includes("visa");
     const isReuploadPendingReview = status === "reuploaded_pending_review";
     const isActionRequired = status === "correction_requested" || stage === "DOCUMENTS_REQUIRED";
     const isApproved = status === "approved" || stage === "DELIVERED";
@@ -719,7 +762,14 @@ export function KanbanBoard({
         ? KANBAN_COLUMNS.filter((column) => filteredCases.some((c) => c.stage === column.id))
         : KANBAN_COLUMNS
       ).map((column) => {
-        const columnCases = filteredCases.filter((c) => c.stage === column.id);
+        const columnCases = filteredCases
+          .filter((c) => c.stage === column.id)
+          .slice()
+          .sort((a, b) => {
+            // Priority / Express paid cases stay on top of the working portal column.
+            if (a.isExpress !== b.isExpress) return a.isExpress ? -1 : 1;
+            return 0;
+          });
         return (
           <KanbanColumn
             key={column.id}

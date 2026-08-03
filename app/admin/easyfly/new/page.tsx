@@ -7,11 +7,12 @@ import {
   createEasyFlyBooking,
   EASYFLY_PAYMENT_MODE_OPTIONS,
   easyflyPaymentMethodChipClass,
+  extractEasyFlyTicket,
   type PaymentMode,
 } from "@/lib/easyfly";
 import toast from "react-hot-toast";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
-import { ChevronLeft, Plus } from "lucide-react";
+import { ChevronLeft, Plus, Upload } from "lucide-react";
 
 const toDateInputValue = (date: Date) => {
   const year = date.getFullYear();
@@ -32,6 +33,8 @@ type CreateForm = {
   pnr: string;
   paxName: string;
   airlineCode: string;
+  fromAirport: string;
+  toAirport: string;
   depDate: string;
   returnDate: string;
   payAgreed: string;
@@ -90,6 +93,7 @@ export default function NewEasyFlyBookingPage() {
   const { adminUser } = useAdminAuth();
   const todayDateValue = useMemo(() => toDateInputValue(new Date()), []);
   const [createSaving, setCreateSaving] = useState(false);
+  const [extractingTicket, setExtractingTicket] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm>({
     srNo: "",
     supplier: "",
@@ -97,6 +101,8 @@ export default function NewEasyFlyBookingPage() {
     pnr: "",
     paxName: "",
     airlineCode: "",
+    fromAirport: "",
+    toAirport: "",
     depDate: "",
     returnDate: "",
     payAgreed: "",
@@ -136,6 +142,39 @@ export default function NewEasyFlyBookingPage() {
     });
   };
 
+  const handleTicketExtract = async (file: File) => {
+    setExtractingTicket(true);
+    try {
+      const extracted = await extractEasyFlyTicket(file);
+      setCreateForm((current) => ({
+        ...current,
+        ...(extracted.pnr ? { pnr: extracted.pnr } : {}),
+        ...(extracted.airlineCode ? { airlineCode: extracted.airlineCode } : {}),
+        ...(extracted.paxName ? { paxName: extracted.paxName } : {}),
+        ...(extracted.fromAirport ? { fromAirport: extracted.fromAirport } : {}),
+        ...(extracted.toAirport ? { toAirport: extracted.toAirport } : {}),
+        ...(extracted.depDate ? { depDate: extracted.depDate } : {}),
+        ...(extracted.returnDate ? { returnDate: extracted.returnDate } : {}),
+      }));
+      const filled = [
+        extracted.pnr && "PNR",
+        extracted.airlineCode && "airline",
+        extracted.paxName && "pax",
+        (extracted.fromAirport || extracted.toAirport) && "route",
+        extracted.depDate && "dep date",
+      ].filter(Boolean);
+      toast.success(
+        filled.length
+          ? `Filled from ticket: ${filled.join(", ")}. Add supplier/SR and save.`
+          : "No autofill fields found in this ticket.",
+      );
+    } catch (extractError) {
+      toast.error(extractError instanceof Error ? extractError.message : "Could not read ticket PDF.");
+    } finally {
+      setExtractingTicket(false);
+    }
+  };
+
   const handleCreateBooking = async () => {
     if (!createForm.srNo || !createForm.supplier || !createForm.pnr || !createForm.paxName) {
       toast.error("SR No, supplier, PNR, and pax name are required.");
@@ -155,6 +194,8 @@ export default function NewEasyFlyBookingPage() {
         pnr: createForm.pnr.trim(),
         pax_name: createForm.paxName.trim(),
         airline_code: createForm.airlineCode.trim() || "AI",
+        from_airport: createForm.fromAirport.trim().toUpperCase(),
+        to_airport: createForm.toAirport.trim().toUpperCase(),
         dep_date: createForm.depDate,
         return_date: createForm.returnDate || createForm.depDate,
         amount_paid: supplierFees,
@@ -216,6 +257,28 @@ export default function NewEasyFlyBookingPage() {
   return (
     <div className="mx-auto max-w-[1100px] space-y-4 font-body pb-8">
       <section className="rounded-[14px] border border-[#D9E1EA] bg-white p-5 shadow-[0_8px_20px_rgba(16,42,67,0.04)]">
+        <h2 className="text-sm font-heading font-semibold text-[#102A43]">Import from ticket</h2>
+        <p className="mt-0.5 text-xs text-[#627D98]">
+          Upload an IndiGo/airline PDF itinerary to autofill PNR, airline, passenger name, and departure date.
+        </p>
+        <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-[10px] border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]">
+          <Upload className="h-3.5 w-3.5" />
+          {extractingTicket ? "Reading ticket…" : "Upload ticket PDF"}
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            disabled={extractingTicket}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void handleTicketExtract(file);
+            }}
+          />
+        </label>
+      </section>
+
+      <section className="rounded-[14px] border border-[#D9E1EA] bg-white p-5 shadow-[0_8px_20px_rgba(16,42,67,0.04)]">
         <h2 className="text-sm font-heading font-semibold text-[#102A43]">Booking details</h2>
         <p className="mt-0.5 text-xs text-[#627D98]">Passenger, supplier and ticket identifiers</p>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -269,6 +332,26 @@ export default function NewEasyFlyBookingPage() {
               onChange={(e) => updateField("airlineCode", e.target.value)}
               className={fieldClass}
               placeholder="AI"
+            />
+          </Field>
+          <Field label="From">
+            <input
+              type="text"
+              value={createForm.fromAirport}
+              onChange={(e) => updateField("fromAirport", e.target.value.toUpperCase())}
+              className={fieldClass}
+              placeholder="e.g. HSR"
+              maxLength={10}
+            />
+          </Field>
+          <Field label="To">
+            <input
+              type="text"
+              value={createForm.toAirport}
+              onChange={(e) => updateField("toAirport", e.target.value.toUpperCase())}
+              className={fieldClass}
+              placeholder="e.g. LHR"
+              maxLength={10}
             />
           </Field>
         </div>

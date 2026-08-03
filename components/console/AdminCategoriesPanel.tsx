@@ -20,7 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Layers, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { ConfirmDialog } from "@/components/console/ConfirmDialog";
 import { clearPublicPricingCache } from "@/lib/public-pricing";
@@ -131,8 +131,7 @@ function SortableCategoryRow({
 }
 
 export default function AdminCategoriesPanel() {
-  const { adminUser } = useAdminAuth();
-  const isAdmin = (adminUser?.role || "").toLowerCase() === "admin";
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/categories");
   const [rows, setRows] = useState<AdminCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -146,7 +145,7 @@ export default function AdminCategoriesPanel() {
   const [formActive, setFormActive] = useState(true);
 
   const load = useCallback(async () => {
-    if (!isAdmin) return;
+    if (!canAccess) return;
     setLoading(true);
     try {
       setRows(await listAdminCategories());
@@ -155,11 +154,12 @@ export default function AdminCategoriesPanel() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, [canAccess]);
 
   useEffect(() => {
+    if (!accessReady || !canAccess) return;
     void load();
-  }, [load]);
+  }, [accessReady, canAccess, load]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -310,7 +310,7 @@ export default function AdminCategoriesPanel() {
   const activeFilterCount = (search.trim() ? 1 : 0) + (activeFilter !== "all" ? 1 : 0);
 
   useSetAdminPageChrome(
-    isAdmin
+    canAccess
       ? {
           title: "Categories",
           subtitle: "Public pricing tabs",
@@ -323,7 +323,7 @@ export default function AdminCategoriesPanel() {
           activeFilterCount,
           onClearFilters: clearFilters,
           meta: `${filtered.length} categor${filtered.length === 1 ? "y" : "ies"}`,
-          syncKey: `${search}|${activeFilter}|${loading}|${rows.length}|${filtered.length}|${modalOpen}|${saving}`,
+          syncKey: `${search}|${activeFilter}|${loading}|${rows.length}|${filtered.length}|${modalOpen}|${saving}|${canAccess ? 1 : 0}`,
           actions: (
             <>
               <button
@@ -362,11 +362,21 @@ export default function AdminCategoriesPanel() {
       : null,
   );
 
-  if (!isAdmin) {
+  if (!accessReady) {
+    return (
+      <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
+        <p className="text-sm text-[#627D98]">Checking access…</p>
+      </div>
+    );
+  }
+
+  if (!canAccess) {
     return (
       <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
         <h1 className="text-xl font-heading font-semibold text-[#102A43]">Categories</h1>
-        <p className="mt-2 text-sm text-[#627D98]">Access restricted to Admin.</p>
+        <p className="mt-2 text-sm text-[#627D98]">
+          Access restricted. Ask an admin to grant the Services or Categories module for your role.
+        </p>
       </div>
     );
   }

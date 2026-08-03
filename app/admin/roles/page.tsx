@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { PageLoader } from "@/components/ui/PageLoader";
 import {
@@ -13,7 +14,6 @@ import {
   getAdminRolePermissions,
   getAdminRolesOverview,
   getAdminStaffPermissions,
-  isAdminStaffRole,
   updateAdminRole,
   updateAdminRolePermissions,
   updateAdminStaffPermissions,
@@ -34,7 +34,7 @@ function AdminRolesPermissionsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { adminUser } = useAdminAuth();
-  const isAdmin = isAdminStaffRole(adminUser?.role);
+  const { canAccess } = useAdminModuleAccess("/admin/roles");
   const ownRoleId = String(adminUser?.role || "").trim().toLowerCase();
   const ownStaffId = adminUser?.id ?? null;
 
@@ -100,7 +100,7 @@ function AdminRolesPermissionsInner() {
   const isEditingOwnRole =
     mode === "role" && Boolean(selectedRoleId) && selectedRoleId?.toLowerCase() === ownRoleId;
   const isEditingSelf = mode === "staff" && selectedStaffId != null && selectedStaffId === ownStaffId;
-  const canEditSelected = isAdmin && !isEditingOwnRole && !isEditingSelf;
+  const canEditSelected = canAccess && !isEditingOwnRole && !isEditingSelf;
 
   const loadStaff = useCallback(async (staffId?: number | null) => {
     setPermsLoading(true);
@@ -635,9 +635,10 @@ function AdminRolesPermissionsInner() {
                 ))}
               </ul>
             )}
-            {!isAdmin ? (
+            {!canAccess ? (
               <p className="px-4 py-3 text-xs text-amber-700 bg-amber-50 border-t border-amber-100">
-                Only admin can change permissions. You can view access settings here.
+                Changing permissions requires the Roles &amp; Permissions module for your role. You can view
+                access settings here.
               </p>
             ) : isEditingOwnRole || isEditingSelf ? (
               <p className="px-4 py-3 text-xs text-amber-700 bg-amber-50 border-t border-amber-100">

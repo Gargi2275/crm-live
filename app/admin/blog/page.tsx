@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { ArrowLeft, ImagePlus, Newspaper, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { ConfirmDialog } from "@/components/console/ConfirmDialog";
 import {
@@ -195,8 +195,7 @@ function ImageUploadField({
 }
 
 export default function AdminBlogPage() {
-  const { adminUser } = useAdminAuth();
-  const isAdmin = (adminUser?.role || "").toLowerCase() === "admin";
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/blog");
 
   const [posts, setPosts] = useState<AdminBlogPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -235,7 +234,7 @@ export default function AdminBlogPage() {
   }, [authorImageFile, authorPreview]);
 
   const loadPosts = useCallback(async () => {
-    if (!isAdmin) return;
+    if (!canAccess) return;
     setLoading(true);
     try {
       setPosts(
@@ -249,7 +248,7 @@ export default function AdminBlogPage() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, search, publishedFilter]);
+  }, [canAccess, search, publishedFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -402,7 +401,7 @@ export default function AdminBlogPage() {
   const activeFilterCount = (search.trim() ? 1 : 0) + (publishedFilter !== "all" ? 1 : 0);
 
   useSetAdminPageChrome(
-    isAdmin
+    canAccess
       ? editorOpen
         ? {
             title: editing ? "Edit post" : "New post",
@@ -482,11 +481,21 @@ export default function AdminBlogPage() {
       : null,
   );
 
-  if (!isAdmin) {
+  if (!accessReady) {
+    return (
+      <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
+        <p className="text-sm text-[#627D98]">Checking access…</p>
+      </div>
+    );
+  }
+
+  if (!canAccess) {
     return (
       <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
         <h1 className="text-xl font-heading font-semibold text-[#102A43]">Blog</h1>
-        <p className="mt-2 text-sm text-[#627D98]">Access restricted to Admin.</p>
+        <p className="mt-2 text-sm text-[#627D98]">
+          Access restricted. Ask an admin to grant the Blog module for your role.
+        </p>
       </div>
     );
   }

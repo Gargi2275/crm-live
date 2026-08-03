@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   createAdminServiceDocument,
@@ -109,8 +109,7 @@ export default function AdminEditServicePage() {
   const params = useParams();
   const router = useRouter();
   const serviceId = Number(params?.id);
-  const { adminUser } = useAdminAuth();
-  const isAdmin = (adminUser?.role || "").toLowerCase() === "admin";
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/services");
   const validId = Number.isFinite(serviceId) && serviceId > 0;
 
   const [meta, setMeta] = useState<AdminServiceMeta>({
@@ -304,7 +303,7 @@ export default function AdminEditServicePage() {
   }, [serviceId, validId]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!accessReady || !canAccess) return;
     if (!validId) {
       setNotFound(true);
       setLoading(false);
@@ -315,15 +314,15 @@ export default function AdminEditServicePage() {
     void loadDocuments();
     void loadQuestions();
     void loadReminders();
-  }, [isAdmin, validId, loadMeta, loadService, loadDocuments, loadQuestions, loadReminders]);
+  }, [accessReady, canAccess, validId, loadMeta, loadService, loadDocuments, loadQuestions, loadReminders]);
 
   useSetAdminPageChrome(
-    isAdmin
+    canAccess
       ? {
           title: "Edit service",
           subtitle: service?.service_name || "Details, questions & documents",
           icon: Layers,
-          syncKey: `edit-service|${serviceId}|${questionRows.length}|${docRows.length}`,
+          syncKey: `edit-service|${serviceId}|${questionRows.length}|${docRows.length}|${canAccess ? 1 : 0}`,
           actions: (
             <button
               type="button"
@@ -700,11 +699,21 @@ export default function AdminEditServicePage() {
     }
   };
 
-  if (!isAdmin) {
+  if (!accessReady) {
+    return (
+      <div className="mx-auto max-w-3xl rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
+        <p className="text-sm text-[#627D98]">Checking access…</p>
+      </div>
+    );
+  }
+
+  if (!canAccess) {
     return (
       <div className="mx-auto max-w-3xl rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
         <h1 className="text-xl font-heading font-semibold text-[#102A43]">Edit service</h1>
-        <p className="mt-2 text-sm text-[#627D98]">Access restricted to Admin.</p>
+        <p className="mt-2 text-sm text-[#627D98]">
+          Access restricted. Ask an admin to grant the Services or Categories module for your role.
+        </p>
       </div>
     );
   }
@@ -867,7 +876,9 @@ export default function AdminEditServicePage() {
                   {fieldErrors.audit_fee ? (
                     <span className="mt-1 block text-xs text-[#B42318]">{fieldErrors.audit_fee}</span>
                   ) : (
-                    <span className="mt-1 block text-xs text-[#627D98]">Leave empty for £0</span>
+                    <span className="mt-1 block text-xs text-[#627D98]">
+                      Leave empty for £0. If set above £0, customers pay assessment first; otherwise they pay the full service fee.
+                    </span>
                   )}
                 </label>
               </div>

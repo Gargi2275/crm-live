@@ -19,6 +19,7 @@ type DashboardApplication = {
   service_name: string;
   service_type?: string;
   application_status: string;
+  current_stage?: string | null;
   application_date: string;
   submission_date: string | null;
   approval_date: string | null;
@@ -31,6 +32,7 @@ type DashboardApplication = {
   audit_payment_status?: string | null;
   full_payment_status?: string | null;
   quote_status?: string | null;
+  payment_confirmed?: boolean;
 };
 
 function canDeleteDraftApplication(app: DashboardApplication): boolean {
@@ -166,8 +168,8 @@ function statusBucket(status: string): Exclude<StatusFilter, "all"> {
   ) {
     return "action";
   }
+  // "paid" means payment received — case is still in progress, not completed.
   if (
-    key.includes("paid") ||
     key.includes("approved") ||
     key.includes("complete") ||
     key.includes("delivered") ||
@@ -176,6 +178,58 @@ function statusBucket(status: string): Exclude<StatusFilter, "all"> {
     return "done";
   }
   return "progress";
+}
+
+function isApplicationPaid(app: DashboardApplication): boolean {
+  if (app.payment_confirmed) return true;
+  if (String(app.full_payment_status || "").toLowerCase() === "paid") return true;
+  if (String(app.quote_status || "").toUpperCase() === "PAID") return true;
+  if (String(app.application_status || "").toLowerCase() === "paid") return true;
+  return false;
+}
+
+function isEmbassySubmitted(app: DashboardApplication): boolean {
+  const stage = String(app.current_stage || "").toLowerCase();
+  const status = String(app.application_status || "").toLowerCase();
+  if (["submitted", "decision_received", "closed", "delivered"].includes(stage)) return true;
+  if (["submitted", "approved", "completed", "delivered", "dispatched", "collected"].includes(status)) {
+    return true;
+  }
+  if (String(app.submission_date || "").trim()) return true;
+  if (extractGovernmentReference(app.notes)) return true;
+  return false;
+}
+
+/** Progress label separate from payment — avoids “Paid” looking like final case status. */
+function progressStatusLabel(app: DashboardApplication): string {
+  const status = String(app.application_status || "").toLowerCase();
+  const stage = String(app.current_stage || "").toLowerCase();
+
+  if (["correction_requested", "reuploaded_pending_review"].includes(status)) return "Action needed";
+  if (status.includes("reject")) return "Rejected";
+  if (status.includes("closed") || status.includes("cancel")) return "Closed";
+
+  if (isEmbassySubmitted(app)) {
+    if (
+      ["decision_received", "closed", "delivered"].includes(stage) ||
+      ["approved", "completed", "delivered", "dispatched", "collected"].includes(status)
+    ) {
+      return "Completed";
+    }
+    return "Submitted";
+  }
+
+  if (
+    ["under_review", "paid", "processing", "audit_pending"].includes(status) ||
+    ["in_preparation", "docs_received", "paid", "audit_pending"].includes(stage)
+  ) {
+    return "Under Review";
+  }
+
+  if (status === "draft" || stage === "draft" || stage === "registered") return "Draft";
+  if (status.includes("payment") || stage.includes("payment")) return "Payment Pending";
+
+  return labelStatus(status || stage || "in_progress");
 }
 
 function formatShortDate(value?: string | null) {
@@ -547,6 +601,8 @@ export default function DashboardPage() {
               const needsAction = statusBucket(app.application_status) === "action";
               const applicantName = resolveApplicantName(app);
               const initials = applicantInitials(applicantName);
+              const progressLabel = progressStatusLabel(app);
+              const showPaidBadge = isApplicationPaid(app);
 
               return (
                 <article
@@ -572,13 +628,20 @@ export default function DashboardPage() {
                         <p className="truncate text-[11px] text-[#829AB1]">{app.service_name || "Service"}</p>
                       </div>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${statusTone(
-                        app.application_status,
-                      )}`}
-                    >
-                      {labelStatus(app.application_status)}
-                    </span>
+                    <div className="flex shrink-0 flex-wrap items-start justify-end gap-1">
+                      {showPaidBadge ? (
+                        <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Paid
+                        </span>
+                      ) : null}
+                      <span
+                        className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${statusTone(
+                          progressLabel,
+                        )}`}
+                      >
+                        {progressLabel}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mt-3 flex items-center gap-1 rounded-lg border border-[#E8EEF5] bg-[#F8FAFC] px-2.5 py-1.5">

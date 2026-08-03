@@ -93,6 +93,14 @@ export default function UploadPage() {
       if (authService.isLoggedIn()) {
         try {
           const resume = await eVisaApi.getResume(normalizedCase);
+          const appData = resume.data.application_data;
+          if (appData?.payment_confirmed || appData?.email_confirmed) {
+            updateData({
+              fileNumber: normalizedCase,
+              hasPaid: Boolean(appData.payment_confirmed),
+              isEmailConfirmed: Boolean(appData.email_confirmed),
+            });
+          }
           canonicalRoute = resolveCanonicalEVisaRoute(resume.data, normalizedCase);
         } catch (error) {
           if (isMissingCaseError(error)) {

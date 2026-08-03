@@ -2046,7 +2046,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     <div>
                       <p className="text-[#102A43] text-sm font-medium">{task.application_reference}</p>
                       <p className="text-xs text-[#627D98] capitalize">
-                        {task.task_type.replace(/_/g, " ")} • {task.customer_name}
+                        {task.task_type.replace(/_/g, " ")} • {task.customer_name || "—"}
                       </p>
                       <p className="text-xs text-[#627D98]">Due: {formatTaskDeadline(task.deadline)}</p>
                     </div>

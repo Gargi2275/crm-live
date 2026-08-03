@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Activity, BarChart3, RefreshCw, Table2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { TeamPerformanceGrid } from "@/components/console/TeamPerformanceGrid";
 import { TeamPerformanceCharts } from "@/components/console/TeamPerformanceCharts";
@@ -28,8 +29,8 @@ type ViewTab = "table" | "graphs";
 
 export default function AdminTeamPerformancePage() {
   const { adminUser } = useAdminAuth();
-  const role = adminUser?.role;
-  const canView = role === "admin" || role === "ops_manager";
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/team-performance");
+  const canView = canAccess;
 
   const [viewTab, setViewTab] = useState<ViewTab>("table");
   const [teamPeriod, setTeamPeriod] = useState<TeamPerformancePeriod>("month");
@@ -110,11 +111,21 @@ export default function AdminTeamPerformancePage() {
     return null;
   }
 
+  if (!accessReady) {
+    return (
+      <div className="max-w-lg mx-auto mt-16 text-center space-y-3">
+        <p className="text-sm text-[#627D98]">Checking access…</p>
+      </div>
+    );
+  }
+
   if (!canView) {
     return (
       <div className="max-w-lg mx-auto mt-16 text-center space-y-3">
         <p className="text-[#102A43] font-heading font-semibold">Access restricted</p>
-        <p className="text-sm text-[#627D98]">Team performance is available to admins and operations managers.</p>
+        <p className="text-sm text-[#627D98]">
+          Ask an admin to grant the Team performance module for your role.
+        </p>
         <Link href="/admin" className="inline-flex text-sm font-semibold text-[#009877] hover:underline">
           Back to dashboard
         </Link>

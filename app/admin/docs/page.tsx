@@ -327,7 +327,12 @@ export default function AdminDocsPage() {
                         {formatDate(row.requested_at)}
                       </td>
                       <td className="px-3 py-2">
-                        <p className="text-sm font-medium text-[#102A43]">{row.customer_email || "—"}</p>
+                        <p className="text-sm font-medium text-[#102A43]">
+                          {row.customer_name || row.customer_email || "—"}
+                        </p>
+                        {row.customer_name && row.customer_email ? (
+                          <p className="mt-0.5 text-xs text-[#627D98]">{row.customer_email}</p>
+                        ) : null}
                         {row.reason ? (
                           <p className="mt-0.5 line-clamp-1 text-xs text-[#627D98]">{row.reason}</p>
                         ) : null}
@@ -435,8 +440,11 @@ export default function AdminDocsPage() {
                     <tr key={row.application_id} className="hover:bg-[#F8FCFF]">
                       <td className="px-3 py-2">
                         <p className="text-sm font-medium text-[#102A43]">
-                          {row.customer_email || row.customer_name || "—"}
+                          {row.customer_name || row.customer_email || "—"}
                         </p>
+                        {row.customer_name && row.customer_email ? (
+                          <p className="mt-0.5 text-xs text-[#627D98]">{row.customer_email}</p>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 text-xs text-[#486581]">{row.service_name || row.case_type || "—"}</td>
                       <td className="px-3 py-2 text-xs text-[#486581]">{row.reference_number || row.application_id}</td>

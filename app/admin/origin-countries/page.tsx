@@ -21,12 +21,11 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Globe2, GripVertical, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { ConfirmDialog } from "@/components/console/ConfirmDialog";
 import {
   deleteAdminOriginCountry,
-  isAdminStaffRole,
   listAdminOriginCountries,
   reorderAdminOriginCountries,
   type AdminOriginCountry,
@@ -126,8 +125,7 @@ function SortableCountryRow({
 }
 
 export default function AdminOriginCountriesPage() {
-  const { adminUser } = useAdminAuth();
-  const isAdmin = isAdminStaffRole(adminUser?.role);
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/origin-countries");
   const [rows, setRows] = useState<AdminOriginCountry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -152,9 +150,9 @@ export default function AdminOriginCountriesPage() {
   }, []);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canAccess) return;
     void load();
-  }, [isAdmin, load]);
+  }, [canAccess, load]);
 
   useSetAdminPageChrome({
     title: "Origin countries",
@@ -246,10 +244,18 @@ export default function AdminOriginCountriesPage() {
     [canDrag, saving, rows],
   );
 
-  if (!isAdmin) {
+  if (!accessReady) {
     return (
       <div className="rounded-[12px] border border-[#E1E7EF] bg-white p-6 text-sm text-[#486581]">
-        Admin access required.
+        Checking access…
+      </div>
+    );
+  }
+
+  if (!canAccess) {
+    return (
+      <div className="rounded-[12px] border border-[#E1E7EF] bg-white p-6 text-sm text-[#486581]">
+        Access restricted. Ask an admin to grant the Origin countries module for your role.
       </div>
     );
   }

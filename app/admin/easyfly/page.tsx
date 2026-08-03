@@ -16,6 +16,7 @@ import toast from "react-hot-toast";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   BadgeCheck,
+  Download,
   Eye,
   FileText,
   IdCard,
@@ -40,6 +41,26 @@ const formatDate = (dateString: string) =>
     month: "short",
     year: "numeric",
   });
+
+function csvEscape(value: string | number | boolean | null | undefined) {
+  const text = String(value ?? "");
+  if (text.includes(",") || text.includes("\n") || text.includes('"')) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function refundStatusLabel(status: RefundStatus) {
+  if (status === "none") return "No refund";
+  if (status === "pending") return "Refund pending";
+  return "Credit note";
+}
+
+function scheduleChangeLabel(status: ScheduleChange) {
+  if (status === "none") return "No schedule change";
+  if (status === "minor") return "Minor change";
+  return "Major change";
+}
 
 function statusTone(status: RefundStatus) {
   if (status === "none") return "success";
@@ -268,10 +289,8 @@ export default function EasyFlyBookingsPage() {
     return baseRows.filter((booking) => {
       const matchesSearch =
         !q ||
-        booking.paxName.toLowerCase().includes(q) ||
-        booking.pnr.toLowerCase().includes(q) ||
-        booking.invoiceNumber.toLowerCase().includes(q) ||
-        booking.srNo.toLowerCase().includes(q);
+        [booking.paxName, booking.pnr, booking.invoiceNumber, booking.srNo, booking.supplier, booking.airlineCode]
+          .some((value) => String(value || "").toLowerCase().includes(q));
 
       const matchesSupplier = supplierFilter === "all" || booking.supplier === supplierFilter;
       const matchesAirline = airlineFilter === "all" || booking.airlineCode === airlineFilter;
@@ -385,6 +404,71 @@ export default function EasyFlyBookingsPage() {
     setPaymentChannelFilter("all");
   }, []);
 
+  const handleExportCsv = useCallback(() => {
+    if (filteredRows.length === 0) {
+      toast.error("No bookings to export for the current filters.");
+      return;
+    }
+
+    const headers = [
+      "SR No",
+      "Pax Name",
+      "PNR",
+      "Invoice",
+      "Supplier",
+      "Airline",
+      "Dep Date",
+      "Return Date",
+      "Booked Date",
+      "Pay Agreed",
+      "Paid",
+      "Pending",
+      "Supplier Fees",
+      "Earnings",
+      "Payment Mode",
+      "Refund Status",
+      "Schedule Change",
+      "Invoice Doc",
+      "ATOL Doc",
+      "Passport Doc",
+    ];
+
+    const rows = filteredRows.map((booking) => [
+      booking.srNo,
+      booking.paxName,
+      booking.pnr,
+      booking.invoiceNumber,
+      booking.supplier,
+      booking.airlineCode,
+      booking.depDate ? formatDate(booking.depDate) : "",
+      booking.returnDate ? formatDate(booking.returnDate) : "",
+      booking.createdAt ? formatDate(booking.createdAt) : "",
+      booking.payAgreed || 0,
+      booking.amountReceived,
+      getPaymentPending(booking),
+      booking.amountPaid,
+      getEarnings(booking),
+      paymentModeLabel(booking.paymentMode),
+      refundStatusLabel(booking.refundStatus),
+      scheduleChangeLabel(booking.scheduleChange),
+      booking.docs.invoice ? "Yes" : "No",
+      booking.docs.atol ? "Yes" : "No",
+      booking.docs.passport ? "Yes" : "No",
+    ]);
+
+    const csv = [headers.map(csvEscape).join(","), ...rows.map((row) => row.map(csvEscape).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `easyfly-bookings-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filteredRows.length} booking${filteredRows.length === 1 ? "" : "s"}.`);
+  }, [filteredRows]);
+
   const activeFilterCount =
     (supplierFilter !== "all" ? 1 : 0) +
     (airlineFilter !== "all" ? 1 : 0) +
@@ -400,21 +484,33 @@ export default function EasyFlyBookingsPage() {
     search: {
       value: search,
       onChange: setSearch,
-      placeholder: "Search pax, PNR, SR No., invoice",
+      placeholder: "Search pax, PNR, SR, invoice, supplier…",
     },
     activeFilterCount,
     onClearFilters: clearFilters,
-    syncKey: `${search}|${supplierFilter}|${airlineFilter}|${depFrom}|${depTo}|${bookedFrom}|${bookedTo}|${paymentChannelFilter}|${kpiFilter}|${loading}|${permissions?.can_create_booking ? 1 : 0}|${isStaffDashboard ? 1 : 0}`,
-    actions: permissions?.can_create_booking ? (
-      <button
-        type="button"
-        onClick={() => router.push("/admin/easyfly/new")}
-        className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        Add Booking
-      </button>
-    ) : undefined,
+    syncKey: `${search}|${supplierFilter}|${airlineFilter}|${depFrom}|${depTo}|${bookedFrom}|${bookedTo}|${paymentChannelFilter}|${kpiFilter}|${loading}|${permissions?.can_create_booking ? 1 : 0}|${filteredRows.length}|${isStaffDashboard ? 1 : 0}`,
+    actions: (
+      <>
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export CSV
+        </button>
+        {permissions?.can_create_booking ? (
+          <button
+            type="button"
+            onClick={() => router.push("/admin/easyfly/new")}
+            className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add Booking
+          </button>
+        ) : null}
+      </>
+    ),
     filtersContent: (
       <>
         <label className="block text-sm">
@@ -638,11 +734,6 @@ export default function EasyFlyBookingsPage() {
                     {paymentModeLabel(booking.paymentMode)}
                   </span>
                   <BookingTag label={booking.scheduleChange === "none" ? "No schedule change" : booking.scheduleChange === "minor" ? "Minor change" : "Major change"} tone={scheduleTone(booking.scheduleChange)} />
-                  <div className="flex items-center gap-1.5">
-                    <DocumentStatus icon={<FileText className="h-3.5 w-3.5" />} label="Invoice" uploaded={booking.docs.invoice} />
-                    <DocumentStatus icon={<BadgeCheck className="h-3.5 w-3.5" />} label="ATOL" uploaded={booking.docs.atol} />
-                    <DocumentStatus icon={<IdCard className="h-3.5 w-3.5" />} label="Passport" uploaded={booking.docs.passport} />
-                  </div>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -658,6 +749,12 @@ export default function EasyFlyBookingsPage() {
                       onClick={() => void handleDeleteBooking(booking.id, booking.srNo)}
                     />
                   ) : null}
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                  <DocumentStatus icon={<FileText className="h-3.5 w-3.5" />} label="Invoice" uploaded={booking.docs.invoice} />
+                  <DocumentStatus icon={<BadgeCheck className="h-3.5 w-3.5" />} label="ATOL" uploaded={booking.docs.atol} />
+                  <DocumentStatus icon={<IdCard className="h-3.5 w-3.5" />} label="Passport" uploaded={booking.docs.passport} />
                 </div>
               </article>
             );
@@ -680,8 +777,8 @@ export default function EasyFlyBookingsPage() {
                 <th className="px-4 py-3 text-left font-semibold">Amounts</th>
                 <th className="px-4 py-3 text-left font-semibold">Payment</th>
                 <th className="px-4 py-3 text-left font-semibold">Status</th>
-                <th className="px-4 py-3 text-left font-semibold">Docs</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                <th className="px-4 py-3 text-left font-semibold">Docs</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
@@ -726,13 +823,6 @@ export default function EasyFlyBookingsPage() {
                       <BookingTag label={booking.scheduleChange === "none" ? "No schedule change" : booking.scheduleChange === "minor" ? "Minor change" : "Major change"} tone={scheduleTone(booking.scheduleChange)} />
                     </td>
                     <td className="px-4 py-4">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <DocumentStatus icon={<FileText className="h-3.5 w-3.5" />} label="Invoice" uploaded={booking.docs.invoice} />
-                        <DocumentStatus icon={<BadgeCheck className="h-3.5 w-3.5" />} label="ATOL" uploaded={booking.docs.atol} />
-                        <DocumentStatus icon={<IdCard className="h-3.5 w-3.5" />} label="Passport" uploaded={booking.docs.passport} />
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
                       <div className="flex justify-end gap-2">
                         <ActionButton href={`/admin/easyfly/${booking.id}`} label="View" icon={<Eye className="h-4 w-4" />} />
                         {canEdit ? (
@@ -746,6 +836,13 @@ export default function EasyFlyBookingsPage() {
                             onClick={() => void handleDeleteBooking(booking.id, booking.srNo)}
                           />
                         ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <DocumentStatus icon={<FileText className="h-3.5 w-3.5" />} label="Invoice" uploaded={booking.docs.invoice} />
+                        <DocumentStatus icon={<BadgeCheck className="h-3.5 w-3.5" />} label="ATOL" uploaded={booking.docs.atol} />
+                        <DocumentStatus icon={<IdCard className="h-3.5 w-3.5" />} label="Passport" uploaded={booking.docs.passport} />
                       </div>
                     </td>
                   </tr>

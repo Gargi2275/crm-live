@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { KeyRound, Mail, Pencil, Plus, RefreshCw, Star, Trash2, X } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   createAdminMailCredential,
@@ -41,8 +41,7 @@ const secondaryBtn =
   "inline-flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#D9E1EA] bg-white px-3 text-sm font-semibold text-[#486581] hover:bg-[#F5F7FA] disabled:opacity-50";
 
 export default function AdminMailCredentialsPage() {
-  const { adminUser } = useAdminAuth();
-  const isAdmin = (adminUser?.role || "").toLowerCase() === "admin";
+  const { canAccess } = useAdminModuleAccess("/admin/email");
 
   const [rows, setRows] = useState<AdminMailCredential[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,7 +81,7 @@ export default function AdminMailCredentialsPage() {
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           Refresh
         </button>
-        {isAdmin ? (
+        {canAccess ? (
           <button
             type="button"
             onClick={() => {
@@ -114,7 +113,7 @@ export default function AdminMailCredentialsPage() {
   };
 
   const handleSave = async () => {
-    if (!isAdmin || saving) return;
+    if (!canAccess || saving) return;
     const email = form.email.trim();
     if (!email) {
       toast.error("Mailbox email is required.");
@@ -173,7 +172,7 @@ export default function AdminMailCredentialsPage() {
   };
 
   const handleSetDefault = async (row: AdminMailCredential) => {
-    if (!isAdmin || saving || row.is_default) return;
+    if (!canAccess || saving || row.is_default) return;
     setSaving(true);
     try {
       await setDefaultAdminMailCredential(row.id);
@@ -187,7 +186,7 @@ export default function AdminMailCredentialsPage() {
   };
 
   const handleDelete = async () => {
-    if (!isAdmin || !deleteTarget || saving) return;
+    if (!canAccess || !deleteTarget || saving) return;
     setSaving(true);
     try {
       await deleteAdminMailCredential(deleteTarget.id);
@@ -249,7 +248,7 @@ export default function AdminMailCredentialsPage() {
                       ) : null}
                     </div>
                   </div>
-                  {isAdmin ? (
+                  {canAccess ? (
                     <div className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"
@@ -272,7 +271,7 @@ export default function AdminMailCredentialsPage() {
                     </div>
                   ) : null}
                 </div>
-                {!row.is_default && isAdmin ? (
+                {!row.is_default && canAccess ? (
                   <button
                     type="button"
                     disabled={saving}
@@ -334,7 +333,7 @@ export default function AdminMailCredentialsPage() {
                           <Star className="h-3.5 w-3.5 fill-current" />
                           Default
                         </span>
-                      ) : isAdmin ? (
+                      ) : canAccess ? (
                         <button
                           type="button"
                           disabled={saving}
@@ -348,7 +347,7 @@ export default function AdminMailCredentialsPage() {
                       )}
                     </td>
                     <td className="px-3 py-3 text-right">
-                      {isAdmin ? (
+                      {canAccess ? (
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"

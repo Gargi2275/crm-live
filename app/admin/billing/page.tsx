@@ -5,29 +5,18 @@ import { getAdminDashboardOverview, type AdminDashboardOverview } from "@/lib/ad
 import { motion } from "framer-motion";
 import { ReceiptText, AlertCircle, HandCoins } from "lucide-react";
 import toast from "react-hot-toast";
-import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 type BillingKpi = "all" | "pending" | "refunds" | "collected";
 
 export default function BillingPage() {
-  const { adminUser } = useAdminAuth();
-  const canExport = ["admin", "ops_manager"].includes(adminUser?.role || "");
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [kpiFilter, setKpiFilter] = useState<BillingKpi>("all");
 
   useSetAdminPageChrome({
     title: "Billing",
     icon: ReceiptText,
-    syncKey: `${canExport}|${dashboardData ? "loaded" : "loading"}|${kpiFilter}`,
-    actions: canExport ? (
-      <button
-        type="button"
-        className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61]"
-      >
-        Export CSV
-      </button>
-    ) : undefined,
+    syncKey: `${dashboardData ? "loaded" : "loading"}|${kpiFilter}`,
   });
 
   useEffect(() => {
@@ -125,9 +114,6 @@ export default function BillingPage() {
         {kpiFilter === "collected" || kpiFilter === "all" ? (
           <p className="text-[#486581] text-sm">Collected this week: {formatInr(weeklyCollected)}</p>
         ) : null}
-        {!canExport ? (
-          <p className="text-xs text-[#9C4F17] bg-[#B87333]/12 inline-flex px-2 py-1 rounded-full">Export hidden for Staff role</p>
-        ) : null}
       </motion.div>
 
       <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
@@ -135,7 +121,7 @@ export default function BillingPage() {
         <ul className="space-y-1 text-sm text-[#486581]">
           <li>Verify payer details before issuing receipts</li>
           <li>Review failed transaction logs every 2 hours</li>
-          <li>Export CSV before daily closing window</li>
+          <li>Reconcile collected totals before daily closing</li>
         </ul>
       </div>
 

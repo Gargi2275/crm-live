@@ -388,11 +388,18 @@ export interface AdminApplication {
   auditor_notes?: string;
   correction_requested_at?: string | null;
   correction_resubmitted_at?: string | null;
-  audit_logs?: Array<{ action: string; timestamp: string; actor: string }>;
   admin_messages?: Array<{
     created_at: string;
     subject: string;
     message: string;
+    sender?: "team" | "customer" | string;
+    message_id?: string;
+  }>;
+  audit_logs?: Array<{
+    action: string;
+    timestamp: string;
+    actor: string;
+    metadata?: Record<string, unknown>;
   }>;
   reupload_requests?: Array<{
     created_at: string;
@@ -487,8 +494,9 @@ export interface AdminApplicationDocument {
 
 export interface AdminApplicationThreadMessage {
   id: string;
-  sender: "team" | "customer";
+  sender: "team" | "customer" | string;
   message_body: string;
+  subject?: string;
   created_at: string;
   is_read?: boolean;
 }
@@ -880,9 +888,12 @@ export const adminAuthenticatedFetch = async (path: string, options: RequestInit
   }
 
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const method = String(options.method || "GET").toUpperCase();
+  // Avoid forcing JSON Content-Type on binary GETs (document download/view).
+  const shouldSetJsonContentType = !isFormData && method !== "GET" && method !== "HEAD";
 
   const headers = {
-    ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    ...(shouldSetJsonContentType ? { "Content-Type": "application/json" } : {}),
     ...(options.headers || {}),
     Authorization: `Bearer ${access}`,
   };
@@ -897,7 +908,7 @@ export const adminAuthenticatedFetch = async (path: string, options: RequestInit
     }
 
     const retryHeaders = {
-      ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      ...(shouldSetJsonContentType ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
       Authorization: `Bearer ${nextAccess}`,
     };
@@ -1032,6 +1043,17 @@ export const resetStaffUserPassword = async (staffId: number, newPassword: strin
   const response = await adminAuthenticatedFetch(`/admin/staff/${staffId}/reset-password/`, {
     method: "POST",
     body: JSON.stringify({ new_password: newPassword }),
+  });
+  await parseApiResponse(response);
+};
+
+export const changeStaffPassword = async (currentPassword: string, newPassword: string) => {
+  const response = await adminAuthenticatedFetch("/admin/change-password/", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
   });
   await parseApiResponse(response);
 };

@@ -135,7 +135,6 @@ export function StartOrderPanel({
   const [otpVerifying, setOtpVerifying] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
   const [otpSent, setOtpSent] = useState(false);
-  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
   const [existingApps, setExistingApps] = useState<CustomerApplicationSummary[]>([]);
   const [existingAppsLoading, setExistingAppsLoading] = useState(false);
 
@@ -195,6 +194,12 @@ export function StartOrderPanel({
     const normalized = serviceKey.trim().toLowerCase().replace(/[\s-]+/g, "_");
     const direct = services.find((s) => s.id === serviceKey);
     if (direct) return direct.id;
+    // Prefer exact live catalog service_type so navbar/hero pick the right row.
+    const byExactType = services.find((s) => {
+      const type = String(s.serviceType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      return type === normalized;
+    });
+    if (byExactType) return byExactType.id;
     const byJourneyExact = services.find((s) => s.journeyId === serviceKey);
     if (byJourneyExact) return byJourneyExact.id;
     const byTypeOrJourney = services.find((s) => {
@@ -219,18 +224,30 @@ export function StartOrderPanel({
     if (selectedIds.includes(serviceId)) return true;
     const row = services.find((s) => s.id === serviceId);
     if (!row) return false;
-    const aliases = new Set(
-      [
-        row.id,
-        row.journeyId,
-        row.serviceType,
-        String(row.journeyId || "").replace(/-/g, "_"),
-        String(row.serviceType || "").replace(/_/g, "-"),
-      ]
-        .filter(Boolean)
-        .map((value) => String(value)),
-    );
-    return selectedIds.some((id) => aliases.has(id) || aliases.has(String(id).replace(/-/g, "_")) || aliases.has(String(id).replace(/_/g, "-")));
+
+    // Catalog rows (svc-<pk>) must only match their own id / serviceType — never another
+    // row via a shared journeyId alias (e.g. spouse incorrectly looking like New OCI).
+    const isCatalogRow = String(row.id).startsWith("svc-");
+    const typeNorm = String(row.serviceType || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+    const typeHyphen = typeNorm.replace(/_/g, "-");
+
+    return selectedIds.some((id) => {
+      if (id === row.id) return true;
+      const idNorm = String(id).trim().toLowerCase().replace(/[\s-]+/g, "_");
+      const idHyphen = idNorm.replace(/_/g, "-");
+      if (typeNorm && (idNorm === typeNorm || idHyphen === typeHyphen)) return true;
+      if (isCatalogRow) return false;
+      const journey = String(row.journeyId || "").trim();
+      if (!journey) return false;
+      return (
+        id === journey ||
+        id === journey.replace(/-/g, "_") ||
+        id === journey.replace(/_/g, "-")
+      );
+    });
   };
 
   useEffect(() => {
@@ -411,7 +428,6 @@ export function StartOrderPanel({
     });
     setOtpError(null);
     setOtpSent(false);
-    setDevOtpHint(null);
     setOtpSending(true);
     try {
       const result = await requestApplicantEmailOtp({
@@ -428,8 +444,7 @@ export function StartOrderPanel({
         return;
       }
       setOtpSent(true);
-      if (result.otp) setDevOtpHint(result.otp);
-      toast.success("Verification code sent.");
+      toast.success("Verification code sent to the applicant email.");
     } catch (err) {
       setOtpTarget(null);
       toast.error(err instanceof Error ? err.message : "Could not send verification code.");
@@ -711,6 +726,7 @@ export function StartOrderPanel({
     <>
       <CheckoutShell
         title="Start your order"
+        subtitle="Select a service, then pay before uploading documents."
         currentStep={0}
         summary={
           <VisamentOrderSummary applicants={summaryApplicants} totalLabel={formatMoney(orderTotal)} />
@@ -855,9 +871,6 @@ export function StartOrderPanel({
               <OTPInput onComplete={handleOtpComplete} error={Boolean(otpError)} />
             </div>
             {otpError ? <p className="mt-3 text-center text-[12px] font-medium text-[#E11D48]">{otpError}</p> : null}
-            {devOtpHint ? (
-              <p className="mt-2 text-center text-[11px] text-amber-700">Dev OTP: {devOtpHint}</p>
-            ) : null}
             {otpVerifying ? <p className="mt-3 text-center text-[12px] text-[#829AB1]">Verifying…</p> : null}
 
             <div className="mt-5 flex items-center justify-between gap-3">

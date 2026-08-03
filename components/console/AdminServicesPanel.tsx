@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { ConfirmDialog } from "@/components/console/ConfirmDialog";
 import {
@@ -28,8 +28,7 @@ function money(value: string | number | undefined | null) {
 
 export default function AdminServicesPanel() {
   const router = useRouter();
-  const { adminUser } = useAdminAuth();
-  const isAdmin = (adminUser?.role || "").toLowerCase() === "admin";
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/services");
 
   const [services, setServices] = useState<AdminService[]>([]);
   const [meta, setMeta] = useState<AdminServiceMeta>({
@@ -50,7 +49,7 @@ export default function AdminServicesPanel() {
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
-    if (!isAdmin) return;
+    if (!canAccess) return;
     setLoading(true);
     try {
       const payload = await listAdminServices({
@@ -69,11 +68,12 @@ export default function AdminServicesPanel() {
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, categoryFilter, isAdmin, page, pageSize, search]);
+  }, [activeFilter, canAccess, categoryFilter, page, pageSize, search]);
 
   useEffect(() => {
+    if (!accessReady || !canAccess) return;
     void load();
-  }, [load]);
+  }, [accessReady, canAccess, load]);
 
   const categoryLabel = useMemo(() => {
     const map = new Map(meta.categories.map((row) => [row.id, row.label]));
@@ -127,7 +127,7 @@ export default function AdminServicesPanel() {
   }, []);
 
   useSetAdminPageChrome(
-    isAdmin
+    canAccess
       ? {
           title: "Services catalog",
           subtitle: "Name, category, fees & status",
@@ -143,7 +143,7 @@ export default function AdminServicesPanel() {
           activeFilterCount,
           onClearFilters: clearFilters,
           meta: `${total} service${total === 1 ? "" : "s"} · page ${page}/${totalPages}`,
-          syncKey: `${search}|${categoryFilter}|${activeFilter}|${page}|${total}|${loading}|${meta.categories.length}`,
+          syncKey: `${search}|${categoryFilter}|${activeFilter}|${page}|${total}|${loading}|${meta.categories.length}|${canAccess ? 1 : 0}`,
           actions: (
             <>
               <button
@@ -205,12 +205,20 @@ export default function AdminServicesPanel() {
       : { title: "Services", icon: Layers },
   );
 
-  if (!isAdmin) {
+  if (!accessReady) {
+    return (
+      <div className="mx-auto max-w-3xl rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
+        <p className="text-sm text-[#627D98]">Checking access…</p>
+      </div>
+    );
+  }
+
+  if (!canAccess) {
     return (
       <div className="mx-auto max-w-3xl rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
         <h1 className="text-xl font-heading font-semibold text-[#102A43]">Services</h1>
         <p className="mt-2 text-sm text-[#627D98]">
-          Access restricted to Admin. Django admin remains available as a fallback for system operators.
+          Access restricted. Ask an admin to grant the Services or Categories module for your role.
         </p>
       </div>
     );

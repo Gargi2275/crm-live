@@ -4,8 +4,8 @@ interface ProgressStepperProps {
   currentStep: number;
 }
 
-/** Visament-style pill tabs: Service → Forms & Payment */
-const STEPS = ["Service", "Forms & Payment"] as const;
+/** Visament-style pill tabs: Service → Payment → Documents */
+const STEPS = ["Service", "Payment", "Documents"] as const;
 
 export function ProgressStepper({ currentStep }: ProgressStepperProps) {
   return (

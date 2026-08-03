@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
@@ -15,7 +16,7 @@ import {
   type EasyFlyStaffRevenueEntry,
   type PaymentMode,
 } from "@/lib/easyfly";
-import { TrendingUp, Download, AlertCircle, Plus, X } from "lucide-react";
+import { TrendingUp, Download, Plus, X, Eye, Pencil, FileText, BadgeCheck, IdCard } from "lucide-react";
 import toast from "react-hot-toast";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
@@ -344,6 +345,7 @@ type StaffStatusFilter = "all" | "pending_review" | "approved" | "rejected";
 type UnifiedRevenueRow = {
   key: string;
   type: "booking" | "staff";
+  bookingId?: number;
   ref: string;
   name: string;
   pnr: string;
@@ -368,6 +370,7 @@ type UnifiedRevenueRow = {
   receiptName: string;
   notes: string;
   sortDate: string;
+  docs?: { invoice: boolean; atol: boolean; passport: boolean };
 };
 
 function staffEntryStatusLabel(status: EasyFlyStaffRevenueEntry["status"]) {
@@ -414,6 +417,7 @@ function EasyFlyAdminRevenueView() {
   const [dateRange, setDateRange] = useState<DateRange>("month");
   const [recordFilter, setRecordFilter] = useState<RevenueRecordFilter>("all");
   const [staffStatusFilter, setStaffStatusFilter] = useState<StaffStatusFilter>("all");
+  const [search, setSearch] = useState("");
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [staffEntries, setStaffEntries] = useState<EasyFlyStaffRevenueEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -519,6 +523,7 @@ function EasyFlyAdminRevenueView() {
       return {
         key: `booking-${booking.id}`,
         type: "booking",
+        bookingId: booking.id,
         ref: booking.srNo,
         name: booking.paxName,
         pnr: booking.pnr,
@@ -530,12 +535,9 @@ function EasyFlyAdminRevenueView() {
         customerPaid: formatInr(booking.amountReceived),
         pendingPayment: formatInr(booking.amountDue || 0),
         govtFees: "—",
-        dueOrEarnings: isPending ? formatInr(booking.amountDue) : formatInr(earnings),
-        dueOrEarningsClass: isPending
-          ? "text-[#B42318] font-semibold"
-          : earnings >= 0
-            ? "text-[#006F57] font-semibold"
-            : "text-[#B42318] font-semibold",
+        dueOrEarnings: formatInr(earnings),
+        dueOrEarningsClass:
+          earnings >= 0 ? "text-[#006F57] font-semibold" : "text-[#B42318] font-semibold",
         paymentMode: formatPaymentMode(booking.paymentMode),
         paymentModeKey: booking.paymentMode || "card",
         primaryDate: bookedOn,
@@ -549,6 +551,7 @@ function EasyFlyAdminRevenueView() {
         receiptName: "",
         notes: "",
         sortDate: bookedOn,
+        docs: booking.docs,
       };
     });
   }, [rangeBookings, recordFilter]);
@@ -596,21 +599,45 @@ function EasyFlyAdminRevenueView() {
     else if (recordFilter === "staff") rows = staffRows;
     else rows = bookingRows;
 
+    const q = search.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter((row) =>
+        [row.name, row.supplier, row.ref, row.pnr, row.notes, row.submittedBy, row.statusLabel]
+          .some((value) => String(value || "").toLowerCase().includes(q)),
+      );
+    }
+
     return rows.sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
-  }, [bookingRows, staffRows, recordFilter]);
+  }, [bookingRows, staffRows, recordFilter, search]);
 
   const stats = useMemo(() => {
-    const totalBookings = kpiBookings.length;
-    const totalPaid = kpiBookings.reduce((sum, b) => sum + b.amountPaid, 0);
-    const totalReceived = kpiBookings.reduce((sum, b) => sum + b.amountReceived, 0);
-    const totalPending = kpiBookings.reduce((sum, b) => sum + Math.max(0, b.amountDue), 0);
-    const totalExtra = kpiBookings.reduce((sum, b) => sum + (b.extraAmount || 0), 0);
+    const bookingPaid = kpiBookings.reduce((sum, b) => sum + b.amountPaid, 0);
+    const bookingReceived = kpiBookings.reduce((sum, b) => sum + b.amountReceived, 0);
+    const bookingPending = kpiBookings.reduce((sum, b) => sum + Math.max(0, b.amountDue), 0);
+    const bookingExtra = kpiBookings.reduce((sum, b) => sum + (b.extraAmount || 0), 0);
+
+    const staffPaid = kpiStaffEntries.reduce((sum, e) => sum + Number(e.amountPaid || 0), 0);
+    const staffReceived = kpiStaffEntries.reduce((sum, e) => sum + Number(e.amountReceived || 0), 0);
+    const staffPendingAmount = kpiStaffEntries.reduce((sum, e) => {
+      const payAgreed = Number(e.payAgreed || 0);
+      const received = Number(e.amountReceived || 0);
+      return sum + Math.max(0, payAgreed - received);
+    }, 0);
+
+    const totalPaid = bookingPaid + staffPaid;
+    const totalReceived = bookingReceived + staffReceived;
+    const totalPending = bookingPending + staffPendingAmount;
+    const totalExtra = bookingExtra;
     const totalEarnings = totalReceived - totalPaid;
+    const totalRecords = kpiBookings.length + kpiStaffEntries.length;
     const pendingCount = kpiBookings.filter((b) => b.amountDue > 0).length;
     const staffPending = kpiStaffEntries.filter((e) => e.status === "pending_review").length;
     const staffCount = kpiStaffEntries.length;
+    const moneyAsGbp = kpiBookings.length === 0 && kpiStaffEntries.length > 0;
+
     return {
-      totalBookings,
+      totalRecords,
+      totalBookings: kpiBookings.length,
       totalPaid,
       totalReceived,
       totalPending,
@@ -619,51 +646,34 @@ function EasyFlyAdminRevenueView() {
       pendingCount,
       staffPending,
       staffCount,
+      moneyAsGbp,
     };
   }, [kpiBookings, kpiStaffEntries]);
 
   const handleExportCsv = () => {
     const headers = [
       "type",
-      "ref",
       "name",
-      "pnr",
       "supplier",
-      "paid",
-      "received",
-      "payAgreed",
-      "customerPaid",
-      "pendingPayment",
-      "govtFees",
-      "extra",
-      "dueOrEarnings",
+      "supplierPaid",
+      "clientReceived",
+      "pending",
+      "earnings",
       "paymentMode",
-      "bookingDate",
-      "dueDate",
+      "date",
       "status",
-      "submittedBy",
-      "notes",
     ];
     const rows = displayRows.map((row) => [
       row.type,
-      row.ref,
       row.name,
-      row.pnr,
       row.supplier,
       row.paid,
       row.received,
-      row.payAgreed,
-      row.customerPaid,
       row.pendingPayment,
-      row.govtFees,
-      row.extra,
       row.dueOrEarnings,
       row.paymentMode,
       row.primaryDate,
-      row.dueDate ?? "",
       row.statusLabel,
-      row.submittedBy,
-      row.notes,
     ]);
     const csv = [headers.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -694,9 +704,14 @@ function EasyFlyAdminRevenueView() {
   useSetAdminPageChrome({
     title: "EasyFly Revenue",
     icon: TrendingUp,
+    search: {
+      value: search,
+      onChange: setSearch,
+      placeholder: "Search name, supplier, status…",
+    },
     activeFilterCount,
     onClearFilters: clearFilters,
-    syncKey: `${recordFilter}|${dateRange}|${staffStatusFilter}|${loading}|${addOpen ? 1 : 0}|${displayRows.length}`,
+    syncKey: `${search}|${recordFilter}|${dateRange}|${staffStatusFilter}|${loading}|${addOpen ? 1 : 0}|${displayRows.length}`,
     actions: (
       <>
         <button
@@ -848,12 +863,32 @@ function EasyFlyAdminRevenueView() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
             {[
-              { label: "Bookings", value: String(stats.totalBookings), color: "text-[#102A43]" },
-              { label: "Supplier Paid", value: formatInr(stats.totalPaid), color: "text-[#B42318]" },
-              { label: "Client Received", value: formatInr(stats.totalReceived), color: "text-[#006F57]" },
-              { label: "Client Pending", value: formatInr(stats.totalPending), color: "text-[#8D5E12]" },
-              { label: "Extra Paid", value: formatInr(stats.totalExtra), color: "text-[#1E40AF]" },
-              { label: "Earnings", value: formatInr(stats.totalEarnings), color: stats.totalEarnings >= 0 ? "text-[#006F57]" : "text-[#B42318]" },
+              { label: "Records", value: String(stats.totalRecords), color: "text-[#102A43]" },
+              {
+                label: "Supplier Paid",
+                value: stats.moneyAsGbp ? formatGbp(stats.totalPaid) : formatInr(stats.totalPaid),
+                color: "text-[#B42318]",
+              },
+              {
+                label: "Client Received",
+                value: stats.moneyAsGbp ? formatGbp(stats.totalReceived) : formatInr(stats.totalReceived),
+                color: "text-[#006F57]",
+              },
+              {
+                label: "Client Pending",
+                value: stats.moneyAsGbp ? formatGbp(stats.totalPending) : formatInr(stats.totalPending),
+                color: "text-[#8D5E12]",
+              },
+              {
+                label: "Extra Paid",
+                value: stats.moneyAsGbp ? formatGbp(stats.totalExtra) : formatInr(stats.totalExtra),
+                color: "text-[#1E40AF]",
+              },
+              {
+                label: "Earnings",
+                value: stats.moneyAsGbp ? formatGbp(stats.totalEarnings) : formatInr(stats.totalEarnings),
+                color: stats.totalEarnings >= 0 ? "text-[#006F57]" : "text-[#B42318]",
+              },
               { label: "Staff Pending", value: String(stats.staffPending), color: "text-[#8D5E12]" },
             ].map((s) => (
               <div key={s.label} className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] p-4">
@@ -872,29 +907,21 @@ function EasyFlyAdminRevenueView() {
               <div className="px-4 py-10 text-center text-sm text-[#627D98]">No records match the current filters.</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1500px] text-sm">
+                <table className="w-full min-w-[1100px] text-sm">
                   <thead className="bg-[#F5F7FA] text-[#486581]">
                     <tr>
                       <th className="px-3 py-2.5 text-left font-semibold">Type</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Ref / SR</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Name</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">PNR</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Supplier</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Supplier Paid</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Client Received</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Pay Agreed</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Paid</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Pending</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Govt Fees</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Extra</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Pending / Earnings</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Earnings</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Payment</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Booking Date</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Due Date</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Date</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Status</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Submitted By</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Receipt</th>
-                      <th className="px-3 py-2.5 text-left font-semibold">Notes</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Actions</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Docs</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
@@ -911,17 +938,11 @@ function EasyFlyAdminRevenueView() {
                             {row.type === "staff" ? "Staff" : "Booking"}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 font-medium text-[#102A43]">{row.ref}</td>
-                        <td className="px-3 py-2.5">{row.name}</td>
-                        <td className="px-3 py-2.5">{row.pnr}</td>
+                        <td className="px-3 py-2.5 font-medium text-[#102A43]">{row.name}</td>
                         <td className="px-3 py-2.5">{row.supplier}</td>
                         <td className="px-3 py-2.5">{row.paid}</td>
                         <td className="px-3 py-2.5">{row.received}</td>
-                        <td className="px-3 py-2.5">{row.payAgreed}</td>
-                        <td className="px-3 py-2.5">{row.customerPaid}</td>
                         <td className="px-3 py-2.5 font-medium text-[#8D5E12]">{row.pendingPayment}</td>
-                        <td className="px-3 py-2.5">{row.govtFees}</td>
-                        <td className="px-3 py-2.5">{row.extra}</td>
                         <td className={`px-3 py-2.5 ${row.dueOrEarningsClass}`}>{row.dueOrEarnings}</td>
                         <td className="px-3 py-2.5">
                           <span className={easyflyPaymentMethodBadgeClass(row.paymentModeKey)}>
@@ -930,39 +951,48 @@ function EasyFlyAdminRevenueView() {
                         </td>
                         <td className="px-3 py-2.5">{formatDate(row.primaryDate)}</td>
                         <td className="px-3 py-2.5">
-                          {row.dueDate ? (
-                            formatDate(row.dueDate)
-                          ) : row.type === "booking" && row.statusLabel !== "Settled" ? (
-                            <span className="inline-flex items-center gap-1 text-[#B42318] font-medium">
-                              <AlertCircle className="w-3.5 h-3.5" />
-                              Not set
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5">
                           <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${row.statusClass}`}>
                             {row.statusLabel}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5">{row.submittedBy || "—"}</td>
                         <td className="px-3 py-2.5">
-                          {row.receiptUrl ? (
-                            <a
-                              href={row.receiptUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[#009877] font-medium hover:underline"
-                            >
-                              {row.receiptName || "View"}
-                            </a>
+                          {row.bookingId ? (
+                            <div className="flex justify-end gap-1.5">
+                              <Link
+                                href={`/admin/easyfly/${row.bookingId}`}
+                                className="inline-flex items-center gap-1 rounded-[8px] border border-[#D9E1EA] bg-white px-2 py-1 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">View</span>
+                              </Link>
+                              <Link
+                                href={`/admin/easyfly/${row.bookingId}`}
+                                className="inline-flex items-center gap-1 rounded-[8px] border border-[#009877]/35 bg-[#009877]/10 px-2 py-1 text-xs font-semibold text-[#006F57] hover:bg-[#009877]/15"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Edit</span>
+                              </Link>
+                            </div>
                           ) : (
-                            "—"
+                            <span className="block text-right text-xs text-[#9AA5B1]">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 max-w-[180px] truncate" title={row.notes}>
-                          {row.notes || "—"}
+                        <td className="px-3 py-2.5">
+                          {row.docs ? (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                              <span className={`inline-flex items-center gap-1 ${row.docs.invoice ? "text-[#006F57]" : "text-[#B42318]"}`}>
+                                <FileText className="h-3.5 w-3.5" /> Inv
+                              </span>
+                              <span className={`inline-flex items-center gap-1 ${row.docs.atol ? "text-[#006F57]" : "text-[#B42318]"}`}>
+                                <BadgeCheck className="h-3.5 w-3.5" /> ATOL
+                              </span>
+                              <span className={`inline-flex items-center gap-1 ${row.docs.passport ? "text-[#006F57]" : "text-[#B42318]"}`}>
+                                <IdCard className="h-3.5 w-3.5" /> Pass
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-[#9AA5B1]">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}

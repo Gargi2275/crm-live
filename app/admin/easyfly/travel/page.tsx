@@ -402,12 +402,12 @@ export default function EasyFlyTravelPage() {
                 <th className="px-4 py-3 text-left font-semibold">Departure Date</th>
                 <th className="px-4 py-3 text-left font-semibold">Return Date</th>
                 <th className="px-4 py-3 text-left font-semibold">Payment Status</th>
-                <th className="px-4 py-3 text-left font-semibold">Ticket Uploaded</th>
-                <th className="px-4 py-3 text-left font-semibold">Passport Uploaded</th>
                 <th className="px-4 py-3 text-left font-semibold">Schedule Change</th>
                 <th className="px-4 py-3 text-left font-semibold">Last Contact</th>
                 <th className="px-4 py-3 text-left font-semibold">Staff Assigned</th>
                 <th className="px-4 py-3 text-right font-semibold">View</th>
+                <th className="px-4 py-3 text-left font-semibold">Ticket Uploaded</th>
+                <th className="px-4 py-3 text-left font-semibold">Passport Uploaded</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
@@ -436,16 +436,6 @@ export default function EasyFlyTravelPage() {
                       )}
                     </td>
                     <td className="px-4 py-4">
-                      <span className={`text-xs font-semibold ${ticketUploaded ? "text-[#006F57]" : "text-[#B42318]"}`}>
-                        {ticketUploaded ? "Yes" : "No"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`text-xs font-semibold ${booking.docs.passport ? "text-[#006F57]" : "text-[#B42318]"}`}>
-                        {booking.docs.passport ? "Yes" : "No"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
                       <span
                         className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
                           booking.scheduleChange === "none"
@@ -472,6 +462,16 @@ export default function EasyFlyTravelPage() {
                       <div className="flex justify-end">
                         <ActionButton href={`/admin/easyfly/${booking.id}`} label="View" icon={<Eye className="h-4 w-4" />} />
                       </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`text-xs font-semibold ${ticketUploaded ? "text-[#006F57]" : "text-[#B42318]"}`}>
+                        {ticketUploaded ? "Yes" : "No"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`text-xs font-semibold ${booking.docs.passport ? "text-[#006F57]" : "text-[#B42318]"}`}>
+                        {booking.docs.passport ? "Yes" : "No"}
+                      </span>
                     </td>
                   </tr>
                 );

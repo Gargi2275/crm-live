@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   createAdminService,
@@ -73,8 +73,7 @@ function typeFromCategory(category: string) {
 
 export default function AdminNewServicePage() {
   const router = useRouter();
-  const { adminUser } = useAdminAuth();
-  const isAdmin = (adminUser?.role || "").toLowerCase() === "admin";
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/services");
 
   const [meta, setMeta] = useState<AdminServiceMeta>({
     service_types: [],
@@ -119,16 +118,16 @@ export default function AdminNewServicePage() {
   }, []);
 
   useEffect(() => {
-    if (isAdmin) void loadMeta();
-  }, [isAdmin, loadMeta]);
+    if (canAccess) void loadMeta();
+  }, [canAccess, loadMeta]);
 
   useSetAdminPageChrome(
-    isAdmin
+    canAccess
       ? {
           title: "New service",
           subtitle: "Details, questions & documents",
           icon: Layers,
-          syncKey: `new-service|${form.category}|${draftQuestions.length}|${draftDocs.length}`,
+          syncKey: `new-service|${form.category}|${draftQuestions.length}|${draftDocs.length}|${canAccess ? 1 : 0}`,
           actions: (
             <button
               type="button"
@@ -295,11 +294,21 @@ export default function AdminNewServicePage() {
     }
   };
 
-  if (!isAdmin) {
+  if (!accessReady) {
+    return (
+      <div className="mx-auto max-w-3xl rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
+        <p className="text-sm text-[#627D98]">Checking access…</p>
+      </div>
+    );
+  }
+
+  if (!canAccess) {
     return (
       <div className="mx-auto max-w-3xl rounded-[12px] border border-[#D9E1EA] bg-white p-6 font-body">
         <h1 className="text-xl font-heading font-semibold text-[#102A43]">New service</h1>
-        <p className="mt-2 text-sm text-[#627D98]">Access restricted to Admin.</p>
+        <p className="mt-2 text-sm text-[#627D98]">
+          Access restricted. Ask an admin to grant the Services or Categories module for your role.
+        </p>
       </div>
     );
   }
@@ -428,7 +437,9 @@ export default function AdminNewServicePage() {
                   {fieldErrors.audit_fee ? (
                     <span className="mt-1 block text-xs text-[#B42318]">{fieldErrors.audit_fee}</span>
                   ) : (
-                    <span className="mt-1 block text-xs text-[#627D98]">Leave empty for £0</span>
+                    <span className="mt-1 block text-xs text-[#627D98]">
+                      Leave empty for £0. If set above £0, customers pay assessment first; otherwise they pay the full service fee.
+                    </span>
                   )}
                 </label>
               </div>

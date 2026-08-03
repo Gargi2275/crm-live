@@ -13,6 +13,7 @@ import {
   EASYFLY_LEDGER_METHOD_OPTIONS,
   EASYFLY_PAYMENT_MODE_OPTIONS,
   easyflyPaymentMethodChipClass,
+  extractEasyFlyTicket,
   getEasyFlyBooking,
   listEasyFlyPaymentLedger,
   runEasyFlyAIVerify,
@@ -22,6 +23,7 @@ import {
   uploadEasyFlyPaymentProof,
   verifyEasyFlyPaymentLedgerEntry,
   type EasyFlyBooking,
+  type EasyFlyExtractedTicket,
   type EasyFlyLedgerMethod,
   type EasyFlyPaymentLedgerEntry,
   type PaymentMode,
@@ -56,6 +58,8 @@ type BookingFormState = {
   pnr: string;
   paxName: string;
   airlineCode: string;
+  fromAirport: string;
+  toAirport: string;
   depDate: string;
   returnDate: string;
   payAgreed: string;
@@ -92,6 +96,7 @@ type BookingRow = EasyFlyBooking;
 
 type PassengerEntry = {
   id: string;
+  backendId: number | null;
   type: "adult" | "youth" | "child" | "infant";
   firstName: string;
   lastName: string;
@@ -106,6 +111,7 @@ type PassengerEntry = {
 
 const createDefaultAdultPassenger = (data: BookingRow): PassengerEntry => ({
   id: `${data.id}-passenger-0`,
+  backendId: null,
   type: "adult",
   firstName: "",
   lastName: "",
@@ -119,17 +125,18 @@ const createDefaultAdultPassenger = (data: BookingRow): PassengerEntry => ({
 });
 
 const mapPassengersFromBooking = (data: BookingRow): PassengerEntry[] => {
-  const rawPassengers = (data as BookingRow & { passengers?: PassengerEntry[] }).passengers;
+  const rawPassengers = data.passengers;
   if (Array.isArray(rawPassengers) && rawPassengers.length > 0) {
-    return rawPassengers.map((passenger, index) => ({
-      id: passenger.id || `${data.id}-passenger-${index}`,
+    return rawPassengers.map((passenger) => ({
+      id: String(passenger.id),
+      backendId: passenger.id,
       type: passenger.type || "adult",
       firstName: passenger.firstName || "",
       lastName: passenger.lastName || "",
       dob: passenger.dob || "",
-      passportNumber: passenger.passportNumber || "",
+      passportNumber: "",
       passportExpiry: passenger.passportExpiry || "",
-      nationality: passenger.nationality || "",
+      nationality: "",
       passportUploaded: Boolean(passenger.passportUploaded),
       passportUrl: passenger.passportUrl,
       passportFileName: passenger.passportFileName,
@@ -137,6 +144,16 @@ const mapPassengersFromBooking = (data: BookingRow): PassengerEntry[] => {
   }
   return [createDefaultAdultPassenger(data)];
 };
+
+const passengersToApiPayload = (passengers: PassengerEntry[]) =>
+  passengers.map((passenger) => ({
+    ...(passenger.backendId ? { id: passenger.backendId } : {}),
+    passenger_type: passenger.type,
+    first_name: passenger.firstName.trim(),
+    last_name: passenger.lastName.trim(),
+    dob: passenger.dob || null,
+    passport_expiry: passenger.passportExpiry || null,
+  }));
 
 const passengerFieldClassName =
   "w-full rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#33A1FD]";
@@ -148,6 +165,8 @@ const mapBookingToForm = (data: BookingRow): BookingFormState => ({
   pnr: data.pnr,
   paxName: data.paxName,
   airlineCode: data.airlineCode,
+  fromAirport: data.fromAirport || "",
+  toAirport: data.toAirport || "",
   depDate: data.depDate,
   returnDate: data.returnDate,
   payAgreed: String(data.payAgreed ?? 0),
@@ -180,6 +199,8 @@ const buildBookingUpdatePayload = (
     pnr: form.pnr.trim(),
     pax_name: form.paxName.trim(),
     airline_code: form.airlineCode.trim(),
+    from_airport: form.fromAirport.trim().toUpperCase(),
+    to_airport: form.toAirport.trim().toUpperCase(),
     dep_date: form.depDate,
     return_date: form.returnDate,
     pay_agreed: payAgreed,
@@ -431,6 +452,8 @@ export default function EasyFlyBookingDetailPage() {
     pnr: "",
     paxName: "",
     airlineCode: "",
+    fromAirport: "",
+    toAirport: "",
     depDate: "",
     returnDate: "",
     payAgreed: "0",
@@ -454,6 +477,7 @@ export default function EasyFlyBookingDetailPage() {
   const [isReissued, setIsReissued] = useState(false);
   const [passengers, setPassengers] = useState<PassengerEntry[]>([]);
   const [extractingPassengerId, setExtractingPassengerId] = useState<string | null>(null);
+  const [extractingTicket, setExtractingTicket] = useState(false);
   const [paymentLedger, setPaymentLedger] = useState<PaymentLedgerEntry[]>([]);
   const [ticketRiskScore, setTicketRiskScore] = useState<"green" | "amber" | "red" | null>(null);
   const [aiChecks, setAiChecks] = useState<
@@ -623,6 +647,7 @@ export default function EasyFlyBookingDetailPage() {
       ...current,
       {
         id: `${booking.id}-passenger-${Date.now()}`,
+        backendId: null,
         type: "adult",
         firstName: "",
         lastName: "",
@@ -683,22 +708,28 @@ export default function EasyFlyBookingDetailPage() {
 
   const handlePassportUpload = async (passengerIndex: number, file: File) => {
     try {
-      const updated = await uploadEasyFlyBookingDocuments(booking.id, { passport_file: file });
-      setBooking(updated);
-      setPassengers((current) =>
-        current.map((passenger, index) =>
-          index === passengerIndex
-            ? {
-                ...passenger,
-                passportUploaded: true,
-                passportUrl: updated.attachments?.passport?.url,
-                passportFileName: updated.attachments?.passport?.name || file.name,
-              }
-            : passenger,
-        ),
+      let currentBooking = booking;
+      let currentPassengers = passengers;
+      if (!currentPassengers[passengerIndex]?.backendId) {
+        currentBooking = await updateEasyFlyBooking(booking.id, {
+          passengers: passengersToApiPayload(passengers),
+        });
+        currentPassengers = mapPassengersFromBooking(currentBooking);
+        setBooking(currentBooking);
+        setPassengers(currentPassengers);
+      }
+
+      const target = currentPassengers[passengerIndex];
+      const updated = await uploadEasyFlyBookingDocuments(
+        booking.id,
+        { passport_file: file },
+        target?.backendId ? { passengerId: target.backendId } : undefined,
       );
+      setBooking(updated);
+      setPassengers(mapPassengersFromBooking(updated));
       toast.success("Passport uploaded.");
-      const pid = passengers[passengerIndex]?.id;
+      const nextPassengers = mapPassengersFromBooking(updated);
+      const pid = nextPassengers[passengerIndex]?.id || target?.id;
       if (pid) void extractPassportDetails(file, pid);
     } catch (uploadError) {
       toast.error(uploadError instanceof Error ? uploadError.message : "Failed to upload passport.");
@@ -716,9 +747,115 @@ export default function EasyFlyBookingDetailPage() {
     }
   };
 
+  const applyTicketExtraction = (extracted: EasyFlyExtractedTicket) => {
+    updateForm({
+      ...(extracted.pnr ? { pnr: extracted.pnr } : {}),
+      ...(extracted.airlineCode ? { airlineCode: extracted.airlineCode } : {}),
+      ...(extracted.paxName ? { paxName: extracted.paxName } : {}),
+      ...(extracted.fromAirport ? { fromAirport: extracted.fromAirport } : {}),
+      ...(extracted.toAirport ? { toAirport: extracted.toAirport } : {}),
+      ...(extracted.depDate ? { depDate: extracted.depDate } : {}),
+      ...(extracted.returnDate ? { returnDate: extracted.returnDate } : {}),
+    });
+
+    if (extracted.passengers.length > 0) {
+      setPassengers(
+        extracted.passengers.map((passenger, index) => ({
+          id: `${booking.id}-ticket-passenger-${index}`,
+          backendId: null,
+          type: passenger.passengerType,
+          firstName: passenger.firstName,
+          lastName: passenger.lastName,
+          dob: "",
+          passportNumber: "",
+          passportExpiry: "",
+          nationality: "",
+          passportUploaded: false,
+        })),
+      );
+    }
+  };
+
+  const persistExtractedBooking = async (
+    extracted: EasyFlyExtractedTicket,
+    nextPassengers: PassengerEntry[],
+  ) => {
+    const updated = await updateEasyFlyBooking(booking.id, {
+      ...(extracted.pnr ? { pnr: extracted.pnr } : {}),
+      ...(extracted.airlineCode ? { airline_code: extracted.airlineCode } : {}),
+      ...(extracted.paxName ? { pax_name: extracted.paxName } : {}),
+      ...(extracted.fromAirport ? { from_airport: extracted.fromAirport } : {}),
+      ...(extracted.toAirport ? { to_airport: extracted.toAirport } : {}),
+      ...(extracted.depDate ? { dep_date: extracted.depDate } : {}),
+      ...(extracted.returnDate ? { return_date: extracted.returnDate } : {}),
+      passengers: passengersToApiPayload(nextPassengers),
+    });
+    setBooking(updated);
+    setForm(mapBookingToForm(updated));
+    setPassengers(mapPassengersFromBooking(updated));
+    return updated;
+  };
+
   const handleTicketUpload = async (file: File) => {
-    await handleUpload("ticket_file", file);
-    await handleRunAiCheck();
+    try {
+      const updated = await uploadEasyFlyBookingDocuments(booking.id, { ticket_file: file });
+      setBooking(updated);
+      toast.success("Ticket uploaded.");
+    } catch (uploadError) {
+      toast.error(uploadError instanceof Error ? uploadError.message : "Failed to upload ticket.");
+      return;
+    }
+
+    setExtractingTicket(true);
+    try {
+      const extracted = await extractEasyFlyTicket(file);
+      const nextPassengers =
+        extracted.passengers.length > 0
+          ? extracted.passengers.map((passenger, index) => ({
+              id: `${booking.id}-ticket-passenger-${index}`,
+              backendId: null as number | null,
+              type: passenger.passengerType,
+              firstName: passenger.firstName,
+              lastName: passenger.lastName,
+              dob: "",
+              passportNumber: "",
+              passportExpiry: "",
+              nationality: "",
+              passportUploaded: false,
+            }))
+          : passengers;
+
+      applyTicketExtraction(extracted);
+      await persistExtractedBooking(extracted, nextPassengers);
+
+      const filled = [
+        extracted.pnr && "PNR",
+        extracted.airlineCode && "airline",
+        extracted.paxName && "pax",
+        (extracted.fromAirport || extracted.toAirport) && "route",
+        extracted.depDate && "dep date",
+        extracted.passengers.length > 0 && `${extracted.passengers.length} passenger(s)`,
+      ].filter(Boolean);
+      toast.success(
+        filled.length
+          ? `Ticket details saved: ${filled.join(", ")}.`
+          : "Ticket uploaded. No autofill fields found.",
+      );
+    } catch (extractError) {
+      toast.error(
+        extractError instanceof Error
+          ? extractError.message
+          : "Ticket uploaded, but details could not be extracted.",
+      );
+    } finally {
+      setExtractingTicket(false);
+    }
+
+    try {
+      await handleRunAiCheck();
+    } catch {
+      // AI check is best-effort after upload/extract.
+    }
   };
 
   const handleCreatePaymentOrder = async () => {
@@ -878,17 +1015,23 @@ export default function EasyFlyBookingDetailPage() {
         }
         const updated = await updateEasyFlyBooking(booking.id, {
           ...bookingUpdatePayload,
+          passengers: passengersToApiPayload(passengers),
           ai_override_reason: reason.trim(),
         });
         setBooking(updated);
         setForm(mapBookingToForm(updated));
+        setPassengers(mapPassengersFromBooking(updated));
         toast.success("Booking saved with admin override.");
         return;
       }
 
-      const updated = await updateEasyFlyBooking(booking.id, bookingUpdatePayload);
+      const updated = await updateEasyFlyBooking(booking.id, {
+        ...bookingUpdatePayload,
+        passengers: passengersToApiPayload(passengers),
+      });
       setBooking(updated);
       setForm(mapBookingToForm(updated));
+      setPassengers(mapPassengersFromBooking(updated));
       toast.success("Booking details saved successfully.");
     } catch (saveError) {
       toast.error(saveError instanceof Error ? saveError.message : "Failed to save booking.");
@@ -959,6 +1102,26 @@ export default function EasyFlyBookingDetailPage() {
               value={form.airlineCode}
               onChange={(event) => updateForm({ airlineCode: event.target.value.toUpperCase() })}
               className={passengerFieldClassName}
+            />
+          </FormField>
+          <FormField label="From">
+            <input
+              type="text"
+              value={form.fromAirport}
+              onChange={(event) => updateForm({ fromAirport: event.target.value.toUpperCase() })}
+              className={passengerFieldClassName}
+              placeholder="e.g. HSR"
+              maxLength={10}
+            />
+          </FormField>
+          <FormField label="To">
+            <input
+              type="text"
+              value={form.toAirport}
+              onChange={(event) => updateForm({ toAirport: event.target.value.toUpperCase() })}
+              className={passengerFieldClassName}
+              placeholder="e.g. LHR"
+              maxLength={10}
             />
           </FormField>
           <FormField label="Dep Date">
@@ -1231,12 +1394,15 @@ export default function EasyFlyBookingDetailPage() {
           <div className="flex-1">
             <UploadStatusCard
               title="Flight Ticket"
-              description="Upload ticket PDF or image. AI will extract and verify passenger details automatically."
+              description="Upload ticket PDF. Available details (PNR, airline, pax, dates) are filled automatically."
               uploaded={ticketAttachment?.uploaded || false}
               fileName={ticketAttachment?.name || ""}
               viewUrl={ticketAttachment?.url || ""}
               onUpload={(file) => void handleTicketUpload(file)}
             />
+            {extractingTicket ? (
+              <p className="mt-2 text-xs text-[#0B69B7] animate-pulse">Reading ticket details…</p>
+            ) : null}
           </div>
           <button
             type="button"

@@ -21,12 +21,11 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, MapPin, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { ConfirmDialog } from "@/components/console/ConfirmDialog";
 import {
   deleteAdminHubCountry,
-  isAdminStaffRole,
   listAdminHubCountries,
   reorderAdminHubCountries,
   type AdminHubCountry,
@@ -117,8 +116,7 @@ function SortableCountryRow({
 }
 
 export default function AdminServiceHubsPage() {
-  const { adminUser } = useAdminAuth();
-  const canManage = isAdminStaffRole(adminUser?.role);
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/service-hubs");
   const [rows, setRows] = useState<AdminHubCountry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -141,9 +139,9 @@ export default function AdminServiceHubsPage() {
   }, []);
 
   useEffect(() => {
-    if (!canManage) return;
+    if (!canAccess) return;
     void load();
-  }, [canManage, load]);
+  }, [canAccess, load]);
 
   useSetAdminPageChrome({
     title: "Service hubs",
@@ -193,10 +191,18 @@ export default function AdminServiceHubsPage() {
     [saving, rows],
   );
 
-  if (!canManage) {
+  if (!accessReady) {
     return (
       <div className="rounded-xl border border-[#E1E7EF] bg-white p-6 text-sm text-[#627D98]">
-        Only admins can manage service hubs.
+        Checking access…
+      </div>
+    );
+  }
+
+  if (!canAccess) {
+    return (
+      <div className="rounded-xl border border-[#E1E7EF] bg-white p-6 text-sm text-[#627D98]">
+        Access restricted. Ask an admin to grant the Service hubs module for your role.
       </div>
     );
   }

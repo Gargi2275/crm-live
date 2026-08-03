@@ -28,7 +28,6 @@ import {
 import {
   Lock,
   BarChart3,
-  Download,
   IndianRupee,
   Users,
   Clock,
@@ -39,6 +38,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 
 type ReportPeriod = "today" | "week" | "month" | "all";
@@ -273,27 +273,6 @@ function buildServiceRevenueSeries(apps: AdminApplication[]) {
     .slice(0, 8);
 }
 
-function csvEscape(value: string | number | boolean | null | undefined) {
-  const text = String(value ?? "");
-  if (text.includes(",") || text.includes("\n") || text.includes('"')) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
-}
-
-function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number>>) {
-  const csv = [headers.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 function MetricCard({
   label,
   value,
@@ -362,7 +341,8 @@ export default function ReportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { adminUser } = useAdminAuth();
-  const canViewReports = ["admin", "ops_manager", "reviewer"].includes(adminUser?.role || "");
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/reports");
+  const canViewReports = canAccess;
   const canViewStaffAccuracy = adminUser?.role === "admin" || adminUser?.role === "ops_manager";
 
   const initialType = (searchParams.get("type") || "revenue") as ReportType;
@@ -755,74 +735,6 @@ export default function ReportsPage() {
     (statusFilter !== "all" ? 1 : 0) +
     (kpiFilter ? 1 : 0);
 
-  const handleExport = () => {
-    if (reportType === "pending_payments") {
-      downloadCsv(
-        `pending-payments-${period}.csv`,
-        ["reference", "customer", "service", "status", "amount_due", "created_at"],
-        kpiScopedPendingApps.map((app) => [
-          app.reference_number,
-          app.customer_name || "",
-          app.service_name || "",
-          app.application_status || "",
-          (Number(app.amount_due_pence || 0) / 100).toFixed(2),
-          app.created_at || "",
-        ]),
-      );
-      toast.success("Pending payments CSV exported.");
-      return;
-    }
-    if (reportType === "staff_performance") {
-      downloadCsv(
-        `staff-performance-${period}.csv`,
-        ["staff", "accuracy", "assigned", "completed", "badge"],
-        staffRows.map((row) => [row.name, row.accuracy, row.assigned, row.completed, row.badge]),
-      );
-      toast.success("Staff performance CSV exported.");
-      return;
-    }
-    if (reportType === "service_mix") {
-      downloadCsv(
-        `service-mix-${period}.csv`,
-        ["service", "cases", "paid_cases"],
-        serviceMixFromApps.map((row) => [row.name, row.cases, row.paid]),
-      );
-      toast.success("Service mix CSV exported.");
-      return;
-    }
-    if (reportType === "pipeline_sla") {
-      downloadCsv(
-        `pipeline-sla.csv`,
-        ["stage", "open_cases", "avg_age", "breached"],
-        pipelineOverview.map((row) => [row.stage, row.openCases, row.avgAge, row.breached]),
-      );
-      toast.success("Pipeline SLA CSV exported.");
-      return;
-    }
-    if (reportType === "leads") {
-      downloadCsv(
-        `leads-conversion-${period}.csv`,
-        ["reference", "customer", "service", "status", "converted", "created_at"],
-        filteredApps.map((app) => [
-          app.reference_number,
-          app.customer_name || "",
-          app.service_name || "",
-          app.application_status || "",
-          isPaidApplication(app) ? "yes" : "no",
-          app.created_at || "",
-        ]),
-      );
-      toast.success("Leads CSV exported.");
-      return;
-    }
-    downloadCsv(
-      `revenue-summary-${period}.csv`,
-      ["day", "expected", "actual"],
-      filteredDailyRevenue.map((row) => [row.day, Number(row.expected || 0), Number(row.actual || 0)]),
-    );
-    toast.success("Revenue CSV exported.");
-  };
-
   useSetAdminPageChrome(
     canViewReports
       ? {
@@ -833,17 +745,6 @@ export default function ReportsPage() {
           onClearFilters: clearFilters,
           syncKey: `${reportType}|${period}|${serviceFilter}|${statusFilter}|${kpiFilter}|${loading}|${filteredApps.length}`,
           meta: loading ? "Loading…" : `${filteredApps.length} apps in period${kpiFilter ? " · KPI filter on" : ""}`,
-          actions: (
-            <button
-              type="button"
-              onClick={handleExport}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA] disabled:opacity-60"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export CSV
-            </button>
-          ),
           filtersContent: (
             <>
               <label className="block text-sm">
@@ -909,11 +810,22 @@ export default function ReportsPage() {
       : null,
   );
 
+  if (!accessReady) {
+    return (
+      <div className="mx-auto max-w-[900px] font-body">
+        <div className="inline-flex items-center gap-2 rounded-[12px] border border-[#D9E1EA] bg-white p-5 text-[#486581]">
+          Checking access…
+        </div>
+      </div>
+    );
+  }
+
   if (!canViewReports) {
     return (
       <div className="mx-auto max-w-[900px] font-body">
         <div className="inline-flex items-center gap-2 rounded-[12px] border border-[#D9E1EA] bg-white p-5 text-[#486581]">
-          <Lock className="h-4 w-4 text-[#9C4F17]" /> Reports are available for Admin and Operations Manager roles.
+          <Lock className="h-4 w-4 text-[#9C4F17]" /> Access restricted. Ask an admin to grant the Reports
+          module for your role.
         </div>
       </div>
     );

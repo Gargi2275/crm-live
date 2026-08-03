@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   OriginCountryForm,
@@ -14,7 +14,6 @@ import {
 } from "@/components/admin/OriginCountryForm";
 import {
   getAdminOriginCountry,
-  isAdminStaffRole,
   listAdminServices,
   updateAdminOriginCountry,
   type AdminService,
@@ -24,8 +23,7 @@ export default function EditOriginCountryPage() {
   const params = useParams();
   const router = useRouter();
   const countryId = Number(params?.id);
-  const { adminUser } = useAdminAuth();
-  const isAdmin = isAdminStaffRole(adminUser?.role);
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/origin-countries");
   const [form, setForm] = useState<OriginCountryFormState>(emptyOriginCountryForm);
   const [services, setServices] = useState<AdminService[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +36,7 @@ export default function EditOriginCountryPage() {
   });
 
   useEffect(() => {
-    if (!isAdmin || !Number.isFinite(countryId) || countryId <= 0) return;
+    if (!canAccess || !Number.isFinite(countryId) || countryId <= 0) return;
     let cancelled = false;
     setLoading(true);
     void Promise.all([
@@ -65,7 +63,7 @@ export default function EditOriginCountryPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, countryId, router]);
+  }, [canAccess, countryId, router]);
 
   const handleSubmit = async () => {
     if (!Number.isFinite(countryId) || countryId <= 0) return;
@@ -81,10 +79,18 @@ export default function EditOriginCountryPage() {
     }
   };
 
-  if (!isAdmin) {
+  if (!accessReady) {
     return (
       <div className="rounded-[12px] border border-[#E1E7EF] bg-white p-6 text-sm text-[#486581]">
-        Admin access required.
+        Checking access…
+      </div>
+    );
+  }
+
+  if (!canAccess) {
+    return (
+      <div className="rounded-[12px] border border-[#E1E7EF] bg-white p-6 text-sm text-[#486581]">
+        Access restricted. Ask an admin to grant the Origin countries module for your role.
       </div>
     );
   }

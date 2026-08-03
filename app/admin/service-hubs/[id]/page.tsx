@@ -5,10 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { HubCountryForm } from "@/components/admin/HubCountryForm";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import {
   getAdminHubCountry,
-  isAdminStaffRole,
   listAdminServices,
   updateAdminHubCountry,
   type AdminHubCountry,
@@ -19,7 +18,7 @@ export default function EditServiceHubPage() {
   const router = useRouter();
   const params = useParams();
   const countryId = Number(params?.id);
-  const { adminUser } = useAdminAuth();
+  const { canAccess, accessReady } = useAdminModuleAccess("/admin/service-hubs");
   const [country, setCountry] = useState<AdminHubCountry | null>(null);
   const [services, setServices] = useState<AdminService[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,7 +30,7 @@ export default function EditServiceHubPage() {
   });
 
   useEffect(() => {
-    if (!isAdminStaffRole(adminUser?.role)) return;
+    if (!canAccess) return;
     if (!Number.isFinite(countryId)) return;
     let cancelled = false;
     (async () => {
@@ -56,12 +55,20 @@ export default function EditServiceHubPage() {
     return () => {
       cancelled = true;
     };
-  }, [adminUser?.role, countryId, router]);
+  }, [canAccess, countryId, router]);
 
-  if (!isAdminStaffRole(adminUser?.role)) {
+  if (!accessReady) {
     return (
       <div className="rounded-xl border border-[#E1E7EF] bg-white p-6 text-sm text-[#627D98]">
-        Only admins can manage service hubs.
+        Checking access…
+      </div>
+    );
+  }
+
+  if (!canAccess) {
+    return (
+      <div className="rounded-xl border border-[#E1E7EF] bg-white p-6 text-sm text-[#627D98]">
+        Access restricted. Ask an admin to grant the Service hubs module for your role.
       </div>
     );
   }

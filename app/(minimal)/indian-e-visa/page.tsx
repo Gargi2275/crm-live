@@ -992,7 +992,8 @@ export default function RegistrationPage() {
     if (!authService.isLoggedIn()) {
       return;
     }
-    if (loadedResumeCaseRef.current === caseFromQuery) {
+    // Always refresh on details view so post-payment status is not stale.
+    if (!detailsMode && loadedResumeCaseRef.current === caseFromQuery) {
       return;
     }
     loadedResumeCaseRef.current = caseFromQuery;
@@ -1001,6 +1002,14 @@ export default function RegistrationPage() {
       try {
         const response = await eVisaApi.getResume(caseFromQuery);
         setResumeApplication(response.data.application_data || null);
+        const appData = response.data.application_data;
+        if (appData?.email_confirmed || appData?.payment_confirmed) {
+          updateData({
+            fileNumber: caseFromQuery,
+            isEmailConfirmed: Boolean(appData.email_confirmed),
+            hasPaid: Boolean(appData.payment_confirmed),
+          });
+        }
         const shouldApplyResumePrefill = Boolean(magicToken || resumeMode || detailsMode);
         if ((response.data.next_step === "registration" && shouldApplyResumePrefill) || detailsMode) {
           applyRegistrationPrefill(caseFromQuery, response.data.registration_prefill);
@@ -1603,6 +1612,8 @@ export default function RegistrationPage() {
         updated_at?: string;
         notes?: string;
         service_name?: string;
+        payment_confirmed?: boolean;
+        email_confirmed?: boolean;
         audit_result?: "pending" | "green" | "amber" | "red" | string;
         auditor_notes?: string;
         correction_requested_at?: string | null;
@@ -1623,6 +1634,49 @@ export default function RegistrationPage() {
           priority?: string;
         }>;
       });
+
+      if (appData) {
+        setResumeApplication((prev) => ({
+          ...(prev || {
+            case_number: caseFromQuery,
+            application_status: "",
+            unified_status: "",
+            current_stage: "",
+            service_name: "",
+            service_type: "",
+            application_date: null,
+            created_at: "",
+            updated_at: "",
+            consent_captured: false,
+            audit_result: "",
+            auditor_notes: "",
+            flagged_documents: [],
+            correction_requested: false,
+            correction_requested_at: null,
+            correction_resubmitted_at: null,
+            upload_url: "",
+          }),
+          ...prev,
+          email_confirmed: Boolean(
+            appData.email_confirmed ?? prev?.email_confirmed ?? false,
+          ),
+          payment_confirmed: Boolean(
+            appData.payment_confirmed ?? prev?.payment_confirmed ?? false,
+          ),
+          application_status: appData.application_status || prev?.application_status || "",
+          unified_status: appData.unified_status || prev?.unified_status || "",
+          current_stage: appData.current_stage || prev?.current_stage || "",
+          service_name: appData.service_name || prev?.service_name || "",
+          updated_at: appData.updated_at || prev?.updated_at || "",
+        }));
+        if (appData.payment_confirmed || appData.email_confirmed) {
+          updateData({
+            fileNumber: caseFromQuery,
+            hasPaid: Boolean(appData.payment_confirmed),
+            isEmailConfirmed: Boolean(appData.email_confirmed),
+          });
+        }
+      }
 
       if (appData?.nationality && !watch("nationality")) {
         setValue("nationality", appData.nationality as RegistrationData["nationality"], { shouldDirty: true, shouldTouch: true });
@@ -1716,8 +1770,12 @@ if (profileRes.ok) {
       ? "w-full px-4 py-3 border rounded-[14px] font-body text-[14px] bg-[#f1f2f6] outline-none transition-all duration-200 border-[#d7dbe8] focus:border-[#7f86a5] focus:shadow-[0_0_0_3px_rgba(127,134,165,0.2)] disabled:opacity-50 disabled:bg-gray-100 text-[#303a52]"
       : "w-full px-3 py-2.5 border rounded-lg font-body text-[12px] bg-[#f8fafd] outline-none transition-all duration-200 border-[#d7e3f2] focus:border-[#1a56db] focus:shadow-[0_0_0_3px_rgba(26,86,219,0.16)] disabled:opacity-50 disabled:bg-gray-50";
 
-  const isPaymentConfirmed = resumeApplication?.payment_confirmed === true;
-  const isEmailConfirmed = resumeApplication?.email_confirmed === true;
+  const isPaymentConfirmed =
+    resumeApplication?.payment_confirmed === true ||
+    Boolean((applicationRecord as { payment_confirmed?: boolean } | null)?.payment_confirmed);
+  const isEmailConfirmed =
+    resumeApplication?.email_confirmed === true ||
+    Boolean((applicationRecord as { email_confirmed?: boolean } | null)?.email_confirmed);
   const isFormLocked = detailsMode && isPaymentConfirmed && isEmailConfirmed;
   const isEVisaCorrectionRequested =
     String(applicationRecord?.application_status || "").toLowerCase() === "correction_requested" ||
@@ -2159,7 +2217,7 @@ if (profileRes.ok) {
             </div>
           </section>
 
-          {!resumeApplication?.payment_confirmed ? (
+          {!isPaymentConfirmed ? (
           <section className="rounded-2xl border border-[#f0d89d] bg-[#fff6de] border-l-[3px] border-l-[#e6a72f] px-4 py-4 sm:px-5 sm:py-5">
             <div className="flex items-start gap-3">
               <span className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#ffe2a8] text-[#a66800]">
@@ -2454,8 +2512,8 @@ if (profileRes.ok) {
               <div className="rounded-xl border border-[#d9e4f7] bg-white p-4 sm:col-span-2 lg:col-span-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7a8bab]">Verification Summary</p>
                 <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <p className="text-[13px] font-semibold text-[#1d2f4f]">Email: <span className="text-[#355f9b]">{resumeApplication?.email_confirmed ? "Confirmed" : "Pending"}</span></p>
-                  <p className="text-[13px] font-semibold text-[#1d2f4f]">Payment: <span className="text-[#355f9b]">{resumeApplication?.payment_confirmed ? "Confirmed" : "Pending"}</span></p>
+                  <p className="text-[13px] font-semibold text-[#1d2f4f]">Email: <span className="text-[#355f9b]">{isEmailConfirmed ? "Confirmed" : "Pending"}</span></p>
+                  <p className="text-[13px] font-semibold text-[#1d2f4f]">Payment: <span className="text-[#355f9b]">{isPaymentConfirmed ? "Confirmed" : "Pending"}</span></p>
                   <p className="text-[13px] font-semibold text-[#1d2f4f]">Consent: <span className="text-[#355f9b]">{resumeApplication?.consent_captured ? "Captured" : "Pending"}</span></p>
                 </div>
               </div>

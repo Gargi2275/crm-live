@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  LockOpen,
   Pencil,
   Plus,
   RefreshCw,
@@ -31,6 +32,7 @@ import {
   listStaffUsersWithSummary,
   resetStaffUserPassword,
   staffIdsMatch,
+  unlockStaffUser,
   updateStaffUser,
   type AdminDashboardOverview,
   type AdminRoleOverview,
@@ -353,6 +355,19 @@ function AdminStaffPageInner() {
     setConfirmAction({ type: "deactivate", user });
   };
 
+  const handleUnlock = async (user: AdminStaffUser) => {
+    setActionLoadingId(user.id);
+    try {
+      await unlockStaffUser(user.id);
+      toast.success("Account unlocked.");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not unlock account.");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   const handleReactivate = async (user: AdminStaffUser) => {
     setActionLoadingId(user.id);
     try {
@@ -365,6 +380,25 @@ function AdminStaffPageInner() {
       setActionLoadingId(null);
     }
   };
+
+  const renderStatusBadges = (user: AdminStaffUser) => (
+    <div className="inline-flex flex-wrap items-center gap-1">
+      <span
+        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+          user.is_active !== false
+            ? "bg-[#009877]/12 text-[#006F57]"
+            : "bg-[#FEF3C7] text-[#9C4F17]"
+        }`}
+      >
+        {user.is_active !== false ? "Active" : "Inactive"}
+      </span>
+      {user.is_locked ? (
+        <span className="inline-flex rounded-full bg-[#FEE4E2] px-2 py-0.5 text-[11px] font-semibold text-[#B42318]">
+          Locked
+        </span>
+      ) : null}
+    </div>
+  );
 
   const handleDelete = (user: AdminStaffUser) => {
     setConfirmAction({ type: "delete", user });
@@ -449,6 +483,18 @@ function AdminStaffPageInner() {
           <KeyRound className="h-3.5 w-3.5" />
           {compact ? "Reset" : null}
         </button>
+        {user.is_locked ? (
+          <button
+            type="button"
+            onClick={() => void handleUnlock(user)}
+            disabled={busy}
+            className={`${btnClass} border-[#FEE4E2] text-[#B42318] hover:bg-[#FEF3F2]`}
+            title="Unlock account"
+          >
+            <LockOpen className="h-3.5 w-3.5" />
+            {compact ? "Unlock" : null}
+          </button>
+        ) : null}
         {user.is_active !== false ? (
           <button
             type="button"
@@ -741,15 +787,7 @@ function AdminStaffPageInner() {
                   <p className="font-heading font-semibold text-[#102A43] truncate">{user.full_name}</p>
                   <p className="text-xs text-[#627D98] font-mono truncate">@{user.username}</p>
                 </div>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    user.is_active !== false
-                      ? "bg-[#009877]/12 text-[#006F57]"
-                      : "bg-[#FEF3C7] text-[#9C4F17]"
-                  }`}
-                >
-                  {user.is_active !== false ? "Active" : "Inactive"}
-                </span>
+                {renderStatusBadges(user)}
               </div>
               <dl className="grid grid-cols-1 gap-1.5 text-sm text-[#486581]">
                 <div className="flex justify-between gap-2">
@@ -817,17 +855,7 @@ function AdminStaffPageInner() {
                     <td className="px-4 py-2.5 font-mono text-xs">{user.username}</td>
                     <td className="px-4 py-2.5 max-w-[200px] truncate">{user.email || "—"}</td>
                     <td className="px-4 py-2.5">{roleLabel(roles, user.role)}</td>
-                    <td className="px-4 py-2.5">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          user.is_active !== false
-                            ? "bg-[#009877]/12 text-[#006F57]"
-                            : "bg-[#FEF3C7] text-[#9C4F17]"
-                        }`}
-                      >
-                        {user.is_active !== false ? "Active" : "Inactive"}
-                      </span>
-                    </td>
+                    <td className="px-4 py-2.5">{renderStatusBadges(user)}</td>
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{formatLastLogin(user.last_login)}</td>
                     <td className="px-4 py-2.5">{renderActions(user)}</td>
                   </tr>

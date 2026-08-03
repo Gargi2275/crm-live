@@ -129,6 +129,8 @@ export type EasyFlyBooking = {
   pnr: string;
   paxName: string;
   airlineCode: string;
+  fromAirport: string;
+  toAirport: string;
   depDate: string;
   returnDate: string;
   amountPaid: number;
@@ -159,8 +161,33 @@ export type EasyFlyBooking = {
   paymentStatus?: "pending" | "created" | "paid" | "failed";
   earnings: number;
   paymentLedger?: EasyFlyPaymentLedgerEntry[];
+  passengers?: EasyFlyPassenger[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type EasyFlyPassenger = {
+  id: number;
+  type: "adult" | "youth" | "child" | "infant";
+  firstName: string;
+  lastName: string;
+  dob: string;
+  passportExpiry: string;
+  passportUploaded: boolean;
+  passportUrl: string;
+  passportFileName: string;
+};
+
+type EasyFlyPassengerApi = {
+  id: number;
+  passenger_type?: string;
+  first_name?: string;
+  last_name?: string;
+  dob?: string | null;
+  passport_expiry?: string | null;
+  passport_uploaded?: boolean;
+  passport_url?: string;
+  passport_file_name?: string;
 };
 
 type EasyFlyBookingApi = {
@@ -171,6 +198,8 @@ type EasyFlyBookingApi = {
   pnr: string;
   pax_name: string;
   airline_code: string;
+  from_airport?: string;
+  to_airport?: string;
   dep_date: string;
   return_date: string;
   amount_paid: number;
@@ -201,6 +230,7 @@ type EasyFlyBookingApi = {
   payment_status?: "pending" | "created" | "paid" | "failed";
   earnings: number;
   payment_ledger?: EasyFlyPaymentLedgerEntryApi[];
+  passengers?: EasyFlyPassengerApi[];
   created_at: string;
   updated_at: string;
 };
@@ -254,6 +284,23 @@ const toLedgerEntry = (entry: EasyFlyPaymentLedgerEntryApi): EasyFlyPaymentLedge
   updatedAt: entry.updated_at,
 });
 
+const toPassenger = (passenger: EasyFlyPassengerApi): EasyFlyPassenger => {
+  const typeRaw = String(passenger.passenger_type || "adult").toLowerCase();
+  const type =
+    typeRaw === "youth" || typeRaw === "child" || typeRaw === "infant" ? typeRaw : "adult";
+  return {
+    id: passenger.id,
+    type,
+    firstName: passenger.first_name || "",
+    lastName: passenger.last_name || "",
+    dob: passenger.dob || "",
+    passportExpiry: passenger.passport_expiry || "",
+    passportUploaded: Boolean(passenger.passport_uploaded),
+    passportUrl: passenger.passport_url || "",
+    passportFileName: passenger.passport_file_name || "",
+  };
+};
+
 const toBooking = (booking: EasyFlyBookingApi): EasyFlyBooking => ({
   id: booking.id,
   srNo: booking.sr_no,
@@ -262,6 +309,8 @@ const toBooking = (booking: EasyFlyBookingApi): EasyFlyBooking => ({
   pnr: booking.pnr,
   paxName: booking.pax_name,
   airlineCode: booking.airline_code,
+  fromAirport: booking.from_airport || "",
+  toAirport: booking.to_airport || "",
   depDate: booking.dep_date,
   returnDate: booking.return_date,
   amountPaid: booking.amount_paid,
@@ -288,6 +337,7 @@ const toBooking = (booking: EasyFlyBookingApi): EasyFlyBooking => ({
   paymentStatus: booking.payment_status,
   earnings: booking.earnings,
   paymentLedger: booking.payment_ledger?.map(toLedgerEntry),
+  passengers: booking.passengers?.map(toPassenger),
   createdAt: booking.created_at,
   updatedAt: booking.updated_at,
 });
@@ -390,11 +440,15 @@ export const uploadEasyFlyBookingDocuments = async (
       File
     >
   >,
+  extras?: { passengerId?: number },
 ) => {
   const formData = new FormData();
   Object.entries(files).forEach(([key, file]) => {
     if (file) formData.append(key, file);
   });
+  if (extras?.passengerId) {
+    formData.append("passenger_id", String(extras.passengerId));
+  }
 
   const response = await adminAuthenticatedFetch(`/admin/easyfly/bookings/${bookingId}/`, {
     method: "PATCH",
@@ -524,6 +578,82 @@ export const runEasyFlyAIVerify = async (
     method: "POST",
   });
   return parseApiResponse(response);
+};
+
+export type EasyFlyExtractedTicketPassenger = {
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  passengerType: "adult" | "youth" | "child" | "infant";
+};
+
+export type EasyFlyExtractedTicket = {
+  pnr: string;
+  airlineCode: string;
+  paxName: string;
+  depDate: string;
+  returnDate: string;
+  fromAirport: string;
+  toAirport: string;
+  route: string;
+  passengers: EasyFlyExtractedTicketPassenger[];
+  source: string;
+  fieldsFound: number;
+};
+
+type EasyFlyExtractedTicketApi = {
+  pnr?: string;
+  airline_code?: string;
+  pax_name?: string;
+  dep_date?: string;
+  return_date?: string;
+  from_airport?: string;
+  to_airport?: string;
+  route?: string;
+  passengers?: Array<{
+    first_name?: string;
+    last_name?: string;
+    full_name?: string;
+    passenger_type?: string;
+  }>;
+  source?: string;
+  fields_found?: number;
+};
+
+export const extractEasyFlyTicket = async (file: File): Promise<EasyFlyExtractedTicket> => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await adminAuthenticatedFetch("/admin/easyfly/extract-ticket/", {
+    method: "POST",
+    body: formData,
+  });
+  const data = await parseApiResponse<EasyFlyExtractedTicketApi>(response);
+  const passengers: EasyFlyExtractedTicketPassenger[] = (data.passengers || []).map((passenger) => {
+    const typeRaw = String(passenger.passenger_type || "adult").toLowerCase();
+    const passengerType =
+      typeRaw === "youth" || typeRaw === "child" || typeRaw === "infant" ? typeRaw : "adult";
+    return {
+      firstName: passenger.first_name || "",
+      lastName: passenger.last_name || "",
+      fullName: passenger.full_name || `${passenger.first_name || ""} ${passenger.last_name || ""}`.trim(),
+      passengerType,
+    };
+  });
+
+  return {
+    pnr: data.pnr || "",
+    airlineCode: data.airline_code || "",
+    paxName: data.pax_name || "",
+    depDate: data.dep_date || "",
+    returnDate: data.return_date || "",
+    fromAirport: data.from_airport || "",
+    toAirport: data.to_airport || "",
+    route: data.route || "",
+    passengers,
+    source: data.source || "generic",
+    fieldsFound: Number(data.fields_found || 0),
+  };
 };
 
 export type EasyFlyStaffRevenueEntry = {

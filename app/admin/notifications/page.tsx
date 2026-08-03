@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Bell, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   createAdminNotificationModule,
@@ -17,8 +17,7 @@ import {
 } from "@/lib/admin-auth";
 
 export default function AdminNotificationsPage() {
-  const { adminUser } = useAdminAuth();
-  const isAdmin = adminUser?.role === "admin";
+  const { canAccess } = useAdminModuleAccess("/admin/notifications");
 
   const [prefs, setPrefs] = useState<AdminNotificationModulePref[]>([]);
   const [catalog, setCatalog] = useState<AdminNotificationModuleItem[]>([]);
@@ -34,7 +33,7 @@ export default function AdminNotificationsPage() {
     try {
       const prefData = await getAdminNotificationPreferences();
       setPrefs(prefData.modules || []);
-      if (isAdmin) {
+      if (canAccess) {
         setCatalog(await getAdminNotificationModules());
       }
     } catch (error) {
@@ -42,7 +41,7 @@ export default function AdminNotificationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, [canAccess]);
 
   useEffect(() => {
     void load();
@@ -125,7 +124,7 @@ export default function AdminNotificationsPage() {
     title: "Notifications",
     subtitle: "Toggle categories to control in-app alerts and email.",
     icon: Bell,
-    syncKey: `${loading}|${prefs.length}|${catalog.length}|${isAdmin}`,
+    syncKey: `${loading}|${prefs.length}|${catalog.length}|${canAccess}`,
     actions: (
       <button
         type="button"
@@ -173,7 +172,7 @@ export default function AdminNotificationsPage() {
         )}
       </section>
 
-      {isAdmin ? (
+      {canAccess ? (
         <section className="rounded-xl border border-[#D9E1EA] bg-white overflow-hidden">
           <div className="border-b border-[#E5EAF0] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-[#102A43]">Notification categories (admin)</p>

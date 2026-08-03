@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Clock, FileText, MessageSquare, MoveRight, Send, CheckCircle, AlertTriangle, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { type PipelineCase } from "@/lib/kanban";
+import { type PipelineCase, isApplicationFullyPaid, isPassportRenewalService, resolvePipelinePaymentStatus, stageAfterPayment } from "@/lib/kanban";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   adminAuthenticatedFetch,
@@ -156,16 +156,13 @@ const resolveDisplayPaymentStatus = (
   effectiveStage: PipelineCase["stage"],
   isEVisaCase: boolean,
 ) => {
-  const fullPaymentStatus = String(details?.full_payment_status || "").trim().toLowerCase();
-  const auditPaymentStatus = String(details?.audit_payment_status || "").trim().toLowerCase();
-  const applicationStatus = String(details?.application_status || "").trim().toLowerCase();
-  const amountDue = Number(details?.amount_due_pence || 0);
-
-  const paidSignals = new Set(["paid", "captured", "success", "completed", "settled"]);
-  if (paidSignals.has(fullPaymentStatus) || paidSignals.has(auditPaymentStatus)) {
-    return "Paid";
+  if (!details) return "Pending";
+  const status = resolvePipelinePaymentStatus(details);
+  if (status === "Paid" || status === "Prepaid") {
+    return status;
   }
 
+  const applicationStatus = String(details.application_status || "").trim().toLowerCase();
   if (
     isEVisaCase
     && (
@@ -176,21 +173,8 @@ const resolveDisplayPaymentStatus = (
     return "Cleared for processing";
   }
 
-  const pendingSignals = new Set(["pending", "created", "initiated", "unpaid", "failed"]);
-  if (pendingSignals.has(fullPaymentStatus) || pendingSignals.has(auditPaymentStatus)) {
-    return "Pending";
-  }
-
-  if (amountDue <= 0 && (details?.service_total_pence || details?.audit_fee_pence)) {
-    return "Paid";
-  }
-
   if (["REVIEW_PENDING", "READY_FOR_SUBMISSION", "SUBMITTED", "DELIVERED"].includes(effectiveStage)) {
     return isEVisaCase ? "Cleared for processing" : "Cleared";
-  }
-
-  if (effectiveStage === "FORM_FILLING") {
-    return "Cleared";
   }
 
   return "Pending";
@@ -204,18 +188,23 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
   const quoteStatus = String(details?.quote_status || "").trim().toUpperCase();
   const serviceHint = String(details?.service_type || details?.service_name || caseData?.serviceType || "").toLowerCase();
   const isEVisaCase = serviceHint.includes("evisa") || serviceHint.includes("e-visa") || serviceHint.includes("e visa");
-  const isPassportCase = serviceHint.includes("passport");
+  const isPassportCase = isPassportRenewalService(details?.service_type, details?.service_name);
   const isApostilleCase = serviceHint.includes("apostille");
   const hasDocuments = Number(details?.document_count || 0) > 0;
   const quotedFee = Number.parseFloat(String(details?.quoted_fee ?? ""));
   const hasQuotedFee = Number.isFinite(quotedFee) && quotedFee > 0;
+  const paymentConfirmed = isApplicationFullyPaid(details || {});
+
+  // Paid cases must never remain on Payment Pending (all services including apostille).
+  if (paymentConfirmed) {
+    return stageAfterPayment(rawStage, hasDocuments);
+  }
 
   if (isApostilleCase) {
     const kanbanStage = String(details?.kanban_stage || details?.stage || stage || caseData?.stage || "")
       .trim()
       .toUpperCase()
       .replace(/\s+/g, "_");
-    const paymentConfirmed = Boolean(details?.payment_confirmed) || fullPaymentStatus === "paid";
     const finalCompleted = Boolean(details?.final_submission_completed);
 
     if (kanbanStage === "DELIVERED" || applicationStatus === "completed" || applicationStatus === "dispatched") {
@@ -239,10 +228,10 @@ const resolveEffectiveStage = (stage?: string, details?: AdminApplication | null
     if (applicationStatus === "processing" || finalCompleted) {
       return "REVIEW_PENDING";
     }
-    if (applicationStatus === "final_submission_pending" || (paymentConfirmed && !finalCompleted)) {
+    if (applicationStatus === "final_submission_pending") {
       return "FORM_FILLING";
     }
-    if ((applicationStatus === "payment_pending" || applicationStatus === "approved" || hasQuotedFee) && !paymentConfirmed) {
+    if (applicationStatus === "payment_pending" || applicationStatus === "approved" || hasQuotedFee) {
       return "PAYMENT_PENDING";
     }
     if (applicationStatus === "rejected" || rawStage === "CORRECTION_REQUESTED") {
@@ -550,7 +539,15 @@ export function SlideOverPanel({
   const [showMoveStage, setShowMoveStage] = useState(false);
   const [isRequestingDocs, setIsRequestingDocs] = useState(false);
   const [isSendingCustomerMessage, setIsSendingCustomerMessage] = useState(false);
-  const [threadMessages, setThreadMessages] = useState<Array<{ sender: "team" | "customer"; message_body: string; created_at: string }>>([]);
+  const [threadMessages, setThreadMessages] = useState<Array<{
+    id?: string;
+    sender: "team" | "customer" | string;
+    message_body: string;
+    subject?: string;
+    created_at: string;
+    is_read?: boolean;
+  }>>([]);
+  const [threadUnreadCount, setThreadUnreadCount] = useState(0);
 
   const [requestDocType, setRequestDocType] = useState("passport");
   const [requestDocDescription, setRequestDocDescription] = useState("");
@@ -656,6 +653,7 @@ export function SlideOverPanel({
     const applicationId = Number(details?.id || caseData?.applicationId || 0);
     if (!applicationId) {
       setThreadMessages([]);
+      setThreadUnreadCount(0);
       return;
     }
     let cancelled = false;
@@ -665,9 +663,11 @@ export function SlideOverPanel({
         if (cancelled) return;
         const merged = (payload.threads || []).flatMap((thread) => thread.messages || []);
         setThreadMessages(merged);
+        setThreadUnreadCount(Number(payload.unread_count || 0));
       } catch {
         if (!cancelled) {
           setThreadMessages([]);
+          setThreadUnreadCount(0);
         }
       }
     };
@@ -675,7 +675,20 @@ export function SlideOverPanel({
     return () => {
       cancelled = true;
     };
-  }, [details?.id, caseData?.applicationId]);
+  }, [details?.id, caseData?.applicationId, details?.admin_messages, details?.audit_logs]);
+
+  const reloadThreadMessages = async () => {
+    const applicationId = Number(details?.id || caseData?.applicationId || 0);
+    if (!applicationId) return;
+    try {
+      const payload = await getAdminApplicationMessages(applicationId);
+      const merged = (payload.threads || []).flatMap((thread) => thread.messages || []);
+      setThreadMessages(merged);
+      setThreadUnreadCount(Number(payload.unread_count || 0));
+    } catch {
+      // Keep existing thread on refresh failure.
+    }
+  };
 
   const effectiveStage = resolveEffectiveStage(details?.stage || caseData?.stage, details, caseData);
   const serviceHint = String(details?.service_type || details?.service_name || caseData?.serviceType || "").toLowerCase();
@@ -734,73 +747,82 @@ export function SlideOverPanel({
       message: string;
     };
 
-    const fromAdminMessages: TimelineMessage[] = Array.isArray(details?.admin_messages)
-      ? details.admin_messages.map((msg) => ({
-          createdAt: String(msg.created_at || ""),
-          sender: "team" as const,
-          subject: String(msg.subject || "FlyOCI update").trim() || "FlyOCI update",
-          message: String(msg.message || "").trim(),
-        }))
-      : [];
-
-    const customerNote = String(details?.notes || "").trim();
-
-    const fromThreadMessages: TimelineMessage[] = threadMessages
-      .map((item) => {
-        const sender: "team" | "customer" = item.sender === "customer" ? "customer" : "team";
-        const message = String(item.message_body || "").trim();
-        if (!message) return null;
-        // Notes field is shown separately — skip duplicate thread entry.
-        if (sender === "customer" && customerNote && message === customerNote) {
-          return null;
-        }
-        return {
-          createdAt: String(item.created_at || ""),
-          sender,
-          subject: sender === "customer" ? "Customer message" : "FlyOCI team message",
-          message,
-        } as TimelineMessage;
-      })
-      .filter((item): item is TimelineMessage => Boolean(item));
-
-    const fromCustomerNotes: TimelineMessage[] = customerNote
-      ? [
-          {
-            createdAt: String(details?.updated_at || details?.application_date || details?.created_at || ""),
-            sender: "customer",
-            subject: "Customer note to FlyOCI Team",
-            message: customerNote,
-          },
-        ]
-      : [];
-
-    const merged = [
-      ...fromAdminMessages,
-      ...fromThreadMessages,
-      ...(isApostilleCase ? [] : fromCustomerNotes),
-    ];
-    const deduped = merged.filter((item, index, list) => {
-      return (
-        list.findIndex((candidate) =>
+    const pushUnique = (list: TimelineMessage[], item: TimelineMessage) => {
+      const message = item.message.trim();
+      if (!message) return;
+      const exists = list.some(
+        (candidate) =>
           candidate.sender === item.sender &&
-          candidate.message === item.message &&
-          candidate.createdAt === item.createdAt
-        ) === index
+          candidate.message === message &&
+          String(candidate.createdAt || "").slice(0, 19) === String(item.createdAt || "").slice(0, 19),
       );
-    });
+      if (!exists) list.push({ ...item, message });
+    };
 
-    return deduped.sort(
-      (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+    const merged: TimelineMessage[] = [];
+
+    // Primary source: messages API thread (customer ↔ FlyOCI).
+    for (const item of threadMessages) {
+      const sender: "team" | "customer" = item.sender === "customer" ? "customer" : "team";
+      pushUnique(merged, {
+        createdAt: String(item.created_at || ""),
+        sender,
+        subject:
+          String(item.subject || "").trim() ||
+          (sender === "customer" ? "Customer message" : "FlyOCI team message"),
+        message: String(item.message_body || "").trim(),
+      });
+    }
+
+    // Fallback from application detail feed (covers API miss / older rows).
+    if (Array.isArray(details?.admin_messages)) {
+      for (const msg of details.admin_messages) {
+        const sender: "team" | "customer" = msg.sender === "customer" ? "customer" : "team";
+        pushUnique(merged, {
+          createdAt: String(msg.created_at || ""),
+          sender,
+          subject:
+            String(msg.subject || "").trim() ||
+            (sender === "customer" ? "Customer message" : "FlyOCI update"),
+          message: String(msg.message || "").trim(),
+        });
+      }
+    }
+
+    // Extra fallback: raw audit_logs on the detail payload.
+    if (Array.isArray(details?.audit_logs)) {
+      for (const log of details.audit_logs) {
+        const action = String(log?.action || "").trim().toLowerCase();
+        const metadata =
+          log?.metadata && typeof log.metadata === "object" ? (log.metadata as Record<string, unknown>) : {};
+        if (action === "application_message") {
+          const message = String(metadata.message_body || metadata.description || "").trim();
+          const sender: "team" | "customer" =
+            String(metadata.sender || "").trim().toLowerCase() === "customer" ? "customer" : "team";
+          pushUnique(merged, {
+            createdAt: String(log.timestamp || ""),
+            sender,
+            subject:
+              String(metadata.subject || "").trim() ||
+              (sender === "customer" ? "Customer message" : "FlyOCI team message"),
+            message,
+          });
+        } else if (action === "admin_customer_message") {
+          const message = String(metadata.description || metadata.message || "").trim();
+          pushUnique(merged, {
+            createdAt: String(log.timestamp || ""),
+            sender: "team",
+            subject: String(metadata.subject || "FlyOCI update").trim() || "FlyOCI update",
+            message,
+          });
+        }
+      }
+    }
+
+    return merged.sort(
+      (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
     );
-  }, [
-    details?.admin_messages,
-    details?.notes,
-    details?.updated_at,
-    details?.application_date,
-    details?.created_at,
-    isApostilleCase,
-    threadMessages,
-  ]);
+  }, [details?.admin_messages, details?.audit_logs, threadMessages]);
 
   const findingDocumentTypes = useMemo(() => {
     const normalize = (value?: string) => (value || "").trim().toLowerCase();
@@ -1140,20 +1162,23 @@ export function SlideOverPanel({
   };
 
   const openDocumentFile = async (doc: AdminApplicationDocument, download = false) => {
-    if (!doc.file_path) {
+    if (!doc.id && !doc.file_path) {
       toast.error("Document file is not available.");
       return;
     }
 
     try {
-      const fileUrl = new URL(doc.file_path, window.location.origin);
-      if (download) {
-        fileUrl.searchParams.set("download", "1");
-      }
+      // Prefer stable document-id file API — avoids broken absolute/relative file_path URLs.
+      const endpoint = doc.id
+        ? (download ? `/documents/${doc.id}/file/?download=1` : `/documents/${doc.id}/file/`)
+        : (() => {
+            const fileUrl = new URL(String(doc.file_path), window.location.origin);
+            if (download) fileUrl.searchParams.set("download", "1");
+            const path = `${fileUrl.pathname}${fileUrl.search}`;
+            return path.startsWith("/api/") ? path.slice(4) : path;
+          })();
 
-      const endpoint = `${fileUrl.pathname}${fileUrl.search}`;
-      const normalizedEndpoint = endpoint.startsWith("/api/") ? endpoint.slice(4) : endpoint;
-      const response = await adminAuthenticatedFetch(normalizedEndpoint, {
+      const response = await adminAuthenticatedFetch(endpoint, {
         method: "GET",
         headers: {
           Accept: "*/*",
@@ -1254,12 +1279,21 @@ export function SlideOverPanel({
         findings: cleanedFindings,
       });
 
-      const nextStage: PipelineCase["stage"] = selectedResult === "green" ? "PAYMENT_PENDING" : "DOCUMENTS_REQUIRED";
+      const nextStage: PipelineCase["stage"] =
+        selectedResult === "green"
+          ? isApplicationFullyPaid(details)
+            ? stageAfterPayment(details.stage || caseData?.stage, Number(details.document_count || 0) > 0)
+            : "PAYMENT_PENDING"
+          : "DOCUMENTS_REQUIRED";
       onStageResolved?.(nextStage);
       await reloadDocuments();
 
       if (selectedResult === "green") {
-        setActionBanner("✓ Assessment passed. Case moved to Payment Pending.");
+        setActionBanner(
+          isApplicationFullyPaid(details)
+            ? "✓ Assessment passed. Payment already confirmed — case moved forward."
+            : "✓ Assessment passed. Case moved to Payment Pending.",
+        );
       } else if (selectedResult === "amber") {
         setActionBanner("⚠ Corrections requested. Email sent to customer.");
       } else {
@@ -1426,6 +1460,8 @@ export function SlideOverPanel({
       toast.success("Message sent to customer.");
       setStaffMessage("");
       setShowSendMessage(false);
+      await reloadThreadMessages();
+      setActiveTab("messages");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to send message.");
     } finally {
@@ -1546,8 +1582,13 @@ export function SlideOverPanel({
         setApostilleReviewNote(updated.review_note);
       }
       if (apostilleQuotedFee.trim() || updated.quoted_fee != null) {
-        onStageResolved?.("PAYMENT_PENDING");
-        setActionBanner("Quoted fee saved. Case moved to Payment Pending.");
+        if (isApplicationFullyPaid(details || {})) {
+          onStageResolved?.(stageAfterPayment(details?.stage || caseData?.stage, Number(details?.document_count || 0) > 0));
+          setActionBanner("Quoted fee saved. Payment already confirmed — stage left after payment.");
+        } else {
+          onStageResolved?.("PAYMENT_PENDING");
+          setActionBanner("Quoted fee saved. Case moved to Payment Pending.");
+        }
       } else {
         setActionBanner("Apostille details saved.");
       }
@@ -1715,11 +1756,16 @@ export function SlideOverPanel({
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={cn(
-                  "px-3 py-1.5 text-xs font-semibold rounded-md transition-colors uppercase",
+                  "px-3 py-1.5 text-xs font-semibold rounded-md transition-colors uppercase inline-flex items-center gap-1.5",
                   activeTab === tab ? "bg-white text-[#102A43] shadow-sm" : "text-[#627D98] hover:text-[#334E68]"
                 )}
               >
                 {tab === "audit" ? "assessment" : tab}
+                {tab === "messages" && (threadUnreadCount > 0 || customerMessageTimeline.some((m) => m.sender === "customer")) ? (
+                  <span className="inline-flex min-w-[16px] h-4 items-center justify-center rounded-full bg-[#0B69B7] px-1 text-[10px] font-bold text-white">
+                    {threadUnreadCount > 0 ? threadUnreadCount : customerMessageTimeline.filter((m) => m.sender === "customer").length}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -1865,17 +1911,37 @@ export function SlideOverPanel({
 
               {activeTab === "messages" && (
                 <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Customer Messages</h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Messages</h3>
+                    <p className="text-[10px] text-[#627D98]">Customer ↔ FlyOCI</p>
+                  </div>
                   {customerMessageTimeline.length > 0 ? (
                     customerMessageTimeline.map((message, index) => (
-                      <div key={`${message.createdAt}-${message.subject}-main-${index}`} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3">
+                      <div
+                        key={`${message.createdAt}-${message.sender}-${message.message.slice(0, 24)}-${index}`}
+                        className={cn(
+                          "rounded-lg border p-3",
+                          message.sender === "customer"
+                            ? "border-[#B7D7F7] bg-[#EFF7FF]"
+                            : "border-[#D9E1EA] bg-[#F8FAFC]",
+                        )}
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <p className="text-xs font-semibold text-[#102A43]">{message.subject}</p>
-                            <p className="text-[10px] text-[#627D98] mt-1">{message.createdAt ? new Date(message.createdAt).toLocaleString() : "Date unknown"}</p>
+                            <p className="text-[10px] text-[#627D98] mt-1">
+                              {message.createdAt ? new Date(message.createdAt).toLocaleString() : "Date unknown"}
+                            </p>
                           </div>
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-white text-[#486581] border-[#D9E1EA]">
-                            {message.sender === "customer" ? "Customer" : "Team"}
+                          <span
+                            className={cn(
+                              "text-[10px] font-semibold px-2 py-0.5 rounded-full border",
+                              message.sender === "customer"
+                                ? "bg-white text-[#0B69B7] border-[#B7D7F7]"
+                                : "bg-white text-[#486581] border-[#D9E1EA]",
+                            )}
+                          >
+                            {message.sender === "customer" ? "Customer" : "FlyOCI"}
                           </span>
                         </div>
                         <p className="mt-2 text-sm text-[#334E68] whitespace-pre-wrap">{message.message}</p>

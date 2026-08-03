@@ -3,6 +3,7 @@
 import {
   Bell,
   Filter,
+  KeyRound,
   LogOut,
   Menu,
   Search,
@@ -18,6 +19,7 @@ import {
   titleForAdminPath,
   useAdminPageChrome,
 } from "@/components/console/AdminPageChromeContext";
+import { StaffChangePasswordModal } from "@/components/console/StaffChangePasswordModal";
 import { dispatchOpenAdminCase } from "@/lib/admin-open-case";
 
 export function TopHeader({
@@ -29,6 +31,7 @@ export function TopHeader({
 }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotificationMenu, setShowNotificationMenu] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openAlertCount, setOpenAlertCount] = useState(0);
   const [notifications, setNotifications] = useState<import("@/lib/admin-auth").AdminNotification[]>([]);
@@ -405,8 +408,19 @@ export function TopHeader({
                     {roleLabel}
                   </span>
                 </div>
-                <div className="border-t border-[#E5EAF0] pt-2">
+                <div className="border-t border-[#E5EAF0] pt-2 space-y-1.5">
                   <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      setShowChangePassword(true);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-[10px] border border-[#D9E1EA] px-3 py-2.5 text-[15px] text-[#334E68] hover:bg-[#F5F7FA]"
+                  >
+                    <KeyRound className="w-4 h-4" /> Change Password
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setShowProfileMenu(false);
                       logout();
@@ -421,6 +435,11 @@ export function TopHeader({
           </div>
         </div>
       </div>
+
+      <StaffChangePasswordModal
+        open={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+      />
 
       {/* Mobile / tablet actions — only when needed, compact scroll row */}
       {hasActions ? (

@@ -20,7 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Eye, EyeOff, GripVertical, LayoutTemplate, RefreshCw, Save } from "lucide-react";
-import { useAdminAuth } from "@/context/AdminAuthContext";
+import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
   getAdminHomepageSettings,
@@ -110,8 +110,7 @@ const DEFAULT_SETTINGS: AdminHomepageSettings = {
 };
 
 export default function AdminHomepageModulesPage() {
-  const { adminUser } = useAdminAuth();
-  const isAdmin = adminUser?.role === "admin";
+  const { canAccess } = useAdminModuleAccess("/admin/homepage");
 
   const [rows, setRows] = useState<AdminHomepageModule[]>([]);
   const [settings, setSettings] = useState<AdminHomepageSettings>(DEFAULT_SETTINGS);
@@ -171,7 +170,7 @@ export default function AdminHomepageModulesPage() {
   );
 
   const handleDragEnd = async (event: DragEndEvent) => {
-    if (!isAdmin || saving) return;
+    if (!canAccess || saving) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -195,7 +194,7 @@ export default function AdminHomepageModulesPage() {
   };
 
   const handleToggle = async (row: AdminHomepageModule) => {
-    if (!isAdmin || saving) return;
+    if (!canAccess || saving) return;
     setSaving(true);
     try {
       const updated = await updateAdminHomepageModule(row.id, { is_active: !row.is_active });
@@ -211,7 +210,7 @@ export default function AdminHomepageModulesPage() {
   };
 
   const handleSaveSettings = async () => {
-    if (!isAdmin || savingSettings) return;
+    if (!canAccess || savingSettings) return;
     setSavingSettings(true);
     try {
       const saved = await updateAdminHomepageSettings({
@@ -232,7 +231,7 @@ export default function AdminHomepageModulesPage() {
   };
 
   const handleToggleFeatured = async (service: AdminService) => {
-    if (!isAdmin || saving) return;
+    if (!canAccess || saving) return;
     setSaving(true);
     try {
       const updated = await updateAdminService(service.id, {
@@ -277,7 +276,7 @@ export default function AdminHomepageModulesPage() {
               min={1}
               max={24}
               value={settingsDraft.pricing_preview_count}
-              disabled={!isAdmin || savingSettings}
+              disabled={!canAccess || savingSettings}
               onChange={(e) =>
                 setSettingsDraft((current) => ({
                   ...current,
@@ -299,7 +298,7 @@ export default function AdminHomepageModulesPage() {
             <input
               type="text"
               value={settingsDraft.pricing_title}
-              disabled={!isAdmin || savingSettings}
+              disabled={!canAccess || savingSettings}
               onChange={(e) => setSettingsDraft((current) => ({ ...current, pricing_title: e.target.value }))}
               className="w-full rounded-[8px] border border-[#D0D7E2] px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/15 disabled:bg-[#F5F7FA]"
             />
@@ -309,7 +308,7 @@ export default function AdminHomepageModulesPage() {
             <input
               type="text"
               value={settingsDraft.pricing_subtitle}
-              disabled={!isAdmin || savingSettings}
+              disabled={!canAccess || savingSettings}
               onChange={(e) =>
                 setSettingsDraft((current) => ({ ...current, pricing_subtitle: e.target.value }))
               }
@@ -321,7 +320,7 @@ export default function AdminHomepageModulesPage() {
         <div className="mt-4 flex justify-end">
           <button
             type="button"
-            disabled={!isAdmin || savingSettings}
+            disabled={!canAccess || savingSettings}
             onClick={() => void handleSaveSettings()}
             className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#1A56DB] px-3 text-sm font-semibold text-white hover:bg-[#1648b8] disabled:opacity-50"
           >
@@ -361,7 +360,7 @@ export default function AdminHomepageModulesPage() {
                     <td className="px-3 py-2.5 text-right">
                       <button
                         type="button"
-                        disabled={!isAdmin || saving}
+                        disabled={!canAccess || saving}
                         onClick={() => void handleToggleFeatured(service)}
                         className={`inline-flex h-8 items-center rounded-[8px] border px-2.5 text-xs font-semibold disabled:opacity-50 ${
                           service.show_on_homepage
@@ -394,9 +393,9 @@ export default function AdminHomepageModulesPage() {
           </div>
         </div>
 
-        {!isAdmin ? (
+        {!canAccess ? (
           <p className="rounded-[8px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-sm text-[#92400E]">
-            Only admins can reorder or show/hide homepage modules.
+            Reordering and visibility changes require the Homepage module permission for your role.
           </p>
         ) : null}
 
@@ -431,7 +430,7 @@ export default function AdminHomepageModulesPage() {
                       <SortableModuleRow
                         key={row.id}
                         row={row}
-                        saving={saving || !isAdmin}
+                        saving={saving || !canAccess}
                         onToggle={handleToggle}
                       />
                     ))

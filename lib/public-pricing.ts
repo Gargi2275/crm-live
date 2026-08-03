@@ -209,7 +209,7 @@ const DETAIL_NOTES: Partial<Record<ServiceTypeCode, string[]>> = {
     "Fully credited against OCI services within 30 days",
   ],
   new_oci: ["End-to-end first-time OCI support", "Assessment credit eligible"],
-  oci_renewal: ["Transfer details to a new passport", "Assessment credit eligible"],
+  oci_renewal: ["Transfer details to a new passport", "Fixed catalog fee at checkout"],
   oci_update: ["Government fee is typically nil", "We handle portal work"],
   evisa_1year: ["Government fee included in total", "Assessment credit does not apply"],
   evisa_5year: ["Government fee included in total", "Assessment credit does not apply"],
@@ -230,9 +230,10 @@ export function formatGbp(amount: number, opts?: { onRequest?: boolean; freeLabe
 }
 
 /**
- * Early / initial assessment fee (OCI only).
- * Prefer active `document_audit` catalog row for OCI; else the selected service's `auditFee`.
- * Returns null when assessment is not offered.
+ * Early / initial assessment fee for a service.
+ * Uses that service's own `auditFee` when defined (>0).
+ * Fresh / New OCI may fall back to the global `document_audit` product.
+ * Returns null when assessment is not offered (customer pays full fee).
  */
 export function getAssessmentFeeGbp(
   services?: CatalogService[] | null,
@@ -243,9 +244,31 @@ export function getAssessmentFeeGbp(
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
-  const isOci = !normalized || normalized.includes("oci") || normalized === "document_audit";
 
-  if (isOci) {
+  // Homepage / no service: show global Assessment product if configured.
+  if (!normalized || normalized === "document_audit") {
+    const auditRow = rows?.find((row) => row.serviceType === "document_audit");
+    if (auditRow) {
+      const fee = auditRow.totalFee > 0 ? auditRow.totalFee : auditRow.auditFee;
+      if (fee > 0) return fee;
+    }
+    if (!normalized) {
+      const freshRow = rows?.find(
+        (row) => String(row.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === "new_oci",
+      );
+      if (freshRow && freshRow.auditFee > 0) return freshRow.auditFee;
+    }
+    return null;
+  }
+
+  // Per-service assessment fee (admin field) — applies to e-OCI, spouse, apostille, etc.
+  const serviceRow = rows?.find(
+    (row) => String(row.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === normalized,
+  );
+  if (serviceRow && serviceRow.auditFee > 0) return serviceRow.auditFee;
+
+  // Fresh OCI only: fall back to global Assessment product when service fee is unset.
+  if (normalized === "new_oci" || normalized === "first_time_oci") {
     const auditRow = rows?.find((row) => row.serviceType === "document_audit");
     if (auditRow) {
       const fee = auditRow.totalFee > 0 ? auditRow.totalFee : auditRow.auditFee;
@@ -253,12 +276,6 @@ export function getAssessmentFeeGbp(
     }
   }
 
-  if (normalized) {
-    const serviceRow = rows?.find(
-      (row) => String(row.serviceType).toLowerCase().replace(/[\s-]+/g, "_") === normalized,
-    );
-    if (serviceRow && serviceRow.auditFee > 0) return serviceRow.auditFee;
-  }
   return null;
 }
 
@@ -348,8 +365,8 @@ export function ctaForServiceType(serviceType: ServiceTypeCode): string {
 }
 
 export function isAuditCreditEligible(serviceType: ServiceTypeCode): boolean {
-  const key = String(serviceType || "").toLowerCase();
-  return key.includes("oci") && key !== "document_audit";
+  const key = String(serviceType || "").toLowerCase().replace(/[\s-]+/g, "_");
+  return key === "new_oci" || key === "first_time_oci";
 }
 
 export function isQuoteBased(_serviceType: ServiceTypeCode, _totalFee: number): boolean {
@@ -391,7 +408,7 @@ export function mapPublicService(raw: PublicPricingService): CatalogService {
       typeof raw.category_display_order === "number" && Number.isFinite(raw.category_display_order)
         ? raw.category_display_order
         : 999,
-    href: hrefForServiceType(serviceType),
+    href: startHrefForServiceType(serviceType),
     cta: ctaForServiceType(serviceType),
     auditCreditEligible: isAuditCreditEligible(serviceType),
     isQuoteBased: isQuoteBased(serviceType, totalFee),

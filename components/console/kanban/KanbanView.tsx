@@ -16,7 +16,7 @@ import {
   FileWarning,
 } from "lucide-react";
 import { listAdminApplications, type AdminApplication } from "@/lib/admin-auth";
-import { KANBAN_COLUMNS, type KanbanStage } from "@/lib/kanban";
+import { KANBAN_COLUMNS, normalizeServiceCategory, type KanbanStage } from "@/lib/kanban";
 import toast from "react-hot-toast";
 
 const STAGE_LABELS: Record<KanbanStage, string> = Object.fromEntries(KANBAN_COLUMNS.map((column) => [column.id, column.title])) as Record<KanbanStage, string>;
@@ -50,12 +50,7 @@ const simplifyNote = (value?: string) => {
 };
 
 const toServiceBucket = (application: AdminApplication): string => {
-  const serviceType = String(application.service_type || "").toLowerCase();
-  const caseType = String(application.case_type || "").toLowerCase();
-  if (caseType.includes("apostille") || serviceType.includes("apostille")) return "Apostille";
-  if (serviceType.includes("passport")) return "Passport Renewal";
-  if (serviceType.includes("evisa") || serviceType.includes("e-visa") || serviceType.includes("e visa") || serviceType.includes("visa")) return "E-Visa";
-  return "OCI";
+  return normalizeServiceCategory(application.service_type, application.case_type, application.service_name);
 };
 
 export function KanbanView({ embedded = false }: { embedded?: boolean }) {

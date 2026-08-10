@@ -8,18 +8,17 @@ import {
   type StaffAccuracyRow,
 } from "@/lib/admin-auth";
 import { motion } from "framer-motion";
-import { Activity, Briefcase, UserCog, Users } from "lucide-react";
+import { Briefcase, UserCog, Users } from "lucide-react";
 import toast from "react-hot-toast";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { DashboardEmbedPanel } from "@/components/console/DashboardEmbedPanel";
 
 type TeamKpiFilter = "all" | "assigned" | "completed";
-type TeamTab = "overview" | "workload" | "performance" | "staff";
+type TeamTab = "overview" | "workload" | "staff";
 
 const TEAM_TABS: Array<{ id: TeamTab; label: string; icon: typeof Users; href?: string }> = [
   { id: "overview", label: "Overview", icon: Users },
   { id: "workload", label: "Workload", icon: UserCog, href: "/admin/workload" },
-  { id: "performance", label: "Performance", icon: Activity, href: "/admin/team-performance" },
   { id: "staff", label: "Staff accounts", icon: Briefcase, href: "/admin/staff" },
 ];
 
@@ -36,9 +35,7 @@ export default function TeamPage() {
         ? "Load & accuracy snapshot"
         : teamTab === "workload"
           ? "Assign & balance work"
-          : teamTab === "performance"
-            ? "Accuracy & revenue"
-            : "Staff accounts",
+          : "Accounts & performance",
     icon: Users,
     syncKey: `${dashboardData ? "loaded" : "loading"}|${accuracyRows.length}|${kpiFilter}|${teamTab}`,
   });
@@ -169,7 +166,7 @@ export default function TeamPage() {
       ) : (
         <>
           <p className="text-xs text-[#627D98]">
-            Snapshot of load and accuracy — switch tabs above for workload, performance, or staff accounts
+            Snapshot of load and accuracy — switch tabs above for workload or staff accounts
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">

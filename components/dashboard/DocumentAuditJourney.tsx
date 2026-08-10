@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, ChevronDown, Eye, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, Clock3, CreditCard, Eye, HelpCircle, MessageSquare, RefreshCcw, Star, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PageLoader } from "@/components/ui/PageLoader";
 import { ConsentCheckboxes } from "@/components/ConsentCheckboxes";
 import { InlineSmartQuestions } from "@/components/checkout/InlineSmartQuestions";
 import { StartOrderPanel, type StartOrderApplicant, type StartOrderCartEntry } from "@/components/dashboard/StartOrderPanel";
+import { sanitizeMobileDigits } from "@/components/checkout/CheckoutShell";
 import toast from "react-hot-toast";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -16,7 +17,9 @@ import {
   createAuditPaymentOrder,
   createCartFullPaymentOrder,
   createFullPaymentOrder,
+  createMiscChargePaymentOrder,
   selectFullPaymentPlan,
+  setApplicationPricingCountry,
   createDocumentDeletionRequest,
   executeDocumentDeletionRequest,
   getApplicationByReference,
@@ -24,6 +27,7 @@ import {
   getAuditStatus,
   getDocumentDeletionRequests,
   getPublicTestimonials,
+  listApplicationMiscCharges,
   openApplicationDocument,
   resubmitApplicationForReview,
   skipAuditWithDisclaimer,
@@ -32,17 +36,28 @@ import {
   uploadDocument,
   verifyAuditPayment,
   verifyCartFullPayment,
+  verifyMiscChargePayment,
   verifyPassportRenewalQuotePayment,
   verifyFullPayment,
+  type CustomerMiscCharge,
   type DocumentDeletionRequestsPayload,
 } from "@/lib/api";
 import { mergeHydratedDocuments, buildChecklistUploadIdMap, documentsFromAuditChecklistItems, inferBackendDocumentTypeFromChecklistId, looksLikeUploadedFileName, resolveChecklistDisplayTitle, type StoredDocumentState } from "@/lib/document-upload-ui";
 import {
+  buildUploadSpecHint,
   fetchDocumentRequirements,
+  fileAcceptFromTypes,
   mapRequirementToChecklistItem,
+  splitGuidanceLines,
   toBackendServiceType,
+  validateDocumentFile,
 } from "@/lib/document-requirements";
 import { formatGbp, getAssessmentFeeGbp, priceDisplay, type CatalogService } from "@/lib/public-pricing";
+import {
+  getStoredPricingCountrySlug,
+  setStoredPricingCountrySlug,
+} from "@/lib/service-country-pricing";
+import { pricingSlugFromCountryName } from "@/lib/country-dial-codes";
 import { usePublicPricing } from "@/hooks/usePublicPricing";
 import {
   clearDependentAnswers,
@@ -114,7 +129,11 @@ type DocumentItem = {
   sample: string;
   sampleUrl?: string | null;
   commonMistakes?: string[];
+  mustHave?: string[];
+  mustNot?: string[];
   specialRequirement?: "apostille" | "bilingual" | "affidavit" | null;
+  allowedFileTypes?: string[];
+  maxFileSizeMb?: number | null;
 };
 
 type GeneratedChecklistResponse = {
@@ -183,6 +202,7 @@ type ApplicationRecord = {
   amount_due_pence?: number;
   service_total_pence?: number;
   fee_plan_code?: string;
+  pricing_country_slug?: string;
   full_payment_status?: string;
   payment_confirmed?: boolean;
   current_stage?: string;
@@ -522,6 +542,7 @@ type DocumentUploadControlsProps = {
   isSubmittedUnderReview: boolean;
   isUploading: boolean;
   uploadLabel?: string;
+  accept?: string;
   disabled?: boolean;
   disabledReason?: string;
   onFileSelect: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -534,6 +555,7 @@ function DocumentUploadControls({
   isSubmittedUnderReview,
   isUploading,
   uploadLabel = "Upload PDF/JPEG/PNG",
+  accept = ".pdf,.jpg,.jpeg,.png",
   disabled = false,
   disabledReason = "Document upload is temporarily unavailable.",
   onFileSelect,
@@ -589,7 +611,7 @@ function DocumentUploadControls({
         {!disabled ? (
           <label className="inline-flex cursor-pointer items-center rounded-xl border border-primary/20 bg-white px-3 py-2 text-xs font-semibold text-primary hover:bg-bg-blue">
             <RefreshCcw className="mr-1.5 h-3.5 w-3.5" /> Upload again
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onFileSelect} />
+            <input type="file" accept={accept} className="hidden" onChange={onFileSelect} />
           </label>
         ) : null}
         {isUploading ? <span className="text-sm text-slate-500">Uploading...</span> : null}
@@ -609,7 +631,7 @@ function DocumentUploadControls({
     <div className="mt-4 flex flex-wrap items-center gap-3">
       <label className="inline-flex cursor-pointer items-center rounded-xl border border-primary/20 bg-white px-4 py-2 text-sm font-semibold text-primary hover:bg-bg-blue">
         <Upload className="mr-2 h-4 w-4" /> {uploadLabel}
-        <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onFileSelect} />
+        <input type="file" accept={accept} className="hidden" onChange={onFileSelect} />
       </label>
       {isUploading ? <span className="text-sm text-slate-500">Uploading...</span> : null}
     </div>
@@ -650,6 +672,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
     fullName: "",
     email: userEmail || "",
     mobile: "",
+    countryCode: "+44",
     applyingFrom: "United Kingdom",
     emailVerified: Boolean(userEmail),
     emailVerificationToken: "",
@@ -687,7 +710,6 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [documents, setDocuments] = useState<Record<string, DocumentState>>(emptyDocStatus);
   const [supportUploads, setSupportUploads] = useState<Record<string, string>>({});
   const [supportNotes, setSupportNotes] = useState("");
-  const [openMistakesId, setOpenMistakesId] = useState<string | null>(null);
   const [expandedChecklistDocIds, setExpandedChecklistDocIds] = useState<Record<string, boolean>>({});
   const [addOns, setAddOns] = useState<string[]>([]);
   const [auditOutcome, setAuditOutcome] = useState<AuditOutcome | null>(null);
@@ -752,6 +774,16 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const [caseSummaryOpen, setCaseSummaryOpen] = useState(false);
   const [paymentConsentsAccepted, setPaymentConsentsAccepted] = useState(false);
   const [uploadConsentsAccepted, setUploadConsentsAccepted] = useState(false);
+  const [miscCharges, setMiscCharges] = useState<CustomerMiscCharge[]>([]);
+  const [miscChargesLoading, setMiscChargesLoading] = useState(false);
+  const [payingChargeId, setPayingChargeId] = useState<number | null>(null);
+  const [focusChargeId, setFocusChargeId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("focusCharge");
+    const id = Number(raw);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  });
+  const pendingChargesRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     stageRef.current = stage;
@@ -760,6 +792,64 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   useEffect(() => {
     preferredFeePlanRef.current = selectedFeePlanCode;
   }, [selectedFeePlanCode]);
+
+  useEffect(() => {
+    const ref = String(resumeReference || referenceNumber || applicationRecord?.reference_number || "").trim();
+    if (!ref) {
+      setMiscCharges([]);
+      return;
+    }
+    let cancelled = false;
+    setMiscChargesLoading(true);
+    void (async () => {
+      try {
+        const rows = await listApplicationMiscCharges(ref);
+        if (!cancelled) setMiscCharges(rows);
+      } catch {
+        if (!cancelled) setMiscCharges([]);
+      } finally {
+        if (!cancelled) setMiscChargesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeReference, referenceNumber, applicationRecord?.reference_number]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("focusCharge");
+    const id = Number(raw);
+    if (Number.isFinite(id) && id > 0) {
+      setFocusChargeId(id);
+    }
+  }, [resumeReference, referenceNumber]);
+
+  useEffect(() => {
+    if (!focusChargeId || miscChargesLoading) return;
+    const hasFocus = miscCharges.some((c) => c.id === focusChargeId);
+    if (hasFocus && pendingChargesRef.current) {
+      pendingChargesRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [focusChargeId, miscCharges, miscChargesLoading]);
+
+  const pendingMiscCharges = useMemo(
+    () => miscCharges.filter((c) => String(c.status).toLowerCase() === "sent"),
+    [miscCharges],
+  );
+
+  const payMiscCharge = async (chargeId: number) => {
+    setPayingChargeId(chargeId);
+    setApiLoading(true);
+    try {
+      const order = await createMiscChargePaymentOrder(chargeId);
+      redirectToStripeCheckout(getStripeCheckoutUrl(order));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to start charge payment.");
+      setPayingChargeId(null);
+      setApiLoading(false);
+    }
+  };
 
   // Opening / refreshing an existing application — never flash the start-order picker.
   useEffect(() => {
@@ -1387,6 +1477,7 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
       quote_expires_at: (response as any).quote_expires_at,
       service_total_pence: response.service_total_pence,
       fee_plan_code: String((response as { fee_plan_code?: string }).fee_plan_code || ""),
+      pricing_country_slug: String((response as { pricing_country_slug?: string }).pricing_country_slug || ""),
       full_payment_status: response.full_payment_status,
       payment_confirmed: response.payment_confirmed,
       current_stage: response.current_stage,
@@ -1477,7 +1568,18 @@ const startApplicationIfNeeded = async (
     clearDraftStorage(resumeReference || referenceNumber || null);
   }
 
-  const payload = await createApplication(mapApplicationServiceType(resolvedService));
+  const payload = await createApplication(mapApplicationServiceType(resolvedService), {
+    pricingCountrySlug:
+      (typeof window !== "undefined"
+        ? (() => {
+            try {
+              return window.localStorage.getItem("flyoci_pricing_country_slug") || "";
+            } catch {
+              return "";
+            }
+          })()
+        : "") || pricingSlugFromCountryName(primaryApplicant?.applyingFrom || ""),
+  });
   const createdApplicationId = Number(payload.application_id || 0);
 
   if (!Number.isFinite(createdApplicationId) || createdApplicationId <= 0) {
@@ -1691,13 +1793,20 @@ useEffect(() => {
 useEffect(() => {
   if (typeof window === "undefined") return;
 
-  // Legacy return from /dashboard/payment after verify — go straight to dashboard.
+  // Legacy return from /dashboard/payment after verify — continue to document upload.
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get("payment") === "success" && !readStripeReturnParams().sessionId) {
       setPostPaymentRedirecting(true);
       toast.success("Payment successful.");
-      router.replace("/dashboard");
+      const ref =
+        String(resumeReference || referenceNumber || applicationRecord?.reference_number || "").trim();
+      if (ref) {
+        router.replace(`/dashboard/document-audit?reference=${encodeURIComponent(ref)}&resume=1`);
+      } else {
+        setStage("checklist");
+        setPostPaymentRedirecting(false);
+      }
       return;
     }
   } catch {
@@ -1757,6 +1866,23 @@ useEffect(() => {
         } catch {
           // ignore
         }
+      } else if (paymentKind === "misc_charge") {
+        const focusRaw =
+          typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search).get("focusCharge")
+            : null;
+        const chargeId = Number(focusRaw);
+        if (!Number.isFinite(chargeId) || chargeId <= 0) {
+          throw new Error("Missing charge id for payment verification.");
+        }
+        await verifyMiscChargePayment(chargeId, sessionId, refNum);
+        if (!active) return;
+        const rows = await listApplicationMiscCharges(refNum);
+        if (!active) return;
+        setMiscCharges(rows);
+        setFocusChargeId(chargeId);
+        toast.success("Charge payment successful.");
+        clearStripeReturnParams();
       } else if (paymentKind === "full") {
         await verifyFullPayment(refNum, sessionId);
         if (!active) return;
@@ -2381,12 +2507,48 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         setPaymentSummaryError(null);
 
         const app = await syncApplicationFromBackend(referenceNumber);
-
         if (!active) return;
+
+        const refNum = String(app.reference_number || referenceNumber || "").trim();
+        const cartMatch = orderCartApps.find(
+          (row) => String(row.referenceNumber || "").trim() === refNum,
+        );
+        const fromApplying = pricingSlugFromCountryName(
+          cartMatch?.applyingFrom || primaryApplicant?.applyingFrom || "",
+        );
+        // Applying From is the source of truth — payment has no country dropdown.
+        const desiredSlug = String(
+          fromApplying || getStoredPricingCountrySlug() || app.pricing_country_slug || "",
+        )
+          .trim()
+          .toLowerCase();
+
+        // Lock price from Applying From — no second country dropdown on payment.
+        if (desiredSlug && refNum) {
+          const currentSlug = String(app.pricing_country_slug || "").trim().toLowerCase();
+          if (currentSlug !== desiredSlug) {
+            try {
+              const updated = await setApplicationPricingCountry(refNum, desiredSlug);
+              if (!active) return;
+              setStoredPricingCountrySlug(desiredSlug);
+              setPaymentSummary({
+                service_label: selectedServiceRecord?.name || app.service_name || "Selected service",
+                service_fee: Number((updated.service_total_pence || 0) / 100),
+                audit_credit: Number((updated.audit_credit_pence || 0) / 100),
+                addons: [],
+                total_due: Number((updated.amount_due_pence || 0) / 100),
+                currency: "GBP",
+              });
+              await syncApplicationFromBackend(refNum, { skipStageSync: true }).catch(() => null);
+              return;
+            } catch {
+              // Fall through to normal snapshot.
+            }
+          }
+        }
 
         const preferred = String(preferredFeePlanRef.current || "").trim().toLowerCase();
         const planCode = String(app.fee_plan_code || "").trim();
-        const refNum = String(app.reference_number || referenceNumber || "").trim();
 
         // Keep Express choice from assessment summary when opening full payment.
         if (preferred === "express" && planCode.toLowerCase() !== "express" && refNum) {
@@ -2440,7 +2602,9 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
     applicationRecord?.audit_skip_disclaimer_accepted,
     applicationRecord?.audit_skipped,
     assessmentOffered,
+    orderCartApps,
     pricingLoading,
+    primaryApplicant?.applyingFrom,
     referenceNumber,
     selectedServiceRecord?.name,
     stage,
@@ -2563,6 +2727,19 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
   const handleDocumentUpload = async (id: string, file?: File | null) => {
     if (!file) {
       updateDocument(id, null);
+      return;
+    }
+
+    const checklistDoc =
+      uploadChecklist.find((doc) => doc.id === id) ||
+      generatedChecklist.find((doc) => doc.id === id) ||
+      null;
+    const validationError = validateDocumentFile(file, {
+      allowedFileTypes: checklistDoc?.allowedFileTypes,
+      maxFileSizeMb: checklistDoc?.maxFileSizeMb,
+    });
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
 
@@ -2914,8 +3091,9 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         serviceId: line.catalogId,
         applicantName: line.applicant.fullName.trim(),
         applicantEmail: line.applicant.email.trim(),
-        applicantMobile: line.applicant.mobile.trim(),
+        applicantMobile: `${line.applicant.countryCode || "+44"}${line.applicant.mobile.trim()}`,
         applyingFrom: line.applicant.applyingFrom,
+        pricingCountrySlug: pricingSlugFromCountryName(line.applicant.applyingFrom || ""),
         applicantEmailVerificationToken: line.applicant.emailVerificationToken || undefined,
       });
       const applicationId = Number(payload.application_id || 0);
@@ -2926,7 +3104,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       createdApps.push({
         applicantName: line.applicant.fullName.trim(),
         applicantEmail: line.applicant.email.trim(),
-        applicantMobile: line.applicant.mobile.trim(),
+        applicantMobile: `${line.applicant.countryCode || "+44"}${line.applicant.mobile.trim()}`,
         applyingFrom: line.applicant.applyingFrom,
         service: line.service,
         applicationId,
@@ -2999,7 +3177,12 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       id: "primary",
       fullName: target.applicantName,
       email: target.applicantEmail,
-      mobile: target.applicantMobile || "",
+      mobile: sanitizeMobileDigits(target.applicantMobile || "", 10),
+      countryCode: (() => {
+        const raw = String(target.applicantMobile || "");
+        const match = raw.match(/^(\+\d{1,4})/);
+        return match?.[1] || "+44";
+      })(),
       applyingFrom: target.applyingFrom || "United Kingdom",
     });
     setShowServicePicker(false);
@@ -4280,6 +4463,110 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 
   return (
     <div className="space-y-6">
+      {(pendingMiscCharges.length > 0 || (focusChargeId && miscCharges.some((c) => c.id === focusChargeId))) ? (
+        <div className="px-4 sm:px-6">
+          <div
+            ref={pendingChargesRef}
+            className={`mx-auto w-full max-w-5xl overflow-hidden rounded-2xl border shadow-sm ${
+              focusChargeId
+                ? "border-amber-300 bg-gradient-to-b from-amber-50 to-white ring-2 ring-amber-200/60"
+                : "border-[#F1D4A8] bg-gradient-to-b from-[#FFF8EE] to-white"
+            }`}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#F1D4A8]/70 px-5 py-4 sm:px-6">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FFF1D6] text-[#B45309]">
+                  <CreditCard className="h-5 w-5" aria-hidden />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#B45309]">Action needed</p>
+                  <h3 className="mt-0.5 text-xl font-heading font-bold text-[#0F1F3D]">Pending charges</h3>
+                  <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600">
+                    FlyOCI added an extra charge on this application. Pay securely with Stripe to keep your case moving.
+                  </p>
+                </div>
+              </div>
+              {miscChargesLoading ? <span className="text-xs text-slate-500">Loading…</span> : null}
+            </div>
+
+            <div className="space-y-3 px-5 py-4 sm:px-6">
+              {(pendingMiscCharges.length
+                ? pendingMiscCharges
+                : miscCharges.filter((c) => c.id === focusChargeId)
+              ).map((charge) => {
+                const isFocused = focusChargeId === charge.id;
+                const isPaid = String(charge.status).toLowerCase() === "paid";
+                const amountMajor = (Number(charge.amount_pence || 0) / 100).toFixed(2);
+                const serviceLabel =
+                  charge.service_name ||
+                  charge.service_type ||
+                  applicationRecord?.service_name ||
+                  applicationRecord?.service_type ||
+                  "";
+                return (
+                  <div
+                    key={charge.id}
+                    className={`rounded-xl border bg-white p-4 sm:p-5 ${
+                      isFocused ? "border-amber-300 shadow-sm" : "border-slate-200/90"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-base font-semibold text-[#0F1F3D]">{charge.description}</p>
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
+                              isPaid
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-amber-200 bg-amber-50 text-amber-800"
+                            }`}
+                          >
+                            {isPaid ? "Paid" : "Awaiting payment"}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
+                          {charge.reference_number || applicationRecord?.reference_number ? (
+                            <span>
+                              Ref{" "}
+                              <span className="font-medium text-[#0F1F3D]">
+                                {charge.reference_number || applicationRecord?.reference_number}
+                              </span>
+                            </span>
+                          ) : null}
+                          {serviceLabel ? (
+                            <span>
+                              Service <span className="font-medium text-[#0F1F3D]">{serviceLabel}</span>
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-2xl font-heading font-bold tracking-tight text-[#0F1F3D]">
+                          GBP {amountMajor}
+                        </p>
+                      </div>
+                      {isPaid ? (
+                        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Payment received
+                        </span>
+                      ) : (
+                        <Button
+                          type="button"
+                          disabled={apiLoading || payingChargeId === charge.id}
+                          onClick={() => void payMiscCharge(charge.id)}
+                          className="shrink-0 min-w-[160px]"
+                        >
+                          {payingChargeId === charge.id ? "Redirecting to Stripe…" : "Pay this charge"}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {orderCartApps.length > 1 && stage !== "service" ? (
         <div className="rounded-2xl border border-[#c7dbf5] bg-[#f3f8ff] px-4 py-3">
           <p className="text-sm font-semibold text-[#0B69B7]">
@@ -4322,7 +4609,13 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       ) : null}
 
       {stage === "service" ? null : bannerMessage ? (
-        <p className="text-sm text-slate-600">{bannerMessage}</p>
+        <p
+          className={`text-sm text-slate-500 ${
+            stage === "processing" ? "mx-auto max-w-5xl px-4 text-center sm:px-6" : ""
+          }`}
+        >
+          {bannerMessage}
+        </p>
       ) : null}
 
       {customerMessages.length > 0 ? (
@@ -4374,7 +4667,13 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
     accountEmail={userEmail || user?.email || ""}
     apiLoading={apiLoading || pricingLoading}
     error={applicationStartError}
-    onPrimaryChange={(patch) => setPrimaryApplicant((current) => ({ ...current, ...patch }))}
+    onPrimaryChange={(patch) =>
+      setPrimaryApplicant((current) => ({
+        ...current,
+        ...patch,
+        ...(patch.mobile !== undefined ? { mobile: sanitizeMobileDigits(patch.mobile, 10) } : {}),
+      }))
+    }
     onAddApplicant={() => {
       setExtraApplicants((prev) => [
         ...prev,
@@ -4383,6 +4682,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
           fullName: "",
           email: "",
           mobile: "",
+          countryCode: primaryApplicant.countryCode || "+44",
           applyingFrom: primaryApplicant.applyingFrom || "United Kingdom",
           emailVerified: false,
           emailVerificationToken: "",
@@ -4390,7 +4690,17 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       ]);
     }}
     onUpdateApplicant={(id, patch) => {
-      setExtraApplicants((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+      setExtraApplicants((prev) =>
+        prev.map((row) =>
+          row.id === id
+            ? {
+                ...row,
+                ...patch,
+                ...(patch.mobile !== undefined ? { mobile: sanitizeMobileDigits(patch.mobile, 10) } : {}),
+              }
+            : row,
+        ),
+      );
     }}
     onRemoveApplicant={(id) => {
       setExtraApplicants((prev) => prev.filter((row) => row.id !== id));
@@ -4520,7 +4830,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 
       {stage === "checklist" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Your Required Documents</h3>
+          <h3 className="text-2xl font-heading font-bold text-[#0F1F3D]">Your Required Documents</h3>
           <p className="mt-2 text-textMuted">
             Based on your answers, we generated a personalised checklist for {selectedServiceRecord ? selectedServiceRecord.name : "your selected service"}. Upload the required documents below after payment.
           </p>
@@ -4531,7 +4841,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
             </p>
           ) : null}
           {messageRequestedDocIds.length > 0 ? (
-            <p className="mt-2 text-sm text-primary">
+            <p className="mt-2 text-sm text-[#0F1F3D]">
               Showing only the document requested by the FlyOCI team from your message thread.
             </p>
           ) : null}
@@ -4562,7 +4872,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
               >
                 {section.heading ? (
                   <>
-                    <h4 className="text-lg font-heading font-semibold text-primary">{section.heading}</h4>
+                    <h4 className="text-lg font-heading font-semibold text-[#0F1F3D]">{section.heading}</h4>
                     {section.subtitle ? <p className="mt-1 text-sm text-textMuted">{section.subtitle}</p> : null}
                   </>
                 ) : null}
@@ -4585,7 +4895,16 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                 : flaggedMatch
                   ? "pending_reupload"
                   : "not_uploaded";
-              const mistakeItems = Array.isArray(doc.commonMistakes) ? doc.commonMistakes : [];
+              const mistakeItems =
+                Array.isArray(doc.mustNot) && doc.mustNot.length
+                  ? doc.mustNot
+                  : Array.isArray(doc.commonMistakes) && doc.commonMistakes.length
+                    ? doc.commonMistakes
+                    : splitGuidanceLines(doc.mistakes);
+              const mustHaveItems =
+                Array.isArray(doc.mustHave) && doc.mustHave.length
+                  ? doc.mustHave
+                  : splitGuidanceLines(doc.sample);
               const specialLabel =
                 doc.specialRequirement === "apostille"
                   ? "Apostille required"
@@ -4612,7 +4931,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-base font-semibold text-primary">{doc.title}</p>
+                            <p className="text-base font-semibold text-[#0F1F3D]">{doc.title}</p>
                             <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${doc.required ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
                               {doc.required ? "Required" : "Optional"}
                             </span>
@@ -4657,7 +4976,33 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 
                   {isExpanded ? (
                     <>
-                      <p className="mt-3 text-sm text-slate-600">{doc.description}</p>
+                      {doc.description ? (
+                        <p className="mt-3 text-sm text-slate-600">{doc.description}</p>
+                      ) : null}
+                      {(mustHaveItems.length > 0 || mistakeItems.length > 0) ? (
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          {mustHaveItems.length > 0 ? (
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
+                              <p className="font-semibold">Must include</p>
+                              <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                                {mustHaveItems.map((item, idx) => (
+                                  <li key={`${doc.id}-must-${idx}`}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {mistakeItems.length > 0 ? (
+                            <div className="rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-3 text-sm text-rose-900">
+                              <p className="font-semibold">Must not</p>
+                              <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                                {mistakeItems.map((item, idx) => (
+                                  <li key={`${doc.id}-not-${idx}`}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {flaggedMatch ? (
                         <p className="mt-1 text-xs font-medium text-amber-800">Flagged document: {flaggedDocLabel}</p>
                       ) : null}
@@ -4670,27 +5015,13 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                       {flaggedMatch?.required_action ? (
                         <p className="mt-1 text-xs text-amber-800">Action: {flaggedMatch.required_action}</p>
                       ) : null}
-                      <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-500">
-                        {doc.sampleUrl ? (
-                          <a href={doc.sampleUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">View sample</a>
-                        ) : null}
-                        {doc.sampleUrl ? <span>•</span> : null}
-                        <button type="button" onClick={() => setOpenMistakesId(openMistakesId === doc.id ? null : doc.id)} className="text-slate-600 hover:underline">Common mistakes</button>
-                      </div>
-
-                  {openMistakesId === doc.id ? (
-                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                      {mistakeItems.length > 0 ? (
-                        <ul className="list-disc pl-4 space-y-1">
-                          {mistakeItems.map((mistake, idx) => (
-                            <li key={`${doc.id}-mistake-${idx}`}>{mistake}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p>No common mistakes listed.</p>
-                      )}
-                    </div>
-                  ) : null}
+                      {doc.sampleUrl ? (
+                        <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-500">
+                          <a href={doc.sampleUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                            View sample
+                          </a>
+                        </div>
+                      ) : null}
 
                   <DocumentUploadControls
                     docState={documents[doc.id]}
@@ -4698,6 +5029,8 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                     isSubmittedUnderReview={isSubmittedUnderReview}
                     isUploading={uploadingDocId === doc.id}
                     disabled={false}
+                    accept={fileAcceptFromTypes(doc.allowedFileTypes)}
+                    uploadLabel={`Upload ${buildUploadSpecHint(doc.allowedFileTypes, doc.maxFileSizeMb)}`}
                     onFileSelect={(event) => handleDocumentFileInputChange(doc.id, event)}
                     onView={() => {
                       void handleViewDocument(documents[doc.id]);
@@ -5237,6 +5570,12 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                                     isUploaded={item.isUploaded}
                                     isSubmittedUnderReview={false}
                                     isUploading={uploadingDocId === item.documentId}
+                                    accept={fileAcceptFromTypes(
+                                      (
+                                        uploadChecklist.find((doc) => doc.id === item.documentId) ||
+                                        generatedChecklist.find((doc) => doc.id === item.documentId)
+                                      )?.allowedFileTypes,
+                                    )}
                                     uploadLabel="Upload corrected file"
                                     onFileSelect={(event) => handleDocumentFileInputChange(item.documentId, event)}
                                     onView={() => {
@@ -5271,6 +5610,12 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                                   isUploaded={item.isUploaded}
                                   isSubmittedUnderReview={false}
                                   isUploading={uploadingDocId === item.documentId}
+                                  accept={fileAcceptFromTypes(
+                                    (
+                                      uploadChecklist.find((doc) => doc.id === item.documentId) ||
+                                      generatedChecklist.find((doc) => doc.id === item.documentId)
+                                    )?.allowedFileTypes,
+                                  )}
                                   uploadLabel="Upload corrected file"
                                   onFileSelect={(event) => handleDocumentFileInputChange(item.documentId, event)}
                                   onView={() => {
@@ -5412,7 +5757,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 
       {stage === "full-payment" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">Full Service Payment</h3>
+          <h3 className="text-2xl font-heading font-bold text-[#0F1F3D]">Full Service Payment</h3>
           <p className="mt-2 text-textMuted">
             {assessmentOffered
               ? "After your document check is approved, pay the remaining service amount."
@@ -5452,7 +5797,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
             return (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 bg-[#fcfdff] p-5">
-              <h4 className="font-semibold text-primary">Payment summary</h4>
+              <h4 className="font-semibold text-[#0F1F3D]">Payment summary</h4>
               {paymentSummaryLoading ? (
                 <div className="mt-4 space-y-2 animate-pulse">
                   <div className="h-5 rounded bg-slate-200" />
@@ -5552,33 +5897,33 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                           </div>
                         );
                       })}
-                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary">
+                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-[#0F1F3D]">
                         <span className="font-semibold">Order total</span>
                         <strong>£{paymentSummary.total_due.toFixed(2)}</strong>
                       </p>
                     </>
                   ) : (
                     <>
-                      <p className="flex justify-between"><span>Service ({paymentSummary.service_label})</span><strong>£{paymentSummary.service_fee.toFixed(2)}</strong></p>
+                      <p className="flex justify-between"><span>Service ({paymentSummary.service_label})</span><strong className="text-[#0F1F3D]">£{paymentSummary.service_fee.toFixed(2)}</strong></p>
                       {paymentSummary.audit_credit > 0 ? (
                         <>
-                          <p className="flex justify-between"><span>Assessment credit</span><strong>- £{paymentSummary.audit_credit.toFixed(2)}</strong></p>
+                          <p className="flex justify-between"><span>Assessment credit</span><strong className="text-[#0F1F3D]">- £{paymentSummary.audit_credit.toFixed(2)}</strong></p>
                           <p className="text-xs text-slate-500">
                             Assessment credit applies when you pay within {AUDIT_CREDIT_VALIDITY_DAYS} days of your assessment fee payment.
                           </p>
                         </>
                       ) : null}
                       {paymentSummary.addons.map((addon) => (
-                        <p key={addon.label} className="flex justify-between"><span>{addon.label}</span><strong>£{addon.amount.toFixed(2)}</strong></p>
+                        <p key={addon.label} className="flex justify-between"><span>{addon.label}</span><strong className="text-[#0F1F3D]">£{addon.amount.toFixed(2)}</strong></p>
                       ))}
-                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary"><span className="font-semibold">Total due</span><strong>£{paymentSummary.total_due.toFixed(2)}</strong></p>
+                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-[#0F1F3D]"><span className="font-semibold">Total due</span><strong>£{paymentSummary.total_due.toFixed(2)}</strong></p>
                     </>
                   )}
                 </div>
               ) : null}
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <h4 className="font-semibold text-primary">Confirm & pay</h4>
+              <h4 className="font-semibold text-[#0F1F3D]">Confirm & pay</h4>
               <p className="mt-3 text-sm text-slate-600">On successful payment, your status moves to Service Confirmed – In Process and notifications are sent by email and WhatsApp.</p>
               <div className="mt-5">
                 <ConsentCheckboxes mode="payment" onAcceptanceChange={setPaymentConsentsAccepted} />
@@ -5600,7 +5945,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 
               {!cartCanCombineFullPayment(orderCartApps) && (hasExpress || checkoutPlans.length > 1) ? (
                 <div className="mt-5 border-t border-slate-200 pt-4">
-                  <p className="text-sm font-semibold text-primary">
+                  <p className="text-sm font-semibold text-[#0F1F3D]">
                     {expressSelected ? "Express service" : "Processing speed"}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
@@ -5636,7 +5981,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                                 : "Standard processing fee"}
                             </span>
                           </span>
-                          <span className={`shrink-0 text-[14px] font-bold ${isExpress ? "text-[#c2410c]" : "text-[#1A56DB]"}`}>
+                          <span className={`shrink-0 text-[14px] font-bold ${isExpress ? "text-[#c2410c]" : "text-[#0F1F3D]"}`}>
                             £{plan.fee.toFixed(2)}
                           </span>
                         </button>
@@ -5726,7 +6071,8 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       )}
 
       {stage === "processing" && (
-        <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
+        <div className="px-4 sm:px-6">
+          <div className="mx-auto w-full max-w-5xl space-y-4">
           {(() => {
             const rawServiceType = String(applicationRecord?.service_type || "").toLowerCase().replace(/[\s-]+/g, "_");
             const processingEstimate =
@@ -5755,6 +6101,9 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
               ["submitted", "approved", "completed", "delivered", "dispatched", "collected"].includes(applicationStatusKey) ||
               Boolean(String(applicationRecord?.submission_date || "").trim()) ||
               Boolean(extractedGovRef);
+            const actionNeeded = ["correction_requested", "rejected", "reuploaded_pending_review"].includes(
+              applicationStatusKey
+            );
             const friendlyStatus = (() => {
               if (embassySubmitted) {
                 if (
@@ -5765,7 +6114,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                 }
                 return "Submitted to embassy / VFS";
               }
-              if (["correction_requested", "rejected", "reuploaded_pending_review"].includes(applicationStatusKey)) {
+              if (actionNeeded) {
                 return "Action needed";
               }
               if (
@@ -5778,92 +6127,176 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
               return String(raw).replaceAll("_", " ");
             })();
 
+            const statusTone = embassySubmitted
+              ? {
+                  shell: "border-emerald-200/80 bg-white",
+                  iconWrap: "bg-emerald-50 text-emerald-600",
+                  label: "text-emerald-600",
+                  value: "text-[#0F1F3D]",
+                }
+              : actionNeeded
+                ? {
+                    shell: "border-amber-200/80 bg-white",
+                    iconWrap: "bg-amber-50 text-amber-600",
+                    label: "text-amber-600",
+                    value: "text-[#0F1F3D]",
+                  }
+                : {
+                    shell: "border-[#D6E6F8] bg-white",
+                    iconWrap: "bg-[#EEF5FC] text-[#1A56DB]",
+                    label: "text-[#1A56DB]",
+                    value: "text-[#0F1F3D]",
+                  };
+
             return (
               <>
                 <div
-                  className={`rounded-2xl border p-5 space-y-2 ${
+                  className={`rounded-2xl border p-5 sm:p-6 space-y-3 shadow-sm ${
                     embassySubmitted
-                      ? "border-emerald-200 bg-emerald-50"
-                      : "border-sky-200 bg-sky-50"
+                      ? "border-emerald-200/70 bg-[#F3FBF7]"
+                      : "border-[#D6E6F8] bg-[#F7FAFD]"
                   }`}
                 >
-                  <h3
-                    className={`text-xl font-heading font-bold ${
-                      embassySubmitted ? "text-emerald-800" : "text-sky-900"
-                    }`}
-                  >
+                  <h3 className="text-xl sm:text-2xl font-heading font-bold text-[#0F1F3D]">
                     {embassySubmitted
                       ? "Your application has been submitted to the embassy / VFS."
                       : "Your application is being prepared by FlyOCI."}
                   </h3>
-                  {applicationRecord?.reference_number ? (
-                    <p className={`text-sm ${embassySubmitted ? "text-emerald-900" : "text-sky-900"}`}>
-                      <span className="font-semibold">Reference:</span> {applicationRecord.reference_number}
-                    </p>
-                  ) : null}
-                  {applicationRecord?.service_name || applicationRecord?.service_type ? (
-                    <p className={`text-sm ${embassySubmitted ? "text-emerald-900" : "text-sky-900"}`}>
-                      <span className="font-semibold">Service:</span>{" "}
-                      {applicationRecord?.service_name || applicationRecord?.service_type}
-                    </p>
-                  ) : null}
-                  {embassySubmitted ? (
-                    displaySubmissionDate ? (
-                      <p className="text-sm text-emerald-900">
-                        <span className="font-semibold">Submitted on:</span>{" "}
-                        {new Date(displaySubmissionDate).toLocaleDateString()}
+                  <div className="space-y-1 text-sm text-slate-600">
+                    {applicationRecord?.reference_number ? (
+                      <p>
+                        <span className="font-medium text-slate-500">Reference:</span>{" "}
+                        <span className="font-semibold text-[#0F1F3D]">{applicationRecord.reference_number}</span>
                       </p>
+                    ) : null}
+                    {applicationRecord?.service_name || applicationRecord?.service_type ? (
+                      <p>
+                        <span className="font-medium text-slate-500">Service:</span>{" "}
+                        <span className="font-semibold text-[#0F1F3D]">
+                          {applicationRecord?.service_name || applicationRecord?.service_type}
+                        </span>
+                      </p>
+                    ) : null}
+                    {embassySubmitted ? (
+                      displaySubmissionDate ? (
+                        <p>
+                          <span className="font-medium text-slate-500">Submitted on:</span>{" "}
+                          <span className="font-semibold text-[#0F1F3D]">
+                            {new Date(displaySubmissionDate).toLocaleDateString()}
+                          </span>
+                        </p>
+                      ) : (
+                        <p>Submission date will be confirmed shortly.</p>
+                      )
                     ) : (
-                      <p className="text-sm text-emerald-900">Submission date will be confirmed shortly.</p>
-                    )
-                  ) : (
-                    <p className="text-sm text-sky-900">
-                      Our team is reviewing your documents and preparing your file. You will be notified when it is
-                      submitted to the embassy / VFS.
-                    </p>
-                  )}
-                  {extractedGovRef ? (
-                    <p className={`text-sm ${embassySubmitted ? "text-emerald-900" : "text-sky-900"}`}>
-                      <span className="font-semibold">Government reference:</span> {extractedGovRef}
-                    </p>
-                  ) : null}
+                      <p className="text-slate-600 leading-relaxed">
+                        Our team is reviewing your documents and preparing your file. You will be notified when it is
+                        submitted to the embassy / VFS.
+                      </p>
+                    )}
+                    {extractedGovRef ? (
+                      <p>
+                        <span className="font-medium text-slate-500">Government reference:</span>{" "}
+                        <span className="font-semibold text-[#0F1F3D]">{extractedGovRef}</span>
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div
+                    className={`mt-1 flex items-center gap-3 rounded-xl border px-4 py-3.5 shadow-sm ${statusTone.shell}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${statusTone.iconWrap}`}
+                    >
+                      {embassySubmitted ? (
+                        <CheckCircle2 className="h-5 w-5" aria-hidden />
+                      ) : (
+                        <Clock3 className="h-5 w-5" aria-hidden />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${statusTone.label}`}>
+                        Current status
+                      </p>
+                      <p className={`mt-0.5 text-lg font-heading font-bold leading-tight ${statusTone.value}`}>
+                        {friendlyStatus}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                <p className="mt-3 text-sm text-textMuted">Current status: {friendlyStatus}</p>
-
                 {selectedService === "passport-renewal" && embassySubmitted && (
-                  <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-5">
-                    <p className="text-sm text-blue-900"><span className="font-semibold">Your documents will be received on email</span> once the government completes your application.</p>
+                  <div className="rounded-2xl border border-[#D6E6F8] bg-[#F7FAFD] p-5 shadow-sm">
+                    <p className="text-sm text-slate-600">
+                      <span className="font-semibold text-[#0F1F3D]">Your documents will be received on email</span> once
+                      the government completes your application.
+                    </p>
                   </div>
                 )}
 
-                <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
-                  <h4 className="font-semibold text-primary">Estimated processing time</h4>
-                  <p className="mt-3 text-sm text-slate-600">Estimated processing time: {processingEstimate}</p>
-                  <p className="mt-2 text-sm text-slate-600">Processing times are set by the embassy and may vary. FlyOCI will notify you of any updates by email and WhatsApp.</p>
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+                  <h4 className="text-sm font-semibold tracking-wide text-[#1A56DB]">Estimated processing time</h4>
+                  <p className="mt-2 text-2xl font-heading font-bold text-[#0F1F3D]">{processingEstimate}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                    Processing times are set by the embassy and may vary. FlyOCI will notify you of any updates by email
+                    and WhatsApp.
+                  </p>
                 </div>
 
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-                  <h4 className="font-semibold text-primary">What to expect next</h4>
-                  <div className="mt-3 space-y-2 text-sm text-slate-600">
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+                  <h4 className="text-sm font-semibold tracking-wide text-[#1A56DB]">What to expect next</h4>
+                  <ul className="mt-3 space-y-2.5 text-sm leading-relaxed text-slate-600">
                     {embassySubmitted ? (
                       <>
-                        <p>The embassy is reviewing your application. No action is needed from you at this stage.</p>
-                        <p>If the embassy requires anything additional, FlyOCI will contact you directly and update your portal.</p>
-                        <p>Once a decision is received, you will be notified immediately by email and WhatsApp.</p>
+                        <li className="flex gap-2.5">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1A56DB]" aria-hidden />
+                          <span>The embassy is reviewing your application. No action is needed from you at this stage.</span>
+                        </li>
+                        <li className="flex gap-2.5">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1A56DB]" aria-hidden />
+                          <span>If the embassy requires anything additional, FlyOCI will contact you directly and update your portal.</span>
+                        </li>
+                        <li className="flex gap-2.5">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1A56DB]" aria-hidden />
+                          <span>Once a decision is received, you will be notified immediately by email and WhatsApp.</span>
+                        </li>
                       </>
                     ) : (
                       <>
-                        <p>FlyOCI is preparing and reviewing your application. No action is needed from you right now.</p>
-                        <p>If anything is missing, we will contact you and update your portal.</p>
-                        <p>Once your file is submitted to the embassy / VFS, your status will update automatically.</p>
+                        {pendingMiscCharges.length > 0 ? (
+                          <li className="flex gap-2.5">
+                            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+                            <span>
+                              Please pay any pending charges above so we can continue without delay.
+                            </span>
+                          </li>
+                        ) : null}
+                        <li className="flex gap-2.5">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1A56DB]" aria-hidden />
+                          <span>
+                            {pendingMiscCharges.length > 0
+                              ? "Once payment is received, FlyOCI will continue preparing and reviewing your application."
+                              : "FlyOCI is preparing and reviewing your application. No action is needed from you right now."}
+                          </span>
+                        </li>
+                        <li className="flex gap-2.5">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1A56DB]" aria-hidden />
+                          <span>If anything is missing, we will contact you and update your portal.</span>
+                        </li>
+                        <li className="flex gap-2.5">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1A56DB]" aria-hidden />
+                          <span>Once your file is submitted to the embassy / VFS, your status will update automatically.</span>
+                        </li>
                       </>
                     )}
-                  </div>
+                  </ul>
                 </div>
               </>
             );
           })()}
+          </div>
         </div>
       )}
 

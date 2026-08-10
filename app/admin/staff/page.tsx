@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { motion } from "framer-motion";
 import {
   Activity,
+  BarChart3,
   Briefcase,
   Eye,
   EyeOff,
@@ -14,6 +15,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Table2,
   Trash2,
   UserCheck,
   UserMinus,
@@ -41,9 +43,12 @@ import {
   type AdminStaffUser,
   type AdminTaskItem,
   type AccessScope,
+  type TeamPerformancePeriod,
 } from "@/lib/admin-auth";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import { ConfirmDialog } from "@/components/console/ConfirmDialog";
+import { TeamPerformanceCharts } from "@/components/console/TeamPerformanceCharts";
+import { TeamPerformanceGrid } from "@/components/console/TeamPerformanceGrid";
 import {
   StaffWorkloadSlideOver,
   type StaffWorkloadSummary,
@@ -52,9 +57,17 @@ import { PageLoader } from "@/components/ui/PageLoader";
 
 const ACCESS_SCOPES: AccessScope[] = ["all", "easyfly_only", "exclude_easyfly"];
 
-type StaffPageTab = "accounts" | "summary";
+type StaffPageTab = "accounts" | "performance";
+type PerformanceViewTab = "table" | "graphs";
 
 type StaffWorkloadRow = AdminDashboardOverview["staff_members"][number];
+
+const TEAM_PERIOD_OPTIONS: { key: TeamPerformancePeriod; label: string }[] = [
+  { key: "day", label: "Today" },
+  { key: "week", label: "Last 7 days" },
+  { key: "month", label: "Last 30 days" },
+  { key: "all", label: "All time" },
+];
 
 const emptyForm = () => ({
   full_name: "",
@@ -101,8 +114,14 @@ function loadStatusStyles(status: string) {
 
 function AdminStaffPageInner() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const initialTab: StaffPageTab = searchParams.get("tab") === "summary" ? "summary" : "accounts";
+  /** When staff is embedded (e.g. Team overview), keep tab switches local — don't leave the host route. */
+  const isEmbedded = !pathname?.startsWith("/admin/staff");
+  const initialTab: StaffPageTab =
+    searchParams.get("tab") === "summary" || searchParams.get("tab") === "performance"
+      ? "performance"
+      : "accounts";
   const [tab, setTab] = useState<StaffPageTab>(initialTab);
 
   const [staff, setStaff] = useState<AdminStaffUser[]>([]);
@@ -112,6 +131,9 @@ function AdminStaffPageInner() {
   const [workloadRows, setWorkloadRows] = useState<StaffWorkloadRow[]>([]);
   const [workloadLoading, setWorkloadLoading] = useState(false);
   const [workloadLoaded, setWorkloadLoaded] = useState(false);
+  const [performanceView, setPerformanceView] = useState<PerformanceViewTab>("table");
+  const [teamPeriod, setTeamPeriod] = useState<TeamPerformancePeriod>("month");
+  const [performanceData, setPerformanceData] = useState<AdminDashboardOverview | null>(null);
   const [taskItems, setTaskItems] = useState<AdminTaskItem[]>([]);
   const [internalMessages, setInternalMessages] = useState<AdminStaffInternalMessage[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<StaffWorkloadSummary | null>(null);
@@ -131,7 +153,8 @@ function AdminStaffPageInner() {
 
   const selectTab = (next: StaffPageTab) => {
     setTab(next);
-    const qs = next === "summary" ? "?tab=summary" : "";
+    if (isEmbedded) return;
+    const qs = next === "performance" ? "?tab=performance" : "";
     router.replace(`/admin/staff${qs}`, { scroll: false });
   };
 
@@ -167,7 +190,7 @@ function AdminStaffPageInner() {
     setWorkloadLoading(true);
     try {
       const [overview, tasks, notes] = await Promise.all([
-        getAdminDashboardOverview({ teamPeriod: "month" }),
+        getAdminDashboardOverview({ teamPeriod }),
         listAdminTasks({ limit: 500 }).catch(() => [] as AdminTaskItem[]),
         getAdminInternalMessagesFeed(80).catch(() => [] as AdminStaffInternalMessage[]),
       ]);
@@ -179,30 +202,32 @@ function AdminStaffPageInner() {
         })
         .sort((a, b) => b.pending - a.pending || b.assigned - a.assigned);
       setWorkloadRows(rows);
+      setPerformanceData(overview);
       setTaskItems(tasks);
       setInternalMessages(notes);
       setWorkloadLoaded(true);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load staff summary.");
+      toast.error(error instanceof Error ? error.message : "Failed to load performance.");
     } finally {
       setWorkloadLoading(false);
     }
-  }, []);
+  }, [teamPeriod]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    if (tab === "summary" && !workloadLoaded && !workloadLoading) {
-      void loadWorkloadSummary();
-    }
-  }, [tab, workloadLoaded, workloadLoading, loadWorkloadSummary]);
+    if (tab !== "performance") return;
+    void loadWorkloadSummary();
+  }, [tab, teamPeriod, loadWorkloadSummary]);
 
   useEffect(() => {
-    const next = searchParams.get("tab") === "summary" ? "summary" : "accounts";
+    if (isEmbedded) return;
+    const raw = searchParams.get("tab");
+    const next: StaffPageTab = raw === "summary" || raw === "performance" ? "performance" : "accounts";
     setTab(next);
-  }, [searchParams]);
+  }, [searchParams, isEmbedded]);
 
   const selectedStaffTasks = useMemo(() => {
     if (!selectedStaff) return [];
@@ -536,17 +561,17 @@ function AdminStaffPageInner() {
 
   useSetAdminPageChrome({
     title: "Staff Management",
-    subtitle: tab === "summary" ? "Workload & case load by staff" : "Accounts, roles & access",
+    subtitle: tab === "performance" ? "Performance, accuracy & staff load" : "Accounts, roles & access",
     icon: Briefcase,
-    syncKey: `${tab}|${loading}|${workloadLoading}|${staff.length}|${statusFilter}|${filteredStaff.length}|${workloadRows.length}`,
+    syncKey: `${tab}|${loading}|${workloadLoading}|${staff.length}|${statusFilter}|${filteredStaff.length}|${workloadRows.length}|${teamPeriod}|${performanceView}`,
     actions: (
       <>
         <button
           type="button"
-          onClick={() => void (tab === "summary" ? loadWorkloadSummary() : load())}
+          onClick={() => void (tab === "performance" ? loadWorkloadSummary() : load())}
           className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
         >
-          <RefreshCw className={`h-4 w-4 ${tab === "summary" ? (workloadLoading ? "animate-spin" : "") : loading ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-4 w-4 ${tab === "performance" ? (workloadLoading ? "animate-spin" : "") : loading ? "animate-spin" : ""}`} />
           Refresh
         </button>
         {tab === "accounts" ? (
@@ -562,6 +587,13 @@ function AdminStaffPageInner() {
       </>
     ),
   });
+
+  const periodLabel =
+    performanceData?.team_performance?.label ||
+    TEAM_PERIOD_OPTIONS.find((option) => option.key === teamPeriod)?.label ||
+    "Last 30 days";
+  const performanceStaff = performanceData?.staff_members ?? [];
+  const revenueNote = performanceData?.staff_revenue_summary?.attribution_note;
 
   return (
     <motion.div
@@ -582,16 +614,16 @@ function AdminStaffPageInner() {
         </button>
         <button
           type="button"
-          onClick={() => selectTab("summary")}
+          onClick={() => selectTab("performance")}
           className={`rounded-[8px] px-3.5 py-1.5 text-xs font-semibold transition ${
-            tab === "summary" ? "bg-[#1A56DB] text-white shadow-sm" : "text-[#486581] hover:bg-[#F5F7FA]"
+            tab === "performance" ? "bg-[#1A56DB] text-white shadow-sm" : "text-[#486581] hover:bg-[#F5F7FA]"
           }`}
         >
-          Staff summary
+          Performance
         </button>
       </div>
 
-      {tab === "summary" ? (
+      {tab === "performance" ? (
         <>
           <StaffWorkloadSlideOver
             isOpen={Boolean(selectedStaff)}
@@ -601,6 +633,70 @@ function AdminStaffPageInner() {
             allTasks={selectedStaffTasks}
             internalNotes={selectedStaffNotes}
           />
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex rounded-[10px] border border-[#D9E1EA] bg-white p-1">
+              <button
+                type="button"
+                onClick={() => setPerformanceView("table")}
+                className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-semibold transition ${
+                  performanceView === "table"
+                    ? "bg-[#009877] text-white shadow-sm"
+                    : "text-[#486581] hover:bg-[#F5F7FA]"
+                }`}
+              >
+                <Table2 className="h-3.5 w-3.5" />
+                Table
+              </button>
+              <button
+                type="button"
+                onClick={() => setPerformanceView("graphs")}
+                className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-semibold transition ${
+                  performanceView === "graphs"
+                    ? "bg-[#009877] text-white shadow-sm"
+                    : "text-[#486581] hover:bg-[#F5F7FA]"
+                }`}
+              >
+                <BarChart3 className="h-3.5 w-3.5" />
+                Graphs
+              </button>
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs text-[#486581]">
+              <span className="font-semibold">Period</span>
+              <select
+                value={teamPeriod}
+                onChange={(e) => setTeamPeriod(e.target.value as TeamPerformancePeriod)}
+                className="rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#102A43]"
+                disabled={workloadLoading}
+              >
+                {TEAM_PERIOD_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {workloadLoading && !performanceData ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#D9E1EA] border-t-[#009877]" />
+            </div>
+          ) : performanceView === "table" ? (
+            <>
+              <TeamPerformanceGrid
+                staffMembers={performanceStaff}
+                periodLabel={periodLabel}
+                teamPeriod={teamPeriod}
+              />
+              {revenueNote ? <p className="text-xs text-[#627D98] px-1">{revenueNote}</p> : null}
+            </>
+          ) : (
+            <>
+              <TeamPerformanceCharts staffMembers={performanceStaff} periodLabel={periodLabel} />
+              {revenueNote ? <p className="text-xs text-[#627D98] px-1">{revenueNote}</p> : null}
+            </>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
@@ -619,7 +715,7 @@ function AdminStaffPageInner() {
           <div className="bg-white border-[0.5px] border-[#D9E1EA] rounded-[12px] overflow-hidden">
             <div className="px-4 py-3 border-b border-[#E5EAF0] flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-heading font-semibold text-[#102A43]">Staff summary</h2>
+                <h2 className="text-sm font-heading font-semibold text-[#102A43]">Staff load summary</h2>
                 <p className="text-[11px] text-[#627D98]">Click staff → then click a task for details</p>
               </div>
               <span className="inline-flex items-center gap-1.5 text-xs text-[#627D98]">

@@ -24,6 +24,7 @@ const EMBEDDED_PAGES: Record<string, ComponentType> = {
   "/admin/reports": lazyPage(() => import("@/app/admin/reports/page")),
   "/admin/my-cases": lazyPage(() => import("@/app/admin/my-cases/page")),
   "/admin/staff": lazyPage(() => import("@/app/admin/staff/page")),
+  "/admin/routing": lazyPage(() => import("@/app/admin/routing/page")),
   "/admin/team": lazyPage(() => import("@/app/admin/team/page")),
   "/admin/team-performance": lazyPage(() => import("@/app/admin/team-performance/page")),
   "/admin/services": lazyPage(() => import("@/app/admin/services/page")),
@@ -62,9 +63,10 @@ export function DashboardEmbedPanel({ href }: { href: string }) {
   const path = normalizeEmbedPath(href);
 
   if (path === "/admin/workload") {
+    const tab = new URLSearchParams(href.includes("?") ? href.slice(href.indexOf("?") + 1) : "").get("tab");
     return (
       <AdminChromeIsolation>
-        <WorkloadView embedded />
+        <WorkloadView embedded focusTab={tab} />
       </AdminChromeIsolation>
     );
   }

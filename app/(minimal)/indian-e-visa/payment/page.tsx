@@ -73,9 +73,7 @@ export default function EVisaPaymentPage() {
         const app = resume.data.application_data;
         setServiceName(app.service_name || "Indian e-Visa assistance");
         setPaymentConfirmed(Boolean(app.payment_confirmed));
-        if (app.email_confirmed) {
-          updateData({ isEmailConfirmed: true, fileNumber: caseNumber });
-        }
+        updateData({ isEmailConfirmed: true, fileNumber: caseNumber });
         if (app.payment_confirmed) {
           markPaidLocally(caseNumber);
           const next = docsUrl(caseNumber);

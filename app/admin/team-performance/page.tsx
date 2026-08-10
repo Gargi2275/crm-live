@@ -69,7 +69,7 @@ export default function AdminTeamPerformancePage() {
     canView
       ? {
           title: "Performance",
-          subtitle: `All team · accuracy & revenue · ${periodLabel}`,
+          subtitle: `Accuracy = completed ÷ assigned · ${periodLabel}`,
           icon: Activity,
           activeFilterCount,
           onClearFilters: clearFilters,

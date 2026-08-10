@@ -467,6 +467,7 @@ export type ApplicationDetailResponse = {
   service_total_pence?: number;
   fee_plan_code?: string;
   fee_plan_fee_pence?: number;
+  pricing_country_slug?: string;
   quote_status?: string;
   quoted_fee?: string;
   full_payment_status?: string;
@@ -640,6 +641,7 @@ export const createApplication = async (
     applicantMobile?: string;
     applyingFrom?: string;
     applicantEmailVerificationToken?: string;
+    pricingCountrySlug?: string;
   },
 ): Promise<CreateApplicationResponse> => {
   try {
@@ -658,6 +660,18 @@ export const createApplication = async (
     if (options?.applicantEmailVerificationToken) {
       body.applicant_email_verification_token = options.applicantEmailVerificationToken;
     }
+    const pricingCountry =
+      options?.pricingCountrySlug ||
+      (typeof window !== 'undefined'
+        ? (() => {
+            try {
+              return window.localStorage.getItem('flyoci_pricing_country_slug') || '';
+            } catch {
+              return '';
+            }
+          })()
+        : '');
+    if (pricingCountry) body.pricing_country_slug = String(pricingCountry).trim().toLowerCase();
 
     const response = await authenticatedFetch(`${API_BASE_URL}/applications/create/`, {
       method: 'POST',
@@ -924,6 +938,40 @@ export const getApplicationByReference = async (referenceNumber: string): Promis
     throw new Error(error instanceof Error ? error.message : 'Failed to load application');
   }
 }
+
+export const setApplicationPricingCountry = async (
+  referenceNumber: string,
+  countrySlug: string,
+): Promise<{
+  reference_number: string;
+  pricing_country_slug: string;
+  service_total_pence: number;
+  audit_fee_pence: number;
+  audit_credit_pence: number;
+  amount_due_pence: number;
+  price_source?: string;
+}> => {
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}/applications/${encodeURIComponent(referenceNumber)}/pricing-country/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ pricing_country_slug: countrySlug }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as {
+    reference_number: string;
+    pricing_country_slug: string;
+    service_total_pence: number;
+    audit_fee_pence: number;
+    audit_credit_pence: number;
+    amount_due_pence: number;
+    price_source?: string;
+  };
+};
 
 export const getApplicationDocuments = async (referenceNumber: string): Promise<ApplicationDocumentResponse[]> => {
   try {
@@ -1962,4 +2010,70 @@ export const executeDocumentDeletionRequest = async (
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "Failed to delete documents");
   }
+};
+
+export type CustomerMiscCharge = {
+  id: number;
+  application_id: number | null;
+  reference_number: string;
+  description: string;
+  amount_pence: number;
+  amount_major: string;
+  currency: string;
+  status: string;
+  sent_at: string | null;
+  paid_at: string | null;
+  service_name?: string;
+  service_type?: string;
+};
+
+export const listApplicationMiscCharges = async (referenceNumber: string): Promise<CustomerMiscCharge[]> => {
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}/applications/${encodeURIComponent(referenceNumber)}/misc-charges/`,
+    { method: "GET" },
+  );
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  const data = (raw?.data || raw) as { charges?: CustomerMiscCharge[] };
+  return Array.isArray(data.charges) ? data.charges : [];
+};
+
+export const createMiscChargePaymentOrder = async (chargeId: number) => {
+  const response = await authenticatedFetch(`${API_BASE_URL}/misc-charges/payment/create-order/`, {
+    method: "POST",
+    body: JSON.stringify({ charge_id: chargeId }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as {
+    checkout_url?: string;
+    order?: { url?: string };
+    amount_pence?: number;
+    charge_id?: number;
+    reference_number?: string;
+  };
+};
+
+export const verifyMiscChargePayment = async (
+  chargeId: number,
+  stripeSessionId: string,
+  referenceNumber?: string,
+) => {
+  const response = await authenticatedFetch(`${API_BASE_URL}/misc-charges/payment/verify/`, {
+    method: "POST",
+    body: JSON.stringify({
+      charge_id: chargeId,
+      stripe_session_id: stripeSessionId,
+      reference_number: referenceNumber || undefined,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response));
+  }
+  const raw = await response.json();
+  return (raw?.data || raw) as CustomerMiscCharge;
 };

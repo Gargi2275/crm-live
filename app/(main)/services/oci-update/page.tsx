@@ -7,6 +7,7 @@ export const metadata = buildPageMetadata(PAGE_SEO.ociUpdate);
 export default function OCIUpdatePage() {
   return (
     <ServicePageLayout
+      serviceType="oci_update"
       eyebrow="OCI Update Service"
       title="Mandatory OCI Updates, Handled Professionally"
       description="Even when government fee is nil, OCI update workflows are technical. We handle the portal work, document checks, and submission accuracy."

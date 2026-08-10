@@ -23,7 +23,13 @@ import {
   listAdminServices,
   type AdminServiceMeta,
 } from "@/lib/admin-auth";
-import { clearDocumentRequirementsCache } from "@/lib/document-requirements";
+import {
+  DOCUMENT_FILE_TYPE_OPTIONS,
+  clearDocumentRequirementsCache,
+  formatFileTypesLabel,
+  formatMaxSizeLabel,
+  normalizeAllowedFileTypes,
+} from "@/lib/document-requirements";
 import { clearQuestionnaireCache } from "@/lib/questionnaire";
 import { clearPublicPricingCache } from "@/lib/public-pricing";
 
@@ -48,7 +54,17 @@ type FormState = {
   show_on_homepage: boolean;
 };
 
-type DraftDoc = { key: string; name: string; is_mandatory: boolean; is_active: boolean };
+type DraftDoc = {
+  key: string;
+  name: string;
+  is_mandatory: boolean;
+  is_active: boolean;
+  allowed_file_types: string[];
+  max_file_size_mb: number | null;
+  description: string;
+  sample: string;
+  mistakes: string;
+};
 type DraftQuestion = {
   key: string;
   label: string;
@@ -97,6 +113,9 @@ export default function AdminNewServicePage() {
   const [draftDocs, setDraftDocs] = useState<DraftDoc[]>([]);
   const [newDocName, setNewDocName] = useState("");
   const [newDocMandatory, setNewDocMandatory] = useState(true);
+  const [newDocFileTypes, setNewDocFileTypes] = useState<string[]>(["pdf", "jpg", "png"]);
+  const [newDocMaxSizeMb, setNewDocMaxSizeMb] = useState("5");
+  const [newDocDescription, setNewDocDescription] = useState("");
 
   const [draftQuestions, setDraftQuestions] = useState<DraftQuestion[]>([]);
   const [newQuestionLabel, setNewQuestionLabel] = useState("");
@@ -203,11 +222,34 @@ export default function AdminNewServicePage() {
     setNewQuestionRequired(true);
   };
 
+  const toggleNewDocFileType = (value: string) => {
+    setNewDocFileTypes((prev) => {
+      if (prev.includes(value)) {
+        return prev.filter((item) => item !== value);
+      }
+      return [...prev, value];
+    });
+  };
+
   const addDraftDoc = () => {
     const name = newDocName.trim();
     if (!name) {
       toast.error("Document name is required.");
       return;
+    }
+    if (newDocFileTypes.length === 0) {
+      toast.error("Select at least one file type.");
+      return;
+    }
+    const maxSizeRaw = newDocMaxSizeMb.trim();
+    let maxFileSizeMb: number | null = null;
+    if (maxSizeRaw) {
+      const parsed = Number(maxSizeRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast.error("Max size must be a positive number (MB).");
+        return;
+      }
+      maxFileSizeMb = parsed;
     }
     setDraftDocs((prev) => [
       ...prev,
@@ -216,10 +258,18 @@ export default function AdminNewServicePage() {
         name,
         is_mandatory: newDocMandatory,
         is_active: true,
+        allowed_file_types: [...newDocFileTypes],
+        max_file_size_mb: maxFileSizeMb,
+        description: newDocDescription.trim(),
+        sample: "",
+        mistakes: "",
       },
     ]);
     setNewDocName("");
     setNewDocMandatory(true);
+    setNewDocFileTypes(["pdf", "jpg", "png"]);
+    setNewDocMaxSizeMb("5");
+    setNewDocDescription("");
   };
 
   const moveList = <T extends { key: string }>(
@@ -262,6 +312,11 @@ export default function AdminNewServicePage() {
           name: draft.name,
           is_mandatory: draft.is_mandatory,
           is_active: draft.is_active,
+          allowed_file_types: draft.allowed_file_types,
+          max_file_size_mb: draft.max_file_size_mb,
+          description: draft.description,
+          sample: draft.sample,
+          mistakes: draft.mistakes,
         });
       }
       for (const draft of draftQuestions) {
@@ -786,40 +841,96 @@ export default function AdminNewServicePage() {
 
           {section === "documents" ? (
             <div className="space-y-3">
-              <div className="flex flex-wrap items-end gap-2 rounded-[10px] border border-dashed border-[#D9E1EA] bg-[#FBFCFD] p-3">
-                <label className="min-w-[220px] flex-[2]">
-                  <span className={labelClass}>Document name</span>
-                  <input
-                    value={newDocName}
-                    onChange={(e) => setNewDocName(e.target.value)}
-                    placeholder="e.g. Passport bio page"
+              <p className="text-xs text-[#627D98]">
+                Optional upload specs — applicants will be validated against file type and max size.
+              </p>
+              <div className="space-y-3 rounded-[10px] border border-dashed border-[#D9E1EA] bg-[#FBFCFD] p-3">
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="min-w-[220px] flex-[2]">
+                    <span className={labelClass}>Document name</span>
+                    <input
+                      value={newDocName}
+                      onChange={(e) => setNewDocName(e.target.value)}
+                      placeholder="e.g. Passport bio page"
+                      className={fieldClass}
+                    />
+                  </label>
+                  <label className="w-[120px]">
+                    <span className={labelClass}>Max size (MB)</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={newDocMaxSizeMb}
+                      onChange={(e) => setNewDocMaxSizeMb(e.target.value)}
+                      placeholder="e.g. 5"
+                      className={fieldClass}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 pb-2 text-[14px] font-semibold text-[#334E68]">
+                    <input
+                      type="checkbox"
+                      checked={newDocMandatory}
+                      onChange={(e) => setNewDocMandatory(e.target.checked)}
+                      className="h-4 w-4 rounded border-[#D9E1EA]"
+                    />
+                    Mandatory
+                  </label>
+                  <button
+                    type="button"
+                    onClick={addDraftDoc}
+                    className="inline-flex items-center gap-1 rounded-[8px] bg-[#102A43] px-3 py-2 text-sm font-semibold text-white"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add document
+                  </button>
+                </div>
+                <div>
+                  <span className={labelClass}>Allowed file types</span>
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    {DOCUMENT_FILE_TYPE_OPTIONS.map((option) => {
+                      const checked = newDocFileTypes.includes(option.value);
+                      return (
+                        <label
+                          key={option.value}
+                          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-semibold ${
+                            checked
+                              ? "border-[#009877]/40 bg-[#E8F7F2] text-[#006F57]"
+                              : "border-[#E5EAF0] bg-white text-[#627D98]"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleNewDocFileType(option.value)}
+                            className="sr-only"
+                          />
+                          {option.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <span className={labelClass}>Description</span>
+                  <p className="mb-1.5 text-[11px] text-[#829AB1]">
+                    Shown to the applicant on the upload page. Keep it short and clear.
+                  </p>
+                  <textarea
+                    value={newDocDescription}
+                    onChange={(e) => setNewDocDescription(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Clear scan of the full passport bio page with all corners visible"
                     className={fieldClass}
                   />
-                </label>
-                <label className="flex items-center gap-2 pb-2 text-[14px] font-semibold text-[#334E68]">
-                  <input
-                    type="checkbox"
-                    checked={newDocMandatory}
-                    onChange={(e) => setNewDocMandatory(e.target.checked)}
-                    className="h-4 w-4 rounded border-[#D9E1EA]"
-                  />
-                  Mandatory
-                </label>
-                <button
-                  type="button"
-                  onClick={addDraftDoc}
-                  className="inline-flex items-center gap-1 rounded-[8px] bg-[#102A43] px-3 py-2 text-sm font-semibold text-white"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add document
-                </button>
+                </div>
               </div>
 
               <div className="overflow-hidden rounded-[10px] border border-[#E5EAF0]">
                 <table className="w-full text-[15px]">
                   <thead className="bg-[#F5F7FA] text-[#486581]">
                     <tr>
-                      <th className="px-3 py-2 text-left text-[12px] font-semibold">Name</th>
+                      <th className="px-3 py-2 text-left text-[12px] font-semibold">Name &amp; specs</th>
                       <th className="px-3 py-2 text-left text-[12px] font-semibold">Mandatory</th>
                       <th className="px-3 py-2 text-right text-[12px] font-semibold">Actions</th>
                     </tr>
@@ -832,72 +943,159 @@ export default function AdminNewServicePage() {
                         </td>
                       </tr>
                     ) : (
-                      draftDocs.map((row, index) => (
-                        <tr key={row.key}>
-                          <td className="px-3 py-2">
-                            <input
-                              value={row.name}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                setDraftDocs((prev) =>
-                                  prev.map((item) => (item.key === row.key ? { ...item, name: next } : item)),
-                                );
-                              }}
-                              className="w-full rounded-[8px] border border-[#D9E1EA] px-2.5 py-1.5 text-[15px]"
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDraftDocs((prev) =>
-                                  prev.map((item) =>
-                                    item.key === row.key
-                                      ? { ...item, is_mandatory: !item.is_mandatory }
-                                      : item,
-                                  ),
-                                )
-                              }
-                              className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${
-                                row.is_mandatory
-                                  ? "bg-[#009877]/12 text-[#006F57]"
-                                  : "bg-[#F5F7FA] text-[#627D98]"
-                              }`}
-                            >
-                              {row.is_mandatory ? "Yes" : "No"}
-                            </button>
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                disabled={index === 0}
-                                onClick={() => setDraftDocs((prev) => moveList(prev, row.key, -1))}
-                                className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
-                              >
-                                <ArrowUp className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={index === draftDocs.length - 1}
-                                onClick={() => setDraftDocs((prev) => moveList(prev, row.key, 1))}
-                                className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
-                              >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                              </button>
+                      draftDocs.map((row, index) => {
+                        const rowTypes = normalizeAllowedFileTypes(row.allowed_file_types);
+                        const sizeLabel = formatMaxSizeLabel(row.max_file_size_mb);
+                        return (
+                          <tr key={row.key}>
+                            <td className="px-3 py-2">
+                              <input
+                                value={row.name}
+                                onChange={(e) => {
+                                  const next = e.target.value;
+                                  setDraftDocs((prev) =>
+                                    prev.map((item) => (item.key === row.key ? { ...item, name: next } : item)),
+                                  );
+                                }}
+                                className="w-full rounded-[8px] border border-[#D9E1EA] px-2.5 py-1.5 text-[15px]"
+                              />
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {DOCUMENT_FILE_TYPE_OPTIONS.map((option) => {
+                                  const checked = rowTypes.includes(option.value);
+                                  return (
+                                    <button
+                                      key={`${row.key}-${option.value}`}
+                                      type="button"
+                                      onClick={() => {
+                                        setDraftDocs((prev) =>
+                                          prev.map((item) => {
+                                            if (item.key !== row.key) return item;
+                                            const next = checked
+                                              ? item.allowed_file_types.filter((t) => t !== option.value)
+                                              : [...item.allowed_file_types, option.value];
+                                            if (!next.length) {
+                                              toast.error("Keep at least one file type.");
+                                              return item;
+                                            }
+                                            return { ...item, allowed_file_types: next };
+                                          }),
+                                        );
+                                      }}
+                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                        checked
+                                          ? "bg-[#009877]/12 text-[#006F57]"
+                                          : "bg-[#F5F7FA] text-[#8A9BB0]"
+                                      }`}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <label className="inline-flex items-center gap-1.5 text-[12px] text-[#486581]">
+                                  Max MB
+                                  <input
+                                    type="number"
+                                    min="0.1"
+                                    step="0.1"
+                                    value={row.max_file_size_mb ?? ""}
+                                    onChange={(e) => {
+                                      const raw = e.target.value.trim();
+                                      setDraftDocs((prev) =>
+                                        prev.map((item) => {
+                                          if (item.key !== row.key) return item;
+                                          if (!raw) return { ...item, max_file_size_mb: null };
+                                          const parsed = Number(raw);
+                                          if (!Number.isFinite(parsed) || parsed <= 0) return item;
+                                          return { ...item, max_file_size_mb: parsed };
+                                        }),
+                                      );
+                                    }}
+                                    className="w-[72px] rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-[13px]"
+                                    placeholder="—"
+                                  />
+                                </label>
+                                <span className="text-[11px] text-[#8A9BB0]">
+                                  {formatFileTypesLabel(rowTypes)}
+                                  {sizeLabel ? ` · max ${sizeLabel}` : " · no size limit"}
+                                </span>
+                              </div>
+                              <div className="mt-2">
+                                <label>
+                                  <span className="text-[10px] font-semibold uppercase tracking-[0.03em] text-[#8A9BB0]">
+                                    Description
+                                  </span>
+                                  <textarea
+                                    value={row.description}
+                                    onChange={(e) => {
+                                      const next = e.target.value;
+                                      setDraftDocs((prev) =>
+                                        prev.map((item) =>
+                                          item.key === row.key ? { ...item, description: next } : item,
+                                        ),
+                                      );
+                                    }}
+                                    rows={3}
+                                    className="mt-0.5 w-full rounded-[8px] border border-[#D9E1EA] px-2.5 py-2 text-[13px]"
+                                    placeholder="Guidance shown to the applicant"
+                                  />
+                                </label>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 align-top">
                               <button
                                 type="button"
                                 onClick={() =>
-                                  setDraftDocs((prev) => prev.filter((item) => item.key !== row.key))
+                                  setDraftDocs((prev) =>
+                                    prev.map((item) =>
+                                      item.key === row.key
+                                        ? { ...item, is_mandatory: !item.is_mandatory }
+                                        : item,
+                                    ),
+                                  )
                                 }
-                                className="rounded-[8px] border border-[#F2C7C3] p-1.5 text-[#B42318]"
+                                className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${
+                                  row.is_mandatory
+                                    ? "bg-[#009877]/12 text-[#006F57]"
+                                    : "bg-[#F5F7FA] text-[#627D98]"
+                                }`}
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
+                                {row.is_mandatory ? "Yes" : "No"}
                               </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
+                            </td>
+                            <td className="px-3 py-2 align-top">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  disabled={index === 0}
+                                  onClick={() => setDraftDocs((prev) => moveList(prev, row.key, -1))}
+                                  className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
+                                >
+                                  <ArrowUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={index === draftDocs.length - 1}
+                                  onClick={() => setDraftDocs((prev) => moveList(prev, row.key, 1))}
+                                  className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
+                                >
+                                  <ArrowDown className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDraftDocs((prev) => prev.filter((item) => item.key !== row.key))
+                                  }
+                                  className="rounded-[8px] border border-[#F2C7C3] p-1.5 text-[#B42318]"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

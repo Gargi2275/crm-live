@@ -165,6 +165,36 @@ export interface KanbanColumnDefinition {
   color: string;
 }
 
+/** Express / urgent fee plans — same priority treatment in the pipeline. */
+export function isExpressOrUrgentPlan(
+  feePlanCode?: string | null,
+  isExpressFlag?: boolean | null,
+): boolean {
+  if (Boolean(isExpressFlag)) return true;
+  const code = String(feePlanCode || "").trim().toLowerCase();
+  if (!code) return false;
+  return (
+    code === "express" ||
+    code.startsWith("express") ||
+    code === "urgent" ||
+    code.startsWith("urgent")
+  );
+}
+
+/** Sort pipeline cards: Express/Urgent first, then older cases within the same priority. */
+export function comparePipelinePriority(
+  a: { isExpress?: boolean; createdAt?: string },
+  b: { isExpress?: boolean; createdAt?: string },
+): number {
+  const aExpress = Boolean(a.isExpress);
+  const bExpress = Boolean(b.isExpress);
+  if (aExpress !== bExpress) return aExpress ? -1 : 1;
+  const aTime = Date.parse(a.createdAt || "") || 0;
+  const bTime = Date.parse(b.createdAt || "") || 0;
+  if (aTime !== bTime) return aTime - bTime;
+  return 0;
+}
+
 export const KANBAN_COLUMNS: KanbanColumnDefinition[] = [
   { id: "NEW_LEAD", title: "NEW LEAD", color: "bg-sky-100 text-sky-700 border-sky-200" },
   {

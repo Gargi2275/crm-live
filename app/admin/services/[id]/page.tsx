@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   ArrowDown,
   ArrowUp,
   Bell,
+  ChevronDown,
   ChevronLeft,
   HelpCircle,
   Layers,
@@ -18,14 +19,17 @@ import {
 import { useAdminModuleAccess } from "@/hooks/useAdminModuleAccess";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
 import {
+  createAdminServiceCountryPricing,
   createAdminServiceDocument,
   createAdminServiceFeePlan,
   createAdminServiceQuestion,
   createAdminServiceReminder,
+  deleteAdminServiceCountryPricing,
   deleteAdminServiceDocument,
   deleteAdminServiceQuestion,
   deleteAdminServiceReminder,
   getAdminService,
+  listAdminServiceCountryPricing,
   listAdminServiceDocuments,
   listAdminServiceFeePlans,
   listAdminServiceQuestions,
@@ -34,17 +38,25 @@ import {
   reorderAdminServiceDocuments,
   reorderAdminServiceQuestions,
   updateAdminService,
+  updateAdminServiceCountryPricing,
   updateAdminServiceDocument,
   updateAdminServiceFeePlan,
   updateAdminServiceQuestion,
   updateAdminServiceReminder,
+  type AdminCountryPricingOffering,
   type AdminDocumentRequirement,
   type AdminService,
   type AdminServiceMeta,
   type AdminServiceQuestion,
   type AdminServiceReminder,
 } from "@/lib/admin-auth";
-import { clearDocumentRequirementsCache } from "@/lib/document-requirements";
+import {
+  DOCUMENT_FILE_TYPE_OPTIONS,
+  clearDocumentRequirementsCache,
+  formatFileTypesLabel,
+  formatMaxSizeLabel,
+  normalizeAllowedFileTypes,
+} from "@/lib/document-requirements";
 import { clearQuestionnaireCache } from "@/lib/questionnaire";
 import { DEFAULT_COUNTRY_OPTIONS } from "@/lib/country-states";
 import { clearPublicPricingCache } from "@/lib/public-pricing";
@@ -122,7 +134,9 @@ export default function AdminEditServicePage() {
   const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [section, setSection] = useState<"details" | "questions" | "documents" | "reminders">("details");
+  const [section, setSection] = useState<"details" | "questions" | "documents" | "reminders" | "country-pricing">(
+    "details",
+  );
 
   const [form, setForm] = useState<FormState>(emptyForm());
 
@@ -135,6 +149,13 @@ export default function AdminEditServicePage() {
   const [docsSaving, setDocsSaving] = useState(false);
   const [newDocName, setNewDocName] = useState("");
   const [newDocMandatory, setNewDocMandatory] = useState(true);
+  const [newDocFileTypes, setNewDocFileTypes] = useState<string[]>(["pdf", "jpg", "png"]);
+  const [newDocMaxSizeMb, setNewDocMaxSizeMb] = useState("5");
+  const [newDocDescription, setNewDocDescription] = useState("");
+  const [newDocMustInclude, setNewDocMustInclude] = useState("");
+  const [newDocMustNot, setNewDocMustNot] = useState("");
+  const [showAddDocForm, setShowAddDocForm] = useState(false);
+  const [expandedDocId, setExpandedDocId] = useState<number | null>(null);
 
   const [questionRows, setQuestionRows] = useState<AdminServiceQuestion[]>([]);
   const [questionsLoading, setQuestionsLoading] = useState(true);
@@ -159,6 +180,18 @@ export default function AdminEditServicePage() {
   const [newReminderBody, setNewReminderBody] = useState("");
   const [expandedReminderKey, setExpandedReminderKey] = useState<string | null>(null);
 
+  const [countryOfferings, setCountryOfferings] = useState<AdminCountryPricingOffering[]>([]);
+  const [hubCountries, setHubCountries] = useState<Array<{ id: number; name: string; slug: string }>>([]);
+  const [countryBaseFee, setCountryBaseFee] = useState("");
+  const [countryBaseAuditFee, setCountryBaseAuditFee] = useState("");
+  const [countryPricingLoading, setCountryPricingLoading] = useState(false);
+  const [countryPricingSaving, setCountryPricingSaving] = useState(false);
+  const [newCountryId, setNewCountryId] = useState("");
+  const [newCountryServiceFee, setNewCountryServiceFee] = useState("");
+  const [newCountryAuditFee, setNewCountryAuditFee] = useState("");
+  const [newCountryName, setNewCountryName] = useState("");
+  const [countryMode, setCountryMode] = useState<"existing" | "new">("existing");
+
   const resetQuestionComposer = () => {
     setNewQuestionLabel("");
     setNewQuestionHelp("");
@@ -168,6 +201,16 @@ export default function AdminEditServicePage() {
     setNewQuestionRequired(true);
     setNewDependsOnCode("");
     setNewCascadeDraftByParent({});
+  };
+
+  const resetDocComposer = () => {
+    setNewDocName("");
+    setNewDocMandatory(true);
+    setNewDocFileTypes(["pdf", "jpg", "png"]);
+    setNewDocMaxSizeMb("5");
+    setNewDocDescription("");
+    setNewDocMustInclude("");
+    setNewDocMustNot("");
   };
 
   const resetReminderComposer = () => {
@@ -302,6 +345,24 @@ export default function AdminEditServicePage() {
     }
   }, [serviceId, validId]);
 
+  const loadCountryPricing = useCallback(async () => {
+    if (!validId) return;
+    setCountryPricingLoading(true);
+    try {
+      const payload = await listAdminServiceCountryPricing(serviceId);
+      setCountryOfferings(payload?.offerings || []);
+      setHubCountries(payload?.countries || []);
+      setCountryBaseFee(payload?.base_fee || "");
+      setCountryBaseAuditFee(payload?.audit_fee || "");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load country pricing.");
+      setCountryOfferings([]);
+      setHubCountries([]);
+    } finally {
+      setCountryPricingLoading(false);
+    }
+  }, [serviceId, validId]);
+
   useEffect(() => {
     if (!accessReady || !canAccess) return;
     if (!validId) {
@@ -314,7 +375,18 @@ export default function AdminEditServicePage() {
     void loadDocuments();
     void loadQuestions();
     void loadReminders();
-  }, [accessReady, canAccess, validId, loadMeta, loadService, loadDocuments, loadQuestions, loadReminders]);
+    void loadCountryPricing();
+  }, [
+    accessReady,
+    canAccess,
+    validId,
+    loadMeta,
+    loadService,
+    loadDocuments,
+    loadQuestions,
+    loadReminders,
+    loadCountryPricing,
+  ]);
 
   useSetAdminPageChrome(
     canAccess
@@ -443,11 +515,34 @@ export default function AdminEditServicePage() {
     }
   };
 
+  const toggleNewDocFileType = (value: string) => {
+    setNewDocFileTypes((prev) => {
+      if (prev.includes(value)) {
+        return prev.filter((item) => item !== value);
+      }
+      return [...prev, value];
+    });
+  };
+
   const addDoc = async () => {
     const name = newDocName.trim();
     if (!name) {
       toast.error("Document name is required.");
       return;
+    }
+    if (newDocFileTypes.length === 0) {
+      toast.error("Select at least one file type.");
+      return;
+    }
+    const maxSizeRaw = newDocMaxSizeMb.trim();
+    let maxFileSizeMb: number | null = null;
+    if (maxSizeRaw) {
+      const parsed = Number(maxSizeRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast.error("Max size must be a positive number (MB).");
+        return;
+      }
+      maxFileSizeMb = parsed;
     }
     setDocsSaving(true);
     try {
@@ -455,10 +550,16 @@ export default function AdminEditServicePage() {
         name,
         is_mandatory: newDocMandatory,
         is_active: true,
+        allowed_file_types: newDocFileTypes,
+        max_file_size_mb: maxFileSizeMb,
+        description: newDocDescription.trim(),
+        sample: newDocMustInclude.trim(),
+        mistakes: newDocMustNot.trim(),
       });
       if (created) setDocRows((prev) => [...prev, created].sort((a, b) => a.display_order - b.display_order));
-      setNewDocName("");
-      setNewDocMandatory(true);
+      resetDocComposer();
+      setShowAddDocForm(false);
+      if (created) setExpandedDocId(created.id);
       clearDocumentRequirementsCache();
       toast.success("Document added.");
     } catch (error) {
@@ -748,8 +849,78 @@ export default function AdminEditServicePage() {
   const sortedDocs = [...docRows].sort((a, b) => a.display_order - b.display_order || a.id - b.id);
   const sortedQuestions = [...questionRows].sort((a, b) => a.display_order - b.display_order || a.id - b.id);
   const sortedReminders = [...reminderRows].sort((a, b) => a.display_order - b.display_order || a.id - b.id);
-  const sectionOrder = ["details", "questions", "documents", "reminders"] as const;
+  const sectionOrder = ["details", "questions", "documents", "reminders", "country-pricing"] as const;
   const sectionIndex = sectionOrder.indexOf(section);
+  const usedCountryIds = new Set(countryOfferings.map((row) => row.country_id));
+  const availableHubCountries = hubCountries.filter((row) => !usedCountryIds.has(row.id));
+
+  const addCountryPricing = async () => {
+    if (countryMode === "existing" && !newCountryId) {
+      toast.error("Choose a country, or pick “+ New country…”.");
+      return;
+    }
+    if (countryMode === "new" && !newCountryName.trim()) {
+      toast.error("Type the country name.");
+      return;
+    }
+    if (newCountryServiceFee.trim() === "" || Number.isNaN(Number(newCountryServiceFee))) {
+      toast.error("Enter a valid service fee.");
+      return;
+    }
+    setCountryPricingSaving(true);
+    try {
+      await createAdminServiceCountryPricing(serviceId, {
+        ...(countryMode === "existing"
+          ? { country_id: Number(newCountryId) }
+          : { new_country_name: newCountryName.trim() }),
+        service_fee: newCountryServiceFee,
+        audit_fee: newCountryAuditFee.trim() === "" ? null : newCountryAuditFee,
+        is_active: true,
+      });
+      setNewCountryId("");
+      setNewCountryName("");
+      setNewCountryServiceFee("");
+      setNewCountryAuditFee("");
+      setCountryMode("existing");
+      await loadCountryPricing();
+      toast.success(countryMode === "new" ? "Country and price saved." : "Country price saved.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save country price.");
+    } finally {
+      setCountryPricingSaving(false);
+    }
+  };
+
+  const saveCountryOffering = async (row: AdminCountryPricingOffering) => {
+    setCountryPricingSaving(true);
+    try {
+      await updateAdminServiceCountryPricing(serviceId, row.id, {
+        service_fee: row.service_fee,
+        audit_fee: row.audit_fee,
+        is_active: row.is_active,
+      });
+      await loadCountryPricing();
+      toast.success("Saved.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save.");
+    } finally {
+      setCountryPricingSaving(false);
+    }
+  };
+
+  const removeCountryOffering = async (row: AdminCountryPricingOffering) => {
+    if (!window.confirm(`Remove the special price for ${row.country_name}?`)) return;
+    setCountryPricingSaving(true);
+    try {
+      await deleteAdminServiceCountryPricing(serviceId, row.id);
+      await loadCountryPricing();
+      toast.success("Removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove.");
+    } finally {
+      setCountryPricingSaving(false);
+    }
+  };
 
   return (
     <div className="w-full space-y-3 font-body">
@@ -771,6 +942,7 @@ export default function AdminEditServicePage() {
                 { id: "questions" as const, label: `Questions (${sortedQuestions.length})` },
                 { id: "documents" as const, label: `Documents (${sortedDocs.length})` },
                 { id: "reminders" as const, label: `Reminders (${sortedReminders.length})` },
+                { id: "country-pricing" as const, label: `Country prices (${countryOfferings.length})` },
               ] as const
             ).map((tab) => (
               <button
@@ -1645,43 +1817,139 @@ export default function AdminEditServicePage() {
 
           {section === "documents" ? (
             <div className="space-y-3">
-              <p className="text-xs text-[#627D98]">Changes save instantly — no need to press Save.</p>
-              <div className="flex flex-wrap items-end gap-2 rounded-[10px] border border-dashed border-[#D9E1EA] bg-[#FBFCFD] p-3">
-                <label className="min-w-[220px] flex-[2]">
-                  <span className={labelClass}>Document name</span>
-                  <input
-                    value={newDocName}
-                    onChange={(e) => setNewDocName(e.target.value)}
-                    placeholder="e.g. Passport bio page"
-                    className={fieldClass}
-                  />
-                </label>
-                <label className="flex items-center gap-2 pb-2 text-[14px] font-semibold text-[#334E68]">
-                  <input
-                    type="checkbox"
-                    checked={newDocMandatory}
-                    onChange={(e) => setNewDocMandatory(e.target.checked)}
-                    className="h-4 w-4 rounded border-[#D9E1EA]"
-                  />
-                  Mandatory
-                </label>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-heading font-semibold text-[#102A43]">
+                    Documents ({sortedDocs.length})
+                  </h3>
+                  <p className="mt-0.5 text-[11px] text-[#829AB1]">
+                    Compact list — click a row to edit description, file types, and tips.
+                  </p>
+                </div>
                 <button
                   type="button"
-                  disabled={docsSaving}
-                  onClick={() => void addDoc()}
-                  className="inline-flex items-center gap-1 rounded-[8px] bg-[#102A43] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  onClick={() => setShowAddDocForm((open) => !open)}
+                  className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#102A43] px-3 py-2 text-sm font-semibold text-white"
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add document
+                  {showAddDocForm ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                  {showAddDocForm ? "Close" : "Add document"}
                 </button>
               </div>
 
+              {showAddDocForm ? (
+                <div className="space-y-3 rounded-[10px] border border-dashed border-[#D9E1EA] bg-[#FBFCFD] p-3">
+                  <p className="text-[12px] font-semibold text-[#334E68]">New checklist document</p>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="min-w-[220px] flex-[2]">
+                      <span className={labelClass}>Document name</span>
+                      <input
+                        value={newDocName}
+                        onChange={(e) => setNewDocName(e.target.value)}
+                        placeholder="e.g. Passport bio page"
+                        className={fieldClass}
+                      />
+                    </label>
+                    <label className="w-[120px]">
+                      <span className={labelClass}>Max size (MB)</span>
+                      <input
+                        type="number"
+                        min="0.1"
+                        step="0.1"
+                        value={newDocMaxSizeMb}
+                        onChange={(e) => setNewDocMaxSizeMb(e.target.value)}
+                        placeholder="e.g. 5"
+                        className={fieldClass}
+                      />
+                    </label>
+                    <label className="flex items-center gap-2 pb-2 text-[14px] font-semibold text-[#334E68]">
+                      <input
+                        type="checkbox"
+                        checked={newDocMandatory}
+                        onChange={(e) => setNewDocMandatory(e.target.checked)}
+                        className="h-4 w-4 rounded border-[#D9E1EA]"
+                      />
+                      Mandatory
+                    </label>
+                    <button
+                      type="button"
+                      disabled={docsSaving}
+                      onClick={() => void addDoc()}
+                      className="inline-flex items-center gap-1 rounded-[8px] bg-[#009877] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Save document
+                    </button>
+                  </div>
+                  <div>
+                    <span className={labelClass}>Allowed file types</span>
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {DOCUMENT_FILE_TYPE_OPTIONS.map((option) => {
+                        const checked = newDocFileTypes.includes(option.value);
+                        return (
+                          <label
+                            key={option.value}
+                            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-semibold ${
+                              checked
+                                ? "border-[#009877]/40 bg-[#E8F7F2] text-[#006F57]"
+                                : "border-[#E5EAF0] bg-white text-[#627D98]"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleNewDocFileType(option.value)}
+                              className="sr-only"
+                            />
+                            {option.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <span className={labelClass}>Description</span>
+                    <textarea
+                      value={newDocDescription}
+                      onChange={(e) => setNewDocDescription(e.target.value)}
+                      rows={2}
+                      placeholder="Short intro on the applicant upload page"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <span className={labelClass}>Must include</span>
+                      <p className="mb-1 text-[11px] text-[#829AB1]">One tip per line</p>
+                      <textarea
+                        value={newDocMustInclude}
+                        onChange={(e) => setNewDocMustInclude(e.target.value)}
+                        rows={3}
+                        placeholder="Use full, clear PDF or high-resolution image."
+                        className={fieldClass}
+                      />
+                    </div>
+                    <div>
+                      <span className={labelClass}>Must not</span>
+                      <p className="mb-1 text-[11px] text-[#829AB1]">One tip per line</p>
+                      <textarea
+                        value={newDocMustNot}
+                        onChange={(e) => setNewDocMustNot(e.target.value)}
+                        rows={3}
+                        placeholder="Uploading partial pages or unreadable scans."
+                        className={fieldClass}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="overflow-hidden rounded-[10px] border border-[#E5EAF0]">
-                <table className="w-full text-[15px]">
+                <table className="w-full text-[14px]">
                   <thead className="bg-[#F5F7FA] text-[#486581]">
                     <tr>
-                      <th className="px-3 py-2 text-left text-[12px] font-semibold">Name</th>
-                      <th className="px-3 py-2 text-left text-[12px] font-semibold">Mandatory</th>
+                      <th className="px-3 py-2 text-left text-[12px] font-semibold">Document</th>
+                      <th className="px-3 py-2 text-left text-[12px] font-semibold">Specs</th>
+                      <th className="px-3 py-2 text-left text-[12px] font-semibold">Required</th>
                       <th className="px-3 py-2 text-left text-[12px] font-semibold">Active</th>
                       <th className="px-3 py-2 text-right text-[12px] font-semibold">Actions</th>
                     </tr>
@@ -1689,92 +1957,255 @@ export default function AdminEditServicePage() {
                   <tbody className="divide-y divide-[#E5EAF0]">
                     {docsLoading ? (
                       <tr>
-                        <td colSpan={4} className="px-3 py-6 text-center text-sm text-[#627D98]">
+                        <td colSpan={5} className="px-3 py-6 text-center text-sm text-[#627D98]">
                           Loading documents…
                         </td>
                       </tr>
                     ) : sortedDocs.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-3 py-6 text-center text-sm text-[#627D98]">
-                          No documents yet — add one above.
+                        <td colSpan={5} className="px-3 py-6 text-center text-sm text-[#627D98]">
+                          No documents yet — click Add document.
                         </td>
                       </tr>
                     ) : (
-                      sortedDocs.map((row, index) => (
-                        <tr key={row.id}>
-                          <td className="px-3 py-2">
-                            <input
-                              defaultValue={row.name}
-                              key={`${row.id}-${row.name}`}
-                              disabled={docsSaving}
-                              onBlur={(e) => {
-                                const next = e.target.value.trim();
-                                if (!next || next === row.name) return;
-                                void patchDoc(row, { name: next });
-                              }}
-                              className="w-full rounded-[8px] border border-[#D9E1EA] px-2.5 py-1.5 text-[15px]"
-                            />
-                            <p className="mt-0.5 text-[10px] text-[#8A9BB0]">{row.code}</p>
-                          </td>
-                          <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              disabled={docsSaving}
-                              onClick={() => void patchDoc(row, { is_mandatory: !row.is_mandatory })}
-                              className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${
-                                row.is_mandatory
-                                  ? "bg-[#009877]/12 text-[#006F57]"
-                                  : "bg-[#F5F7FA] text-[#627D98]"
-                              }`}
-                            >
-                              {row.is_mandatory ? "Yes" : "No"}
-                            </button>
-                          </td>
-                          <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              disabled={docsSaving}
-                              onClick={() => void patchDoc(row, { is_active: !row.is_active })}
-                              className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${
-                                row.is_active ? "bg-[#009877]/12 text-[#006F57]" : "bg-[#F5F7FA] text-[#627D98]"
-                              }`}
-                            >
-                              {row.is_active ? "On" : "Off"}
-                            </button>
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                disabled={docsSaving || index === 0}
-                                onClick={() => void moveDoc(row, -1)}
-                                className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
-                                aria-label="Move up"
-                              >
-                                <ArrowUp className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={docsSaving || index === sortedDocs.length - 1}
-                                onClick={() => void moveDoc(row, 1)}
-                                className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
-                                aria-label="Move down"
-                              >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={docsSaving}
-                                onClick={() => void removeDoc(row)}
-                                className="rounded-[8px] border border-[#F2C7C3] p-1.5 text-[#B42318]"
-                                aria-label="Delete"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
+                      sortedDocs.map((row, index) => {
+                        const rowTypes = normalizeAllowedFileTypes(row.allowed_file_types);
+                        const sizeLabel = formatMaxSizeLabel(row.max_file_size_mb);
+                        const expanded = expandedDocId === row.id;
+                        const tipCount =
+                          (String(row.sample || "").trim() ? 1 : 0) + (String(row.mistakes || "").trim() ? 1 : 0);
+                        return (
+                          <Fragment key={row.id}>
+                            <tr className={expanded ? "bg-[#F8FCFF]" : "hover:bg-[#FBFCFD]"}>
+                              <td className="px-3 py-2.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedDocId(expanded ? null : row.id)}
+                                  className="flex w-full items-start gap-2 text-left"
+                                >
+                                  <ChevronDown
+                                    className={`mt-0.5 h-4 w-4 shrink-0 text-[#829AB1] transition ${
+                                      expanded ? "rotate-180" : ""
+                                    }`}
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="block font-semibold text-[#102A43]">{row.name}</span>
+                                    <span className="block text-[11px] text-[#8A9BB0]">{row.code}</span>
+                                  </span>
+                                </button>
+                              </td>
+                              <td className="px-3 py-2.5 text-[12px] text-[#486581]">
+                                {formatFileTypesLabel(rowTypes)}
+                                {sizeLabel ? ` · max ${sizeLabel}` : ""}
+                                {tipCount ? ` · tips set` : ""}
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <button
+                                  type="button"
+                                  disabled={docsSaving}
+                                  onClick={() => void patchDoc(row, { is_mandatory: !row.is_mandatory })}
+                                  className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${
+                                    row.is_mandatory
+                                      ? "bg-[#009877]/12 text-[#006F57]"
+                                      : "bg-[#F5F7FA] text-[#627D98]"
+                                  }`}
+                                >
+                                  {row.is_mandatory ? "Yes" : "No"}
+                                </button>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <button
+                                  type="button"
+                                  disabled={docsSaving}
+                                  onClick={() => void patchDoc(row, { is_active: !row.is_active })}
+                                  className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${
+                                    row.is_active ? "bg-[#009877]/12 text-[#006F57]" : "bg-[#F5F7FA] text-[#627D98]"
+                                  }`}
+                                >
+                                  {row.is_active ? "On" : "Off"}
+                                </button>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={docsSaving || index === 0}
+                                    onClick={() => void moveDoc(row, -1)}
+                                    className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
+                                    aria-label="Move up"
+                                  >
+                                    <ArrowUp className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={docsSaving || index === sortedDocs.length - 1}
+                                    onClick={() => void moveDoc(row, 1)}
+                                    className="rounded-[8px] border border-[#E5EAF0] p-1.5 disabled:opacity-30"
+                                    aria-label="Move down"
+                                  >
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={docsSaving}
+                                    onClick={() => void removeDoc(row)}
+                                    className="rounded-[8px] border border-[#F2C7C3] p-1.5 text-[#B42318]"
+                                    aria-label="Delete"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                            {expanded ? (
+                              <tr className="bg-[#F8FCFF]">
+                                <td colSpan={5} className="px-3 pb-3 pt-0">
+                                  <div className="ml-6 space-y-3 rounded-[10px] border border-[#D9E1EA] bg-white p-3">
+                                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                                      <label>
+                                        <span className="text-[10px] font-semibold uppercase tracking-[0.03em] text-[#8A9BB0]">
+                                          Document name
+                                        </span>
+                                        <input
+                                          defaultValue={row.name}
+                                          key={`${row.id}-${row.name}`}
+                                          disabled={docsSaving}
+                                          onBlur={(e) => {
+                                            const next = e.target.value.trim();
+                                            if (!next || next === row.name) return;
+                                            void patchDoc(row, { name: next });
+                                          }}
+                                          className="mt-0.5 w-full rounded-[8px] border border-[#D9E1EA] px-2.5 py-1.5 text-[14px]"
+                                        />
+                                      </label>
+                                      <label className="inline-flex items-end gap-1.5 text-[12px] text-[#486581]">
+                                        Max MB
+                                        <input
+                                          type="number"
+                                          min="0.1"
+                                          step="0.1"
+                                          defaultValue={row.max_file_size_mb ?? ""}
+                                          key={`${row.id}-size-${row.max_file_size_mb ?? "none"}`}
+                                          disabled={docsSaving}
+                                          onBlur={(e) => {
+                                            const raw = e.target.value.trim();
+                                            const current =
+                                              row.max_file_size_mb == null ? "" : String(row.max_file_size_mb);
+                                            if (raw === current) return;
+                                            if (!raw) {
+                                              void patchDoc(row, { max_file_size_mb: null });
+                                              return;
+                                            }
+                                            const parsed = Number(raw);
+                                            if (!Number.isFinite(parsed) || parsed <= 0) {
+                                              toast.error("Max size must be a positive number (MB).");
+                                              e.target.value = current;
+                                              return;
+                                            }
+                                            void patchDoc(row, { max_file_size_mb: parsed });
+                                          }}
+                                          className="w-[72px] rounded-[8px] border border-[#D9E1EA] px-2 py-1.5 text-[13px]"
+                                          placeholder="—"
+                                        />
+                                      </label>
+                                    </div>
+                                    <div>
+                                      <span className="text-[10px] font-semibold uppercase tracking-[0.03em] text-[#8A9BB0]">
+                                        Allowed file types
+                                      </span>
+                                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                        {DOCUMENT_FILE_TYPE_OPTIONS.map((option) => {
+                                          const checked = rowTypes.includes(option.value);
+                                          return (
+                                            <button
+                                              key={`${row.id}-${option.value}`}
+                                              type="button"
+                                              disabled={docsSaving}
+                                              onClick={() => {
+                                                const next = checked
+                                                  ? rowTypes.filter((item) => item !== option.value)
+                                                  : [...rowTypes, option.value];
+                                                if (!next.length) {
+                                                  toast.error("Keep at least one file type.");
+                                                  return;
+                                                }
+                                                void patchDoc(row, { allowed_file_types: next });
+                                              }}
+                                              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold disabled:opacity-60 ${
+                                                checked
+                                                  ? "bg-[#009877]/12 text-[#006F57]"
+                                                  : "bg-[#F5F7FA] text-[#8A9BB0]"
+                                              }`}
+                                            >
+                                              {option.label}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                    <label>
+                                      <span className="text-[10px] font-semibold uppercase tracking-[0.03em] text-[#8A9BB0]">
+                                        Description
+                                      </span>
+                                      <textarea
+                                        defaultValue={row.description || ""}
+                                        key={`${row.id}-desc-${row.description || ""}`}
+                                        disabled={docsSaving}
+                                        rows={2}
+                                        onBlur={(e) => {
+                                          const next = e.target.value.trim();
+                                          if (next === (row.description || "").trim()) return;
+                                          void patchDoc(row, { description: next });
+                                        }}
+                                        placeholder="Short intro shown to the applicant"
+                                        className="mt-0.5 w-full rounded-[8px] border border-[#D9E1EA] px-2.5 py-2 text-[13px] text-[#334E68]"
+                                      />
+                                    </label>
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                      <label>
+                                        <span className="text-[10px] font-semibold uppercase tracking-[0.03em] text-[#006F57]">
+                                          Must include
+                                        </span>
+                                        <textarea
+                                          defaultValue={row.sample || ""}
+                                          key={`${row.id}-sample-${row.sample || ""}`}
+                                          disabled={docsSaving}
+                                          rows={3}
+                                          onBlur={(e) => {
+                                            const next = e.target.value.trim();
+                                            if (next === (row.sample || "").trim()) return;
+                                            void patchDoc(row, { sample: next });
+                                          }}
+                                          placeholder="One tip per line"
+                                          className="mt-0.5 w-full rounded-[8px] border border-[#B7EBD8] bg-[#F3FBF8] px-2.5 py-2 text-[13px] text-[#334E68]"
+                                        />
+                                      </label>
+                                      <label>
+                                        <span className="text-[10px] font-semibold uppercase tracking-[0.03em] text-[#B42318]">
+                                          Must not
+                                        </span>
+                                        <textarea
+                                          defaultValue={row.mistakes || ""}
+                                          key={`${row.id}-mistakes-${row.mistakes || ""}`}
+                                          disabled={docsSaving}
+                                          rows={3}
+                                          onBlur={(e) => {
+                                            const next = e.target.value.trim();
+                                            if (next === (row.mistakes || "").trim()) return;
+                                            void patchDoc(row, { mistakes: next });
+                                          }}
+                                          placeholder="One tip per line"
+                                          className="mt-0.5 w-full rounded-[8px] border border-[#F2C7C3] bg-[#FFF8F7] px-2.5 py-2 text-[13px] text-[#334E68]"
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : null}
+                          </Fragment>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -2000,6 +2431,210 @@ export default function AdminEditServicePage() {
                     Add reminder
                   </button>
                 </div>
+              </div>
+            </div>
+          ) : null}
+
+          {section === "country-pricing" ? (
+            <div className="space-y-4">
+              <div className="rounded-[10px] border border-[#D7EFE8] bg-[#F3FBF8] px-4 py-3">
+                <p className="text-sm font-semibold text-[#102A43]">
+                  Default price (everyone): £{countryBaseFee || "—"}
+                  {Number(countryBaseAuditFee) > 0 ? ` · assessment £${countryBaseAuditFee}` : ""}
+                </p>
+                <p className="mt-1 text-sm text-[#486581]">
+                  Want a different price for one country? Add it below. Customers from that country see that price;
+                  everyone else keeps the default.
+                </p>
+              </div>
+
+              {countryPricingLoading ? (
+                <p className="text-sm text-[#829AB1]">Loading…</p>
+              ) : (
+                <div className="overflow-x-auto rounded-[10px] border border-[#E5EAF0]">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-[#F8FAFC] text-[12px] font-semibold uppercase tracking-wide text-[#829AB1]">
+                      <tr>
+                        <th className="px-3 py-2">Country</th>
+                        <th className="px-3 py-2">Price (£)</th>
+                        <th className="px-3 py-2">Assessment (£)</th>
+                        <th className="px-3 py-2">On</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {countryOfferings.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-6 text-center text-[#829AB1]">
+                            No special country prices yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        countryOfferings.map((row) => (
+                          <tr key={row.id} className="border-t border-[#E5EAF0]">
+                            <td className="px-3 py-2 font-semibold text-[#102A43]">{row.country_name}</td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={row.service_fee}
+                                onChange={(e) =>
+                                  setCountryOfferings((prev) =>
+                                    prev.map((item) =>
+                                      item.id === row.id ? { ...item, service_fee: e.target.value } : item,
+                                    ),
+                                  )
+                                }
+                                className={fieldClass}
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="Same as default"
+                                value={row.audit_fee ?? ""}
+                                onChange={(e) =>
+                                  setCountryOfferings((prev) =>
+                                    prev.map((item) =>
+                                      item.id === row.id
+                                        ? { ...item, audit_fee: e.target.value === "" ? null : e.target.value }
+                                        : item,
+                                    ),
+                                  )
+                                }
+                                className={fieldClass}
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="checkbox"
+                                checked={row.is_active}
+                                onChange={(e) =>
+                                  setCountryOfferings((prev) =>
+                                    prev.map((item) =>
+                                      item.id === row.id ? { ...item, is_active: e.target.checked } : item,
+                                    ),
+                                  )
+                                }
+                                className="h-4 w-4 rounded border-[#D9E1EA]"
+                                title="Turn this country price on or off"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-wrap gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={countryPricingSaving}
+                                  onClick={() => void saveCountryOffering(row)}
+                                  className="rounded-[8px] bg-[#009877] px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={countryPricingSaving}
+                                  onClick={() => void removeCountryOffering(row)}
+                                  className="rounded-[8px] border border-[#F2C7C3] px-2.5 py-1.5 text-xs font-semibold text-[#B42318] disabled:opacity-60"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="rounded-[10px] border border-[#E5EAF0] bg-white p-4">
+                <p className="text-sm font-semibold text-[#102A43]">Add a country price</p>
+                <p className="mt-1 text-xs text-[#829AB1]">
+                  Pick a country from the list, or type a new country name.
+                </p>
+
+                <div className="mt-3 space-y-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="block">
+                      <span className={labelClass}>Pick country</span>
+                      <select
+                        value={countryMode === "existing" ? newCountryId : "__new__"}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === "__new__") {
+                            setCountryMode("new");
+                            setNewCountryId("");
+                          } else {
+                            setCountryMode("existing");
+                            setNewCountryId(value);
+                            setNewCountryName("");
+                          }
+                        }}
+                        className={fieldClass}
+                      >
+                        <option value="">Choose…</option>
+                        {availableHubCountries.map((country) => (
+                          <option key={country.id} value={country.id}>
+                            {country.name}
+                          </option>
+                        ))}
+                        <option value="__new__">+ New country…</option>
+                      </select>
+                    </label>
+
+                    {countryMode === "new" ? (
+                      <label className="block">
+                        <span className={labelClass}>Country name</span>
+                        <input
+                          type="text"
+                          value={newCountryName}
+                          onChange={(e) => setNewCountryName(e.target.value)}
+                          placeholder="e.g. United Arab Emirates"
+                          className={fieldClass}
+                        />
+                      </label>
+                    ) : (
+                      <div className="hidden md:block" />
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="block">
+                      <span className={labelClass}>Price for this country (£)</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={newCountryServiceFee}
+                        onChange={(e) => setNewCountryServiceFee(e.target.value)}
+                        placeholder={countryBaseFee || "0"}
+                        className={fieldClass}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={labelClass}>Assessment fee (£) — optional</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="Leave blank = use default"
+                        value={newCountryAuditFee}
+                        onChange={(e) => setNewCountryAuditFee(e.target.value)}
+                        className={fieldClass}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={countryPricingSaving}
+                  onClick={() => void addCountryPricing()}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-[8px] bg-[#009877] px-3 py-2 text-sm font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
+                >
+                  <Plus className="h-4 w-4" />
+                  Save country price
+                </button>
               </div>
             </div>
           ) : null}

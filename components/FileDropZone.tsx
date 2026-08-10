@@ -12,6 +12,19 @@ interface FileDropZoneProps {
   error?: string;
 }
 
+function formatFileSize(bytes: number): string {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n === 0) return "0 B";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) {
+    const kb = n / 1024;
+    return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  }
+  const mb = n / 1024 / 1024;
+  return `${mb < 10 ? mb.toFixed(2) : mb.toFixed(1)} MB`;
+}
+
 export function FileDropZone({ label, accept, maxSizeMsg, onUpload, file, error }: FileDropZoneProps) {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -80,7 +93,7 @@ export function FileDropZone({ label, accept, maxSizeMsg, onUpload, file, error 
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-body font-bold text-green-800 text-sm truncate">{file.name}</p>
-              <p className="font-mono text-[11px] text-green-600/80">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              <p className="font-mono text-[11px] text-green-600/80">{formatFileSize(file.size)}</p>
             </div>
             <CheckCircle className="w-5 h-5 text-green-500 shrink-0 mr-2" />
             

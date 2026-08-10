@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -20,6 +20,16 @@ export default function AdminLoginPage() {
   const [loginCaptchaError, setLoginCaptchaError] = useState("");
   const [resetCaptchaToken, setResetCaptchaToken] = useState("");
   const [resetCaptchaError, setResetCaptchaError] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    if (reason === "idle") {
+      toast.error(
+        "You were logged out after 30 minutes of inactivity. Your work is still saved — sign in again.",
+      );
+    }
+  }, []);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

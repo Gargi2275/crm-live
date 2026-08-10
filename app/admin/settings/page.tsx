@@ -1,14 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getAdminDashboardOverview, type AdminDashboardOverview } from "@/lib/admin-auth";
+import {
+  getAdminDashboardOverview,
+  getWorkloadSettings,
+  updateWorkloadSettings,
+  type AdminDashboardOverview,
+  type WorkloadSettings,
+} from "@/lib/admin-auth";
 import { motion } from "framer-motion";
 import { Settings } from "lucide-react";
 import toast from "react-hot-toast";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 
 export default function SettingsPage() {
+  const { adminUser } = useAdminAuth();
+  const isAdmin = String(adminUser?.role || "").toLowerCase() === "admin";
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+  const [workloadSettings, setWorkloadSettings] = useState<WorkloadSettings | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   useSetAdminPageChrome({
     title: "Settings",
@@ -26,8 +37,39 @@ export default function SettingsPage() {
       }
     };
 
+    const loadSettings = async () => {
+      try {
+        const settings = await getWorkloadSettings();
+        setWorkloadSettings(settings);
+      } catch {
+        // Non-fatal for roles without settings/workload access.
+      }
+    };
+
     void loadDashboard();
+    void loadSettings();
   }, []);
+
+  const handleToggleLeaveApproval = async (checked: boolean) => {
+    if (!isAdmin) {
+      toast.error("Only admin can change this setting.");
+      return;
+    }
+    setSettingsSaving(true);
+    try {
+      const updated = await updateWorkloadSettings(checked);
+      setWorkloadSettings(updated);
+        toast.success(
+          checked
+            ? "On-leave staff reassign now needs admin approval."
+            : "On-leave staff can reassign tasks directly.",
+        );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update setting.");
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
 
   const accessLogs = dashboardData?.access_logs ?? [];
   const alertsSummary = dashboardData?.alerts_summary;
@@ -48,8 +90,15 @@ export default function SettingsPage() {
         value: String(alertsSummary?.critical ?? 0),
         lastUpdated: accessLogs[2]?.time || accessLogs[0]?.time || "-",
       },
+      {
+        setting: "Staff reassign needs admin approval",
+        value: workloadSettings?.require_admin_approval_on_leave_reassign ? "On" : "Off",
+        lastUpdated: workloadSettings?.updated_at
+          ? new Date(workloadSettings.updated_at).toLocaleString()
+          : "-",
+      },
     ],
-    [alertsSummary, accessLogs],
+    [alertsSummary, accessLogs, workloadSettings],
   );
 
   return (
@@ -78,6 +127,29 @@ export default function SettingsPage() {
             <p className="text-[#102A43] font-semibold">{alertsSummary?.critical ?? 0}</p>
           </div>
 
+          <div className="flex items-center justify-between gap-3 rounded-[12px] border border-[#D9E1EA] p-3">
+            <div className="min-w-0">
+              <p className="text-[#102A43] font-medium">Require admin approval for staff reassign</p>
+              <p className="text-xs text-[#627D98]">
+                When On, staff who are on leave and reassign a task need admin approval. Reassign only
+                appears for staff marked on leave today. Pending requests show on the dashboard and in
+                the top notification bell (approve under Workload → Reassigns).
+              </p>
+            </div>
+            <label className="inline-flex items-center gap-2 shrink-0 cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[#009877]"
+                checked={Boolean(workloadSettings?.require_admin_approval_on_leave_reassign)}
+                disabled={!isAdmin || settingsSaving || workloadSettings == null}
+                onChange={(e) => void handleToggleLeaveApproval(e.target.checked)}
+              />
+              <span className="text-xs font-semibold text-[#102A43]">
+                {workloadSettings?.require_admin_approval_on_leave_reassign ? "On" : "Off"}
+              </span>
+            </label>
+          </div>
+
           <div className="rounded-[12px] border border-[#D9E1EA] p-3">
             <p className="text-[#102A43] font-medium mb-2">Recent access events</p>
             <p className="text-sm text-[#486581]">{accessLogs.length} entries loaded from backend audit feed.</p>
@@ -89,7 +161,9 @@ export default function SettingsPage() {
         <h2 className="text-[#102A43] font-heading font-semibold mb-2">Audit Log</h2>
         {accessLogs.length > 0 ? (
           accessLogs.map((log, index) => (
-            <p key={`${log.staff}-${index}`} className="text-sm text-[#486581]">{log.time} | {log.staff} | {log.file}</p>
+            <p key={`${log.staff}-${index}`} className="text-sm text-[#486581]">
+              {log.time} | {log.staff} | {log.file}
+            </p>
           ))
         ) : (
           <p className="text-sm text-[#486581]">No recent audit entries.</p>
@@ -131,15 +205,6 @@ export default function SettingsPage() {
           </table>
         </div>
       </div>
-
-      <details className="bg-white border border-[#D9E1EA] rounded-[12px] p-3 group">
-        <summary className="list-none cursor-pointer text-sm font-heading font-semibold text-[#102A43] flex items-center justify-between">
-          Hardening recommendations
-          <span className="text-[#627D98] group-open:rotate-180 transition-transform">⌄</span>
-        </summary>
-        <p className="mt-2 text-sm text-[#486581]">Enable OTP confirmation for sensitive actions (exports, stage overrides, file downloads) and enforce 90-day password rotation.</p>
-      </details>
     </motion.div>
   );
 }
-

@@ -170,10 +170,17 @@ export interface AdminDashboardOverview {
     completed: number;
     pending: number;
     avgTime: string;
+    avg_turnaround_minutes?: number;
     slaBreach: number;
     accuracy: number;
     auditsPassed: number;
     auditsFailed: number;
+    reassignments?: number;
+    on_leave_today?: boolean;
+    leave_type_today?: string | null;
+    leave_label_today?: string | null;
+    blocks_auto_assign_today?: boolean;
+    pending_on_leave?: number;
     loadStatus: string;
     revenue_total?: number;
     revenue_30d?: number;
@@ -196,6 +203,7 @@ export interface AdminDashboardOverview {
     acknowledged: number;
     critical: number;
   };
+  pending_reassign_count?: number;
 }
 
 export interface StaffAccuracyRow {
@@ -241,6 +249,9 @@ export interface AdminAlert {
     | "follow_up_required"
     | "lead_converted"
     | "staff_idle"
+    | "staff_leave_express"
+    | "task_reassign_pending"
+    | "staff_help_needed"
     | "task_assigned"
     | "task_activity"
     | "system";
@@ -542,6 +553,7 @@ export interface AdminTaskItem {
   assigned_staff_name?: string | null;
   assigned_staff_role?: StaffRole | string | null;
   customer_name?: string;
+  service_name?: string | null;
   task_type: string;
   description?: string | null;
   status: string;
@@ -900,7 +912,30 @@ export const adminAuthenticatedFetch = async (path: string, options: RequestInit
 
   const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
 
+  const forceIdleLogout = async (res: Response) => {
+    let detail = "";
+    try {
+      const cloned = res.clone();
+      const body = (await cloned.json()) as {
+        detail?: string;
+        error?: { message?: string };
+        message?: string;
+      };
+      detail = String(body?.detail || body?.error?.message || body?.message || "");
+    } catch {
+      detail = "";
+    }
+    const idle = /inactivity/i.test(detail);
+    if (idle) {
+      clearAdminSession();
+      throw new Error("Session expired due to inactivity. Please login again.");
+    }
+    return false;
+  };
+
   if (response.status === 401) {
+    await forceIdleLogout(response);
+
     const nextAccess = await refreshAdminAccessToken();
     if (!nextAccess) {
       clearAdminSession();
@@ -919,6 +954,7 @@ export const adminAuthenticatedFetch = async (path: string, options: RequestInit
     });
 
     if (retryResponse.status === 401) {
+      await forceIdleLogout(retryResponse);
       clearAdminSession();
       throw new Error("Admin session expired. Please login again.");
     }
@@ -1180,6 +1216,8 @@ export type AdminDocumentRequirement = {
   is_mandatory: boolean;
   display_order: number;
   is_active: boolean;
+  allowed_file_types?: string[];
+  max_file_size_mb?: number | null;
   show_when_question_code?: string;
   show_when_value?: string;
 };
@@ -1811,6 +1849,83 @@ export const updateAdminServiceFeePlan = async (
   return payload.data?.plan;
 };
 
+export type AdminCountryPricingOffering = {
+  id: number;
+  country_id: number;
+  country_name: string;
+  country_slug: string;
+  service_id: number;
+  service_fee: string;
+  audit_fee: string | null;
+  govt_fee?: string | null;
+  is_active: boolean;
+  display_order: number;
+  processing_time?: string;
+  validity?: string;
+};
+
+export type AdminCountryPricingPayload = {
+  service_id: number;
+  base_fee: string;
+  audit_fee: string;
+  offerings: AdminCountryPricingOffering[];
+  countries: Array<{ id: number; name: string; slug: string }>;
+};
+
+export const listAdminServiceCountryPricing = async (serviceId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/country-pricing/`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<AdminCountryPricingPayload>(response);
+  return payload.data;
+};
+
+export const createAdminServiceCountryPricing = async (
+  serviceId: number,
+  body: {
+    country_id?: number;
+    country_slug?: string;
+    new_country_name?: string;
+    country_name?: string;
+    service_fee: string | number;
+    audit_fee?: string | number | null;
+    is_active?: boolean;
+  },
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/country-pricing/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ offering: AdminCountryPricingOffering }>(response);
+  return payload.data?.offering;
+};
+
+export const updateAdminServiceCountryPricing = async (
+  serviceId: number,
+  offeringId: number,
+  body: Record<string, unknown>,
+) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/services/${serviceId}/country-pricing/${offeringId}/`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  const payload = await parseApiResponse<{ offering: AdminCountryPricingOffering }>(response);
+  return payload.data?.offering;
+};
+
+export const deleteAdminServiceCountryPricing = async (serviceId: number, offeringId: number) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/services/${serviceId}/country-pricing/${offeringId}/`,
+    { method: "DELETE" },
+  );
+  await parseApiResponse(response);
+};
+
 export const deleteAdminServiceFeePlan = async (serviceId: number, planId: number) => {
   const response = await adminAuthenticatedFetch(`/admin/services/${serviceId}/fee-plans/${planId}/`, {
     method: "DELETE",
@@ -2187,16 +2302,42 @@ export const listAdminTasks = async (params?: { limit?: number; status?: string;
   return payload.data || [];
 };
 
+export type TaskReassignRequestItem = {
+  id: number;
+  status: string;
+  task_id: number;
+  task_type: string;
+  application_reference: string;
+  from_staff_id: number;
+  from_staff_name: string;
+  to_staff_id: number;
+  to_staff_name: string;
+  requested_by_id: number;
+  requested_by_name: string;
+  note?: string;
+  review_note?: string;
+  reviewed_by_id?: number | null;
+  reviewed_by_name?: string;
+  reviewed_at?: string | null;
+  created_at?: string | null;
+};
+
 export const assignAdminTask = async (taskId: number, staffId: number) => {
   const response = await adminAuthenticatedFetch("/tasks/assign/", {
     method: "POST",
     body: JSON.stringify({ task_id: taskId, staff_id: staffId }),
   });
-  const payload = await parseApiResponse<AdminTaskItem>(response);
+  const payload = await parseApiResponse<
+    | AdminTaskItem
+    | {
+        pending_approval: true;
+        request: TaskReassignRequestItem;
+      }
+  >(response);
   if (!payload.data) {
     throw new Error("Task assignment response missing.");
   }
-  return payload.data;
+  return { ...payload.data, message: payload.message || "" };
 };
 
 export const adminDirectAssignTask = async (taskId: number, staffId: number) => {
@@ -2220,8 +2361,293 @@ export const autoAssignAdminTasks = async () => {
   return { ...payload.data, message: payload.message };
 };
 
+export type StaffLeaveType = "full_day" | "half_day" | "sick" | "other";
 
-export const patchAdminTask = async (taskId: number, body: { status?: string; priority?: string; completion_notes?: string }) => {
+export interface StaffLeaveEntry {
+  id: number;
+  staff_id: number;
+  staff_name: string;
+  staff_role?: string;
+  marked_by_id?: number | null;
+  marked_by_name?: string;
+  date: string;
+  leave_type: StaffLeaveType | string;
+  reason?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface StaffLeaveCalendarPayload {
+  month: number;
+  year: number;
+  start?: string;
+  end?: string;
+  staff: Array<{ id: number; name: string; role: string; role_label?: string }>;
+  entries: StaffLeaveEntry[];
+}
+
+export const listAdminStaffLeave = async (params: { month: number; year: number; staffId?: number }) => {
+  const query = new URLSearchParams({
+    month: String(params.month),
+    year: String(params.year),
+  });
+  if (typeof params.staffId === "number") {
+    query.set("staff_id", String(params.staffId));
+  }
+  const response = await adminAuthenticatedFetch(`/admin/staff/leave/?${query.toString()}`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<StaffLeaveCalendarPayload>(response);
+  if (!payload.data) {
+    throw new Error("Leave calendar response missing.");
+  }
+  return payload.data;
+};
+
+export type TaskRoutingExpressMode = "any" | "express_only" | "standard_only";
+
+export type TaskRoutingRule = {
+  id: number;
+  name: string;
+  staff_id: number;
+  staff_name: string;
+  staff_role: string;
+  staff_on_leave_today?: boolean;
+  service_id: number | null;
+  service_name: string | null;
+  category_id: number | null;
+  category_name: string | null;
+  express_mode: TaskRoutingExpressMode | string;
+  task_type: string;
+  case_type: string;
+  pricing_country_slug: string;
+  auto_assign: boolean;
+  is_active: boolean;
+  priority: number;
+  created_by_id?: number | null;
+  created_by_name?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type TaskRoutingMeta = {
+  express_modes: Array<{ value: string; label: string }>;
+  task_types: Array<{ value: string; label: string }>;
+  case_types: Array<{ value: string; label: string }>;
+  staff: Array<{ id: number; name: string; role: string; role_label?: string }>;
+  services: Array<{ id: number; name: string; category_id?: number | null; is_active?: boolean }>;
+  categories: Array<{ id: number; name: string; slug?: string }>;
+};
+
+export type TaskRoutingRuleInput = {
+  name?: string;
+  staff_id: number;
+  service_id?: number | null;
+  category_id?: number | null;
+  express_mode?: TaskRoutingExpressMode | string;
+  task_type?: string;
+  case_type?: string;
+  pricing_country_slug?: string;
+  auto_assign?: boolean;
+  is_active?: boolean;
+  priority?: number;
+};
+
+export const listAdminRoutingRules = async () => {
+  const response = await adminAuthenticatedFetch("/admin/routing-rules/", { method: "GET" });
+  const payload = await parseApiResponse<{ rules: TaskRoutingRule[]; meta: TaskRoutingMeta }>(response);
+  return {
+    rules: payload.data?.rules || [],
+    meta: payload.data?.meta || {
+      express_modes: [],
+      task_types: [],
+      case_types: [],
+      staff: [],
+      services: [],
+      categories: [],
+    },
+  };
+};
+
+export const createAdminRoutingRule = async (body: TaskRoutingRuleInput) => {
+  const response = await adminAuthenticatedFetch("/admin/routing-rules/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ rule: TaskRoutingRule; backfill?: { assigned_count?: number } }>(response);
+  return payload.data;
+};
+
+export const updateAdminRoutingRule = async (ruleId: number, body: Partial<TaskRoutingRuleInput>) => {
+  const response = await adminAuthenticatedFetch(`/admin/routing-rules/${ruleId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<{ rule: TaskRoutingRule; backfill?: { assigned_count?: number } }>(response);
+  return payload.data;
+};
+
+export const deleteAdminRoutingRule = async (ruleId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/routing-rules/${ruleId}/`, {
+    method: "DELETE",
+  });
+  await parseApiResponse<{ id: number }>(response);
+};
+
+export const markAdminStaffLeave = async (
+  staffId: number,
+  body: { date: string; leave_type: StaffLeaveType | string; reason?: string },
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/staff/${staffId}/leave/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<StaffLeaveEntry>(response);
+  if (!payload.data) {
+    throw new Error("Leave save response missing.");
+  }
+  return payload.data;
+};
+
+export const clearAdminStaffLeave = async (staffId: number, date: string) => {
+  const response = await adminAuthenticatedFetch(
+    `/admin/staff/${staffId}/leave/?date=${encodeURIComponent(date)}`,
+    { method: "DELETE" },
+  );
+  const payload = await parseApiResponse<{ staff_id: number; date: string }>(response);
+  return payload.data;
+};
+
+export const listOwnStaffLeave = async (params: { month: number; year: number }) => {
+  const query = new URLSearchParams({
+    month: String(params.month),
+    year: String(params.year),
+  });
+  const response = await adminAuthenticatedFetch(`/staff/leave/?${query.toString()}`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<{
+    month: number;
+    year: number;
+    on_leave_today?: boolean;
+    entries: StaffLeaveEntry[];
+    colleagues?: Array<{ id: number; name: string; role: string }>;
+  }>(response);
+  if (!payload.data) {
+    throw new Error("Own leave response missing.");
+  }
+  return payload.data;
+};
+
+export const markOwnStaffLeave = async (body: {
+  date: string;
+  leave_type: StaffLeaveType | string;
+  reason?: string;
+}) => {
+  const response = await adminAuthenticatedFetch("/staff/leave/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<StaffLeaveEntry>(response);
+  if (!payload.data) {
+    throw new Error("Leave save response missing.");
+  }
+  return payload.data;
+};
+
+export const clearOwnStaffLeave = async (date: string) => {
+  const response = await adminAuthenticatedFetch(`/staff/leave/?date=${encodeURIComponent(date)}`, {
+    method: "DELETE",
+  });
+  const payload = await parseApiResponse<{ date: string }>(response);
+  return payload.data;
+};
+
+export const peerReassignAdminTask = async (taskId: number, staffId: number) => {
+  const response = await adminAuthenticatedFetch(`/staff/tasks/${taskId}/reassign/`, {
+    method: "POST",
+    body: JSON.stringify({ staff_id: staffId }),
+  });
+  const payload = await parseApiResponse<
+    | AdminTaskItem
+    | {
+        pending_approval: true;
+        request: TaskReassignRequestItem;
+      }
+  >(response);
+  if (!payload.data) {
+    throw new Error("Peer reassign response missing.");
+  }
+  return { ...payload.data, message: payload.message || "" };
+};
+
+export type WorkloadSettings = {
+  require_admin_approval_on_leave_reassign: boolean;
+  updated_at?: string | null;
+  updated_by_id?: number | null;
+  updated_by_name?: string;
+};
+
+export const getWorkloadSettings = async (): Promise<WorkloadSettings> => {
+  const response = await adminAuthenticatedFetch("/admin/workload-settings/", { method: "GET" });
+  const payload = await parseApiResponse<WorkloadSettings>(response);
+  if (!payload.data) {
+    throw new Error("Workload settings missing.");
+  }
+  return payload.data;
+};
+
+export const updateWorkloadSettings = async (
+  requireAdminApprovalOnLeaveReassign: boolean,
+): Promise<WorkloadSettings> => {
+  const response = await adminAuthenticatedFetch("/admin/workload-settings/", {
+    method: "PATCH",
+    body: JSON.stringify({
+      require_admin_approval_on_leave_reassign: requireAdminApprovalOnLeaveReassign,
+    }),
+  });
+  const payload = await parseApiResponse<WorkloadSettings>(response);
+  if (!payload.data) {
+    throw new Error("Workload settings update missing.");
+  }
+  return payload.data;
+};
+
+export const listTaskReassignRequests = async (statusFilter: string = "pending") => {
+  const q = encodeURIComponent(statusFilter || "pending");
+  const response = await adminAuthenticatedFetch(`/admin/task-reassign-requests/?status=${q}`, {
+    method: "GET",
+  });
+  const payload = await parseApiResponse<{ requests: TaskReassignRequestItem[]; count: number }>(response);
+  return payload.data?.requests || [];
+};
+
+export const decideTaskReassignRequest = async (
+  requestId: number,
+  decision: "approve" | "reject",
+  reviewNote?: string,
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/task-reassign-requests/${requestId}/decide/`, {
+    method: "POST",
+    body: JSON.stringify({ decision, review_note: reviewNote || "" }),
+  });
+  const payload = await parseApiResponse<TaskReassignRequestItem>(response);
+  if (!payload.data) {
+    throw new Error("Reassign decision response missing.");
+  }
+  return payload.data;
+};
+
+export const patchAdminTask = async (
+  taskId: number,
+  body: {
+    status?: string;
+    priority?: string;
+    completion_notes?: string;
+    need_help?: boolean;
+    help_message?: string;
+  },
+) => {
   const response = await adminAuthenticatedFetch(`/tasks/${taskId}/`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -2900,4 +3326,87 @@ export const deleteAdminBlogPost = async (postId: number) => {
     method: "DELETE",
   });
   await parseApiResponse(response);
+};
+
+export type AdminMiscCharge = {
+  id: number;
+  application_id: number | null;
+  reference_number: string;
+  file_number: string;
+  customer_name: string;
+  customer_email: string;
+  service_id: number | null;
+  service_name: string;
+  service_type: string;
+  pricing_country_slug: string;
+  description: string;
+  amount_pence: number;
+  amount_major: string;
+  currency: string;
+  status: "draft" | "sent" | "paid" | "cancelled" | string;
+  created_by_id: number | null;
+  sent_at: string | null;
+  paid_at: string | null;
+  stripe_session_id: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export const listAdminMiscCharges = async (params?: {
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  service?: string;
+  country?: string;
+  search?: string;
+  application_id?: number;
+  limit?: number;
+}) => {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.date_from) query.set("date_from", params.date_from);
+  if (params?.date_to) query.set("date_to", params.date_to);
+  if (params?.service) query.set("service", params.service);
+  if (params?.country) query.set("country", params.country);
+  if (params?.search) query.set("search", params.search);
+  if (typeof params?.application_id === "number") query.set("application_id", String(params.application_id));
+  if (typeof params?.limit === "number") query.set("limit", String(params.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await adminAuthenticatedFetch(`/admin/misc-charges/${suffix}`, { method: "GET" });
+  const payload = await parseApiResponse<{ charges: AdminMiscCharge[]; count: number }>(response);
+  return payload.data?.charges || [];
+};
+
+export const createAdminMiscCharge = async (
+  applicationId: number,
+  body: { description: string; amount?: number | string; amount_pence?: number },
+) => {
+  const response = await adminAuthenticatedFetch(`/admin/applications/${applicationId}/misc-charges/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload = await parseApiResponse<AdminMiscCharge>(response);
+  if (!payload.data) throw new Error("Charge create response missing.");
+  return payload.data;
+};
+
+export const sendAdminMiscCharge = async (chargeId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/misc-charges/${chargeId}/send/`, { method: "POST" });
+  const payload = await parseApiResponse<AdminMiscCharge>(response);
+  if (!payload.data) throw new Error("Charge send response missing.");
+  return payload.data;
+};
+
+export const cancelAdminMiscCharge = async (chargeId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/misc-charges/${chargeId}/cancel/`, { method: "POST" });
+  const payload = await parseApiResponse<AdminMiscCharge>(response);
+  if (!payload.data) throw new Error("Charge cancel response missing.");
+  return payload.data;
+};
+
+export const markPaidAdminMiscCharge = async (chargeId: number) => {
+  const response = await adminAuthenticatedFetch(`/admin/misc-charges/${chargeId}/mark-paid/`, { method: "POST" });
+  const payload = await parseApiResponse<AdminMiscCharge>(response);
+  if (!payload.data) throw new Error("Charge mark-paid response missing.");
+  return payload.data;
 };

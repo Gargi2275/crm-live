@@ -3,7 +3,12 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { ArrowRight, BadgeCheck, CheckCircle2, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
+import {
+  formatGbpAmount,
+  useServiceCountryPricing,
+} from "@/lib/service-country-pricing";
 
 const container = {
   hidden: {},
@@ -30,6 +35,8 @@ export type ServicePageLayoutProps = {
   highlights?: ServiceHighlight[];
   bulletPoints?: string[];
   extraHeroContent?: React.ReactNode;
+  /** Catalog service_type — enables country dropdown + live fee from /services/<id>/price/ */
+  serviceType?: string;
   pricing: {
     title?: string;
     lines: PricingLine[];
@@ -51,6 +58,7 @@ export function ServicePageLayout({
   highlights,
   bulletPoints,
   extraHeroContent,
+  serviceType,
   pricing,
   stats,
   whoFor,
@@ -60,14 +68,42 @@ export function ServicePageLayout({
 }: ServicePageLayoutProps) {
   const reduceMotion = useReducedMotion();
   const { isAuthenticated } = useAuth();
-  const startHref =
-    isAuthenticated || !pricing.ctaHref.startsWith("/")
-      ? pricing.ctaHref
-      : `/auth/login?next=${encodeURIComponent(pricing.ctaHref)}`;
+  const { countries, countrySlug, price, loading, onCountryChange } =
+    useServiceCountryPricing(serviceType);
+
+  const pricingLines = useMemo(() => {
+    if (!serviceType || !price) return pricing.lines;
+    const lines: PricingLine[] = [
+      {
+        label: "Service fee",
+        value: formatGbpAmount(price.service_fee || price.total_fee),
+        highlight: true,
+      },
+    ];
+    const audit = Number(price.audit_fee);
+    if (Number.isFinite(audit) && audit > 0) {
+      lines.push({
+        label: "Assessment fee",
+        value: formatGbpAmount(price.audit_fee),
+      });
+    }
+    return lines;
+  }, [serviceType, price, pricing.lines]);
+
+  const startHref = useMemo(() => {
+    let href = pricing.ctaHref;
+    if (serviceType && countrySlug && href.startsWith("/")) {
+      const url = new URL(href, "https://flyoci.local");
+      url.searchParams.set("country", countrySlug);
+      href = `${url.pathname}${url.search}`;
+    }
+    return isAuthenticated || !href.startsWith("/")
+      ? href
+      : `/auth/login?next=${encodeURIComponent(href)}`;
+  }, [pricing.ctaHref, serviceType, countrySlug, isAuthenticated]);
 
   return (
     <>
-      {/* Compact action-first hero */}
       <section className="relative overflow-hidden bg-[linear-gradient(180deg,#f3f8ff_0%,#ffffff_60%)] px-4 pb-8 pt-24 sm:px-6 sm:pb-10 sm:pt-28 lg:px-8">
         <div className="pointer-events-none absolute -right-16 top-8 h-52 w-52 rounded-full bg-[#dbeafe] blur-3xl" />
 
@@ -136,7 +172,6 @@ export function ServicePageLayout({
                 </motion.div>
               ) : null}
 
-              {/* Quick benefits under CTA area on mobile — pulled from whatYouGet */}
               {whatYouGet ? (
                 <motion.div
                   variants={fadeUp}
@@ -157,7 +192,6 @@ export function ServicePageLayout({
               ) : null}
             </div>
 
-            {/* Pricing / start card — primary action */}
             <motion.div variants={fadeUp} className="lg:sticky lg:top-24">
               <div className="overflow-hidden rounded-2xl border border-[#d6e8ff] bg-white shadow-[0_16px_40px_rgba(28,105,221,0.12)]">
                 <div className="h-1 bg-gradient-to-r from-[#1c69dd] via-[#60a5fa] to-[#1c69dd]" />
@@ -165,23 +199,52 @@ export function ServicePageLayout({
                   <h2 className="font-heading text-base font-bold text-[#041020]">
                     {pricing.title ?? "Start this service"}
                   </h2>
-                  <div className="mt-4 space-y-2">
-                    {pricing.lines.map((line) => (
-                      <div
-                        key={line.label}
-                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm ${
-                          line.highlight
-                            ? "border border-[#dbeafe] bg-[#f0f7ff] font-bold text-[#041020]"
-                            : "bg-[#f8fbff] text-[#486581]"
-                        }`}
+
+                  {serviceType && countries.length > 0 ? (
+                    <label className="mt-4 block">
+                      <span className="text-xs font-semibold text-[#627d98]">Your country</span>
+                      <select
+                        value={countrySlug}
+                        onChange={(e) => onCountryChange(e.target.value)}
+                        className="mt-1.5 w-full rounded-xl border border-[#d6e8ff] bg-[#f8fbff] px-3 py-2.5 text-sm font-semibold text-[#102a43] outline-none focus:border-[#1c69dd]"
                       >
-                        <span className="font-semibold">{line.label}</span>
-                        <strong className={line.highlight ? "text-[#1c69dd]" : "text-[#102a43]"}>
-                          {line.value}
-                        </strong>
-                      </div>
-                    ))}
+                        {countries.map((country) => (
+                          <option key={country.id} value={country.slug}>
+                            {country.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+
+                  <div className="mt-4 space-y-2">
+                    {loading && serviceType ? (
+                      <p className="rounded-xl bg-[#f8fbff] px-3 py-2.5 text-sm text-[#829ab1]">
+                        Updating price…
+                      </p>
+                    ) : (
+                      pricingLines.map((line) => (
+                        <div
+                          key={line.label}
+                          className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm ${
+                            line.highlight
+                              ? "border border-[#dbeafe] bg-[#f0f7ff] font-bold text-[#041020]"
+                              : "bg-[#f8fbff] text-[#486581]"
+                          }`}
+                        >
+                          <span className="font-semibold">{line.label}</span>
+                          <strong className={line.highlight ? "text-[#1c69dd]" : "text-[#102a43]"}>
+                            {line.value}
+                          </strong>
+                        </div>
+                      ))
+                    )}
                   </div>
+                  {price?.source === "country_override" ? (
+                    <p className="mt-2 text-[11px] font-medium text-[#1c69dd]">
+                      Price for {price.country_name || countrySlug}
+                    </p>
+                  ) : null}
                   {pricing.footnote ? (
                     <p className="mt-3 text-xs leading-relaxed text-[#627d98]">{pricing.footnote}</p>
                   ) : null}
@@ -221,74 +284,73 @@ export function ServicePageLayout({
         </div>
       </section>
 
-      {/* Secondary detail — denser, below the fold */}
       {(whoFor || whatYouGet || whatWeDo || (processSteps && processSteps.length > 0)) && (
         <section className="border-t border-[#e8f1ff] bg-[#f8fbff] px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
           <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-2">
             {whoFor ? (
               <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5">
-                <h2 className="font-heading text-lg font-bold text-[#041020]">{whoFor.title}</h2>
+                <h3 className="font-heading text-lg font-bold text-[#041020]">{whoFor.title}</h3>
                 <ul className="mt-3 space-y-2">
                   {whoFor.items.map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-sm font-medium text-[#334e68]">
+                    <li key={item} className="flex items-start gap-2 text-sm text-[#486581]">
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
                       {item}
                     </li>
                   ))}
                 </ul>
                 {whoFor.footnote ? (
-                  <p className="mt-3 text-xs font-medium text-[#627d98]">{whoFor.footnote}</p>
+                  <p className="mt-3 text-xs text-[#829ab1]">{whoFor.footnote}</p>
                 ) : null}
               </div>
             ) : null}
 
-            {whatYouGet ? (
-              <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5 lg:hidden">
-                <h2 className="font-heading text-lg font-bold text-[#041020]">{whatYouGet.title}</h2>
-                <ul className="mt-3 space-y-2">
-                  {whatYouGet.items.map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-sm font-medium text-[#334e68]">
-                      <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
             {whatWeDo ? (
-              <div className={`rounded-2xl border border-[#e2ecf8] bg-white p-5 ${whoFor ? "" : "lg:col-span-2"}`}>
-                <h2 className="font-heading text-lg font-bold text-[#041020]">{whatWeDo.title}</h2>
-                <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5">
+                <h3 className="font-heading text-lg font-bold text-[#041020]">{whatWeDo.title}</h3>
+                <ul className="mt-3 space-y-2">
                   {whatWeDo.items.map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-sm font-medium text-[#334e68]">
+                    <li key={item} className="flex items-start gap-2 text-sm text-[#486581]">
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
                       {item}
                     </li>
                   ))}
                 </ul>
                 {whatWeDo.footnote ? (
-                  <p className="mt-3 text-xs font-medium text-[#627d98]">{whatWeDo.footnote}</p>
+                  <p className="mt-3 text-xs text-[#829ab1]">{whatWeDo.footnote}</p>
                 ) : null}
+              </div>
+            ) : null}
+
+            {whatYouGet ? (
+              <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5 lg:hidden">
+                <h3 className="font-heading text-lg font-bold text-[#041020]">{whatYouGet.title}</h3>
+                <ul className="mt-3 space-y-2">
+                  {whatYouGet.items.map((item) => (
+                    <li key={item} className="flex items-start gap-2 text-sm text-[#486581]">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#1c69dd]" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
 
             {processSteps && processSteps.length > 0 ? (
               <div className="rounded-2xl border border-[#e2ecf8] bg-white p-5 lg:col-span-2">
-                <h2 className="font-heading text-lg font-bold text-[#041020]">Step-by-step process</h2>
-                <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                  {processSteps.map((step, i) => (
-                    <div
+                <h3 className="font-heading text-lg font-bold text-[#041020]">How it works</h3>
+                <ol className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {processSteps.map((step, index) => (
+                    <li
                       key={step}
-                      className="flex items-start gap-3 rounded-xl border border-[#eef3fa] bg-[#f8fbff] px-3.5 py-3"
+                      className="flex items-start gap-2 rounded-xl bg-[#f8fbff] px-3 py-2.5 text-sm text-[#486581]"
                     >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1c69dd] text-xs font-bold text-white">
-                        {i + 1}
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#1c69dd] text-[11px] font-bold text-white">
+                        {index + 1}
                       </span>
-                      <p className="pt-0.5 text-sm font-semibold leading-snug text-[#041020]">{step}</p>
-                    </div>
+                      {step}
+                    </li>
                   ))}
-                </div>
+                </ol>
               </div>
             ) : null}
           </div>

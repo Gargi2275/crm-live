@@ -33,6 +33,7 @@ type DashboardApplication = {
   full_payment_status?: string | null;
   quote_status?: string | null;
   payment_confirmed?: boolean;
+  pending_misc_charge_count?: number;
 };
 
 function canDeleteDraftApplication(app: DashboardApplication): boolean {
@@ -180,6 +181,19 @@ function statusBucket(status: string): Exclude<StatusFilter, "all"> {
   return "progress";
 }
 
+function hasPendingMiscCharge(app: DashboardApplication): boolean {
+  return Number(app.pending_misc_charge_count || 0) > 0;
+}
+
+function appStatusBucket(app: DashboardApplication): Exclude<StatusFilter, "all"> {
+  if (hasPendingMiscCharge(app)) return "action";
+  return statusBucket(app.application_status);
+}
+
+function applicationNeedsAction(app: DashboardApplication): boolean {
+  return appStatusBucket(app) === "action";
+}
+
 function isApplicationPaid(app: DashboardApplication): boolean {
   if (app.payment_confirmed) return true;
   if (String(app.full_payment_status || "").toLowerCase() === "paid") return true;
@@ -248,7 +262,13 @@ function statusTone(status: string) {
   if (key.includes("paid") || key.includes("approved") || key.includes("complete")) {
     return "bg-emerald-50 text-emerald-700 border-emerald-100";
   }
-  if (key.includes("pending") || key.includes("review") || key.includes("upload") || key.includes("correction")) {
+  if (
+    key.includes("action") ||
+    key.includes("pending") ||
+    key.includes("review") ||
+    key.includes("upload") ||
+    key.includes("correction")
+  ) {
     return "bg-amber-50 text-amber-800 border-amber-100";
   }
   if (key.includes("reject") || key.includes("closed")) {
@@ -334,7 +354,7 @@ export default function DashboardPage() {
       closed: 0,
     };
     for (const app of applications) {
-      counts[statusBucket(app.application_status)] += 1;
+      counts[appStatusBucket(app)] += 1;
     }
     return counts;
   }, [applications]);
@@ -347,7 +367,7 @@ export default function DashboardPage() {
   const filteredApplications = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = applications.filter((app) => {
-      if (statusFilter !== "all" && statusBucket(app.application_status) !== statusFilter) return false;
+      if (statusFilter !== "all" && appStatusBucket(app) !== statusFilter) return false;
       if (serviceFilter !== "all" && serviceCategory(app) !== serviceFilter) return false;
       if (!q) return true;
       const haystack = [
@@ -598,11 +618,12 @@ export default function DashboardPage() {
                 app.service_type && app.service_type.toLowerCase().startsWith("evisa")
                   ? `/indian-e-visa?case=${encodeURIComponent(app.reference_number)}&view=details`
                   : `/dashboard/document-audit?reference=${encodeURIComponent(app.reference_number)}&resume=1`;
-              const needsAction = statusBucket(app.application_status) === "action";
+              const needsAction = applicationNeedsAction(app);
               const applicantName = resolveApplicantName(app);
               const initials = applicantInitials(applicantName);
               const progressLabel = progressStatusLabel(app);
               const showPaidBadge = isApplicationPaid(app);
+              const showActionTag = needsAction && progressLabel !== "Action needed";
 
               return (
                 <article
@@ -634,6 +655,11 @@ export default function DashboardPage() {
                           Paid
                         </span>
                       ) : null}
+                      {showActionTag ? (
+                        <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                          Action needed
+                        </span>
+                      ) : null}
                       <span
                         className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${statusTone(
                           progressLabel,
@@ -663,7 +689,6 @@ export default function DashboardPage() {
                     {applied ? <p>Applied {applied}</p> : null}
                     {updated && updated !== applied ? <p>Updated {updated}</p> : null}
                     {governmentReference ? <p className="truncate">Gov: {governmentReference}</p> : null}
-                    {needsAction ? <p className="font-semibold text-amber-700">Action needed</p> : null}
                   </div>
 
                   <div className="mt-auto pt-3">

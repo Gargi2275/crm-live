@@ -1,11 +1,12 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { DocumentAuditJourney } from "@/components/dashboard/DocumentAuditJourney";
 import { PageLoader } from "@/components/ui/PageLoader";
+import { setStoredPricingCountrySlug } from "@/lib/service-country-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,11 @@ function DocumentAuditContent() {
   const resumeReference = (searchParams.get("reference") || "").trim().toUpperCase() || undefined;
   const startFresh = ["1", "true", "yes"].includes((searchParams.get("start") || "").trim().toLowerCase());
   const serviceType = (searchParams.get("service") || "").trim() || undefined;
+  const pricingCountry = (searchParams.get("country") || "").trim().toLowerCase();
+
+  useEffect(() => {
+    if (pricingCountry) setStoredPricingCountrySlug(pricingCountry);
+  }, [pricingCountry]);
 
   if (loading) {
     return (

@@ -36,6 +36,7 @@ export const API_ENDPOINTS = {
   SERVICES: {
     LIST: '/services/',
     DETAIL: '/services/:service_id/',
+    PRICE: '/services/:service_id/price/',
   },
   // Applications
   APPLICATIONS: {

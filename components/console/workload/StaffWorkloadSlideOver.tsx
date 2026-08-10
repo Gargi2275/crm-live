@@ -73,6 +73,7 @@ function staffActivitySummary(task: AdminTaskItem) {
 
 function loadStatusStyles(status: string) {
   const normalized = String(status || "").toLowerCase();
+  if (normalized === "on leave") return "bg-[#FEE2E2] text-[#9B1C1C] border-[#F8B4B4]";
   if (normalized === "overloaded") return "bg-[#FEE4E2] text-[#B42318] border-[#FECDCA]";
   if (normalized === "busy") return "bg-[#FFF4E5] text-[#9C4F17] border-[#F9DBAF]";
   return "bg-[#E6F7F2] text-[#006F57] border-[#B7EBD8]";
@@ -215,10 +216,10 @@ export function StaffWorkloadSlideOver({
       <button
         type="button"
         aria-label="Close panel"
-        className="flex-1 bg-[#102A43]/40"
+        className="hidden sm:block flex-1 bg-[#102A43]/40"
         onClick={handleClose}
       />
-      <aside className="w-full max-w-[520px] h-[100dvh] max-h-[100dvh] min-h-0 bg-white shadow-2xl flex flex-col border-l border-[#D9E1EA] overflow-hidden">
+      <aside className="ml-auto w-full max-w-full sm:max-w-[520px] shrink-0 h-[100dvh] max-h-[100dvh] min-h-0 bg-white shadow-2xl flex flex-col border-l border-[#D9E1EA] overflow-hidden">
         <div className="shrink-0 sticky top-0 z-30 bg-white border-b border-[#E5EAF0] px-4 pt-4 pb-3 shadow-sm">
           <button
             type="button"
@@ -226,7 +227,7 @@ export function StaffWorkloadSlideOver({
             className="w-full flex items-center justify-center gap-2 rounded-[10px] bg-[#009877] px-4 py-3 text-sm font-heading font-semibold text-white hover:bg-[#007B61] transition-colors"
           >
             <ChevronLeft className="w-5 h-5 shrink-0" />
-            {backLabel}
+            <span className="truncate">{backLabel}</span>
           </button>
         </div>
 

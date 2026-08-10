@@ -7,6 +7,7 @@ export const metadata = buildPageMetadata(PAGE_SEO.ociRenewal);
 export default function OCIRenewalPage() {
   return (
     <ServicePageLayout
+      serviceType="oci_renewal"
       eyebrow="OCI Renewal Service"
       title="OCI Renewal / Transfer to New Passport"
       description="If your passport changed or your OCI requires re-issuance, we manage the process clearly from document prep to final submission guidance."

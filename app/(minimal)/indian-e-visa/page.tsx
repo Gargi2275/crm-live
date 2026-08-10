@@ -16,13 +16,16 @@ import {
   OrderSummaryCard,
   ServiceOptionList,
   checkoutFieldClass,
+  checkoutFieldErrorClass,
   checkoutLabelClass,
+  sanitizeMobileDigits,
 } from "@/components/checkout/CheckoutShell";
 import { eVisaApi } from "@/lib/api-client";
 import { EVISA_DEFAULTS } from "@/lib/evisa-config";
 import { authService } from "@/lib/auth";
-import { authenticatedFetch, getPublicTestimonials, submitTestimonial } from "@/lib/api";
+import { authenticatedFetch, getPublicTestimonials, setTokens, submitTestimonial } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
+import { fetchServicePrice, setStoredPricingCountrySlug } from "@/lib/service-country-pricing";
 
 type ExtraApplicant = {
   id: string;
@@ -37,17 +40,59 @@ const RELATIONSHIP_OPTIONS = ["Father", "Mother", "Spouse", "Son", "Daughter"] a
 
 const registrationSchema = z.object({
   visaDuration: z.enum(["1-Year", "5-Year"], { message: "Select visa duration" }),
-  email: z.string().min(1, 'Email is required').email("Enter a valid email address"),
-  countryCode: z.string().min(1),
-  phone: z.string().min(7, "Enter a valid phone number"),
-  fullName: z.string().min(2, "Enter your full name as per passport"),
-  nationality: z.string().min(1, "Select your nationality"),
-  countryOfResidence: z.string().min(1, "Select your country of residence"),
-  purposeOfVisit: z.enum(["Tourism", "Business", "Medical", "Conference", "Other"], { message: "Select purpose of visit" }),
+  email: z
+    .string()
+    .trim()
+    .min(1, "Email is required")
+    .email("Enter a valid email address"),
+  countryCode: z.string().trim().min(1, "Select country code"),
+  phone: z
+    .string()
+    .trim()
+    .min(1, "Mobile number is required")
+    .regex(/^\d{10}$/, "Enter a valid 10-digit mobile number"),
+  fullName: z
+    .string()
+    .trim()
+    .min(2, "Enter your full name as per passport")
+    .max(120, "Name is too long"),
+  nationality: z.string().trim().min(1, "Select your nationality"),
+  countryOfResidence: z.string().trim().min(1, "Select your country of residence"),
+  purposeOfVisit: z.enum(["Tourism", "Business", "Medical", "Conference", "Other"], {
+    message: "Select purpose of visit",
+  }),
   consent: z.literal(true, { message: "You must agree to continue" }),
 });
 
 type RegistrationData = z.infer<typeof registrationSchema>;
+
+type ExtraApplicantErrors = {
+  fullName?: string;
+  phone?: string;
+  email?: string;
+};
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validateExtraApplicant(row: ExtraApplicant): ExtraApplicantErrors {
+  const errors: ExtraApplicantErrors = {};
+  const hasAny = Boolean(row.fullName.trim() || row.email.trim() || row.phone.trim());
+  if (!hasAny) return errors;
+
+  if (!row.fullName.trim() || row.fullName.trim().length < 2) {
+    errors.fullName = "Enter full name as per passport";
+  }
+  const digits = row.phone.replace(/\D/g, "");
+  if (!row.phone.trim() || !/^\d{10}$/.test(digits)) {
+    errors.phone = "Enter a valid 10-digit mobile number";
+  }
+  if (!row.email.trim()) {
+    errors.email = "Email is required";
+  } else if (!EMAIL_PATTERN.test(row.email.trim())) {
+    errors.email = "Enter a valid email address";
+  }
+  return errors;
+}
 
 const containerVariants = {
   hidden: {},
@@ -452,8 +497,9 @@ export default function RegistrationPage() {
   const searchParams = useSearchParams();
   const { data, updateData, resetData } = useEVisa();
   const originOptionIdRef = useRef<number | null>(null);
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, refreshUser } = useAuth();
   const [extraApplicants, setExtraApplicants] = useState<ExtraApplicant[]>([]);
+  const [extraApplicantErrors, setExtraApplicantErrors] = useState<Record<string, ExtraApplicantErrors>>({});
   const [emailAutofilled, setEmailAutofilled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitError, setHasSubmitError] = useState(false);
@@ -566,6 +612,7 @@ export default function RegistrationPage() {
   const originSlugFromQuery = (searchParams.get("origin") || "").trim();
   const optionFromQuery = Number(searchParams.get("option") || "");
   const durationFromQuery = (searchParams.get("duration") || "").trim();
+  const countryFromQuery = (searchParams.get("country") || "").trim().toLowerCase();
   const shouldHydrateFromPersistedState = Boolean(magicToken || caseFromQuery || resumeMode || detailsMode || hasActiveDraftSession);
   const nationalityOptions = useMemo(
     () => appendOtherOption(dedupeAndSortOptions(countryOptions.map((option) => option.nationality || option.country))),
@@ -615,6 +662,8 @@ export default function RegistrationPage() {
 
   const { register, handleSubmit, control, setValue, watch, reset, resetField, formState: { errors } } = useForm<RegistrationData>({
     resolver: zodResolver(registrationSchema),
+    mode: "onTouched",
+    reValidateMode: "onChange",
     defaultValues: {
       visaDuration: shouldHydrateFromPersistedState ? data.visaDuration || "1-Year" : "1-Year",
       email: shouldHydrateFromPersistedState ? data.email || "" : "",
@@ -637,8 +686,11 @@ export default function RegistrationPage() {
       durationFromQuery === "5-Year" || durationFromQuery === "1-Year"
         ? durationFromQuery
         : null;
-    if (!optionId && !originSlugFromQuery && !duration) return;
+    if (!optionId && !originSlugFromQuery && !duration && !countryFromQuery) return;
     originOptionIdRef.current = optionId;
+    if (countryFromQuery) {
+      setStoredPricingCountrySlug(countryFromQuery);
+    }
     updateData({
       ...(optionId ? { originOptionId: optionId } : {}),
       ...(originSlugFromQuery ? { originSlug: originSlugFromQuery } : {}),
@@ -647,10 +699,49 @@ export default function RegistrationPage() {
     if (duration) {
       setValue("visaDuration", duration);
     }
-  }, [optionFromQuery, originSlugFromQuery, durationFromQuery, updateData, setValue]);
+  }, [optionFromQuery, originSlugFromQuery, durationFromQuery, countryFromQuery, updateData, setValue]);
 
   const selectedVisaDuration = watch("visaDuration") || "1-Year";
-  const selectedFeePounds = selectedVisaDuration === "5-Year" ? 150 : 88;
+  const [countryFeePounds, setCountryFeePounds] = useState<number | null>(null);
+  useEffect(() => {
+    const slug = countryFromQuery || "";
+    if (!slug) {
+      setCountryFeePounds(null);
+      return;
+    }
+    let cancelled = false;
+    const serviceType = selectedVisaDuration === "5-Year" ? "evisa_5year" : "evisa_1year";
+    (async () => {
+      try {
+        const listRes = await fetch(`${API_BASE_URL}/services/`, { method: "GET" });
+        if (!listRes.ok) return;
+        const raw = await listRes.json();
+        const list = raw?.data || raw;
+        const rows = Array.isArray(list) ? list : list?.services || [];
+        const match = rows.find(
+          (row: { service_type?: string; id?: number }) =>
+            String(row.service_type || "").toLowerCase() === serviceType,
+        );
+        const id = Number(match?.id || 0);
+        if (!id) return;
+        const price = await fetchServicePrice(id, slug);
+        const fee = Number(price?.total_fee ?? price?.service_fee);
+        if (!cancelled && Number.isFinite(fee)) setCountryFeePounds(fee);
+      } catch {
+        if (!cancelled) setCountryFeePounds(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [countryFromQuery, selectedVisaDuration]);
+
+  const selectedFeePounds =
+    countryFeePounds != null && Number.isFinite(countryFeePounds)
+      ? countryFeePounds
+      : selectedVisaDuration === "5-Year"
+        ? 150
+        : 88;
   const selectedFeeLabel = `£${selectedFeePounds}`;
   const selectedServiceLabel =
     selectedVisaDuration === "5-Year" ? "5-Year Indian Tourist e-Visa" : "1-Year Indian Tourist e-Visa";
@@ -712,11 +803,34 @@ export default function RegistrationPage() {
   };
 
   const updateExtraApplicant = (id: string, patch: Partial<ExtraApplicant>) => {
-    setExtraApplicants((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+    setExtraApplicants((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row;
+        const next = { ...row, ...patch };
+        setExtraApplicantErrors((current) => {
+          if (!current[id]) return current;
+          const nextErrors = validateExtraApplicant(next);
+          const copy = { ...current };
+          if (Object.keys(nextErrors).length === 0) {
+            delete copy[id];
+          } else {
+            copy[id] = nextErrors;
+          }
+          return copy;
+        });
+        return next;
+      }),
+    );
   };
 
   const removeExtraApplicant = (id: string) => {
     setExtraApplicants((prev) => prev.filter((row) => row.id !== id));
+    setExtraApplicantErrors((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -1079,18 +1193,22 @@ export default function RegistrationPage() {
     setIsSubmitting(true);
     setHasSubmitError(false);
 
-    const incompleteExtras = extraApplicants.filter(
-      (row) => row.fullName.trim() || row.email.trim() || row.phone.trim()
-        ? !(row.fullName.trim() && row.email.trim() && row.phone.trim())
-        : false
-    );
-    if (incompleteExtras.length > 0) {
+    const nextExtraErrors: Record<string, ExtraApplicantErrors> = {};
+    for (const row of extraApplicants) {
+      const rowErrors = validateExtraApplicant(row);
+      if (Object.keys(rowErrors).length > 0) {
+        nextExtraErrors[row.id] = rowErrors;
+      }
+    }
+    if (Object.keys(nextExtraErrors).length > 0) {
+      setExtraApplicantErrors(nextExtraErrors);
       toast.error("Please complete name, email, and mobile for each added applicant — or remove them.");
       setIsSubmitting(false);
       setHasSubmitError(true);
       setTimeout(() => setHasSubmitError(false), 500);
       return;
     }
+    setExtraApplicantErrors({});
 
     const readyExtras = extraApplicants.filter(
       (row) => row.fullName.trim() && row.email.trim() && row.phone.trim()
@@ -1198,19 +1316,33 @@ export default function RegistrationPage() {
         otpExpiresInMinutes: response.data.otp_expires_in_minutes ?? EVISA_DEFAULTS.otpExpiresInMinutes,
         resendCooldownSeconds: response.data.resend_cooldown_seconds ?? EVISA_DEFAULTS.resendCooldownSeconds,
         maxResends: response.data.max_resends ?? EVISA_DEFAULTS.maxResends,
-        isEmailConfirmed: false,
+        isEmailConfirmed: true,
         hasPaid: false,
         hasUploaded: false,
       });
 
-      const backendConfirmUrl = response.data.confirm_url;
-      const cooldownSeconds = response.data.resend_cooldown_seconds ?? EVISA_DEFAULTS.resendCooldownSeconds;
-      if (backendConfirmUrl) {
-        const separator = backendConfirmUrl.includes("?") ? "&" : "?";
-        router.push(`${backendConfirmUrl}${separator}cooldown=${encodeURIComponent(String(cooldownSeconds))}`);
-      } else {
-        router.push(`/indian-e-visa/confirm-email?case=${encodeURIComponent(fileNumber)}&cooldown=${encodeURIComponent(String(cooldownSeconds))}`);
+      if (response.data.tokens?.access && response.data.tokens?.refresh) {
+        setTokens(response.data.tokens.access, response.data.tokens.refresh);
+        try {
+          await refreshUser();
+        } catch {
+          // Tokens are stored; auth context recovers on next check.
+        }
       }
+
+      const paymentUrl =
+        response.data.payment_url ||
+        (response.data.confirm_url?.includes("/payment")
+          ? response.data.confirm_url
+          : null) ||
+        `/indian-e-visa/payment?case=${encodeURIComponent(fileNumber)}`;
+      const separator = paymentUrl.includes("?") ? "&" : "?";
+      const hasCase = /[?&]case=/i.test(paymentUrl);
+      router.push(
+        hasCase
+          ? paymentUrl
+          : `${paymentUrl}${separator}case=${encodeURIComponent(fileNumber)}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Registration failed. Please try again.";
       toast.error(message);
@@ -2525,6 +2657,7 @@ if (profileRes.ok) {
   }
 
   const fieldClass = `${checkoutFieldClass} ${fieldDisabledClass}`;
+  const fieldError = (hasError: boolean) => `${fieldClass} ${hasError ? checkoutFieldErrorClass : ""}`;
 
   const summaryLines = [
     {
@@ -2572,13 +2705,16 @@ if (profileRes.ok) {
                 disabled={isSubmitting || isReadOnlyApplication}
                 readOnly={isReadOnlyApplication}
                 placeholder="As on passport"
-                className={fieldClass}
+                className={fieldError(Boolean(errors.fullName))}
+                aria-invalid={Boolean(errors.fullName)}
               />
               {errors.fullName ? <p className="mt-1 text-[11px] text-[#E11D48]">{errors.fullName.message}</p> : null}
             </div>
 
             <div>
-              <label className={checkoutLabelClass}>Mobile Number</label>
+              <label className={checkoutLabelClass}>
+                Mobile Number <span className="text-[#E11D48]">*</span>
+              </label>
               <div className="flex gap-2">
                 <Controller
                   name="countryCode"
@@ -2589,21 +2725,37 @@ if (profileRes.ok) {
                       options={countryOptions}
                       loading={isCountryOptionsLoading}
                       disabled={isSubmitting || isReadOnlyApplication}
-                      className={`w-[92px] shrink-0 ${fieldClass}`}
+                      className={`w-[92px] shrink-0 ${fieldError(Boolean(errors.countryCode || errors.phone))}`}
                       onChange={field.onChange}
                     />
                   )}
                 />
                 <input
-                  {...register("phone")}
                   type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
                   disabled={isSubmitting || isReadOnlyApplication}
                   readOnly={isReadOnlyApplication}
-                  placeholder="Phone number"
-                  className={`min-w-0 flex-1 ${fieldClass}`}
+                  placeholder="10-digit mobile number"
+                  className={`min-w-0 flex-1 ${fieldError(Boolean(errors.phone))}`}
+                  aria-invalid={Boolean(errors.phone)}
+                  {...register("phone", {
+                    onChange: (event) => {
+                      const next = sanitizeMobileDigits(event.target.value, 10);
+                      event.target.value = next;
+                      setValue("phone", next, { shouldDirty: true, shouldValidate: true });
+                    },
+                  })}
                 />
               </div>
-              {errors.phone ? <p className="mt-1 text-[11px] text-[#E11D48]">{errors.phone.message}</p> : null}
+              {errors.countryCode ? (
+                <p className="mt-1 text-[11px] text-[#E11D48]">{errors.countryCode.message}</p>
+              ) : errors.phone ? (
+                <p className="mt-1 text-[11px] text-[#E11D48]">{errors.phone.message}</p>
+              ) : (
+                <p className="mt-1 text-[11px] text-[#829AB1]">Digits only · exactly 10 numbers</p>
+              )}
             </div>
 
             <div>
@@ -2616,7 +2768,8 @@ if (profileRes.ok) {
                 disabled={isSubmitting || isReadOnlyApplication || (emailAutofilled && isAuthenticated)}
                 readOnly={isReadOnlyApplication || (emailAutofilled && isAuthenticated)}
                 placeholder="you@email.com"
-                className={`${fieldClass} ${emailAutofilled && isAuthenticated ? "bg-[#F0F7FF]" : ""}`}
+                className={`${fieldError(Boolean(errors.email))} ${emailAutofilled && isAuthenticated ? "bg-[#F0F7FF]" : ""}`}
+                aria-invalid={Boolean(errors.email)}
               />
               {errors.email ? (
                 <p className="mt-1 text-[11px] text-[#E11D48]">{errors.email.message}</p>
@@ -2641,7 +2794,7 @@ if (profileRes.ok) {
                     placeholder="Select country"
                     loading={isCountryOptionsLoading}
                     disabled={isSubmitting || isReadOnlyApplication}
-                    className={fieldClass}
+                    className={fieldError(Boolean(errors.countryOfResidence || errors.nationality))}
                     onChange={(value) => {
                       field.onChange(value);
                       const nationalityMatch =
@@ -2670,8 +2823,15 @@ if (profileRes.ok) {
           </div>
 
           {/* Extra applicants expand on SAME screen */}
-          {extraApplicants.map((applicant, index) => (
-            <div key={applicant.id} className="rounded-lg border border-[#D7E4F4] bg-[#F8FBFF] p-3">
+          {extraApplicants.map((applicant, index) => {
+            const rowErrors = extraApplicantErrors[applicant.id] || {};
+            return (
+            <div
+              key={applicant.id}
+              className={`rounded-lg border bg-[#F8FBFF] p-3 ${
+                Object.keys(rowErrors).length ? "border-[#F3A4A4]" : "border-[#D7E4F4]"
+              }`}
+            >
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-[13px] font-semibold text-[#0F1F3D]">Applicant {index + 2}</p>
                 <button
@@ -2685,47 +2845,71 @@ if (profileRes.ok) {
               </div>
               <div className="grid gap-2.5 sm:grid-cols-2">
                 <div>
-                  <label className={checkoutLabelClass}>Name</label>
+                  <label className={checkoutLabelClass}>
+                    Name <span className="text-[#E11D48]">*</span>
+                  </label>
                   <input
                     type="text"
                     value={applicant.fullName}
                     disabled={isSubmitting || isReadOnlyApplication}
                     onChange={(e) => updateExtraApplicant(applicant.id, { fullName: e.target.value })}
                     placeholder="As on passport"
-                    className={fieldClass}
+                    className={fieldError(Boolean(rowErrors.fullName))}
                   />
+                  {rowErrors.fullName ? (
+                    <p className="mt-1 text-[11px] text-[#E11D48]">{rowErrors.fullName}</p>
+                  ) : null}
                 </div>
                 <div>
-                  <label className={checkoutLabelClass}>Mobile</label>
+                  <label className={checkoutLabelClass}>
+                    Mobile <span className="text-[#E11D48]">*</span>
+                  </label>
                   <div className="flex gap-2">
                     <SearchableDialCode
                       value={applicant.countryCode}
                       options={countryOptions}
                       loading={isCountryOptionsLoading}
                       disabled={isSubmitting || isReadOnlyApplication}
-                      className={`w-[92px] shrink-0 ${fieldClass}`}
+                      className={`w-[92px] shrink-0 ${fieldError(Boolean(rowErrors.phone))}`}
                       onChange={(value) => updateExtraApplicant(applicant.id, { countryCode: value })}
                     />
                     <input
                       type="tel"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={10}
                       value={applicant.phone}
                       disabled={isSubmitting || isReadOnlyApplication}
-                      onChange={(e) => updateExtraApplicant(applicant.id, { phone: e.target.value })}
-                      placeholder="Phone"
-                      className={`min-w-0 flex-1 ${fieldClass}`}
+                      onChange={(e) =>
+                        updateExtraApplicant(applicant.id, {
+                          phone: sanitizeMobileDigits(e.target.value, 10),
+                        })
+                      }
+                      placeholder="10-digit mobile"
+                      className={`min-w-0 flex-1 ${fieldError(Boolean(rowErrors.phone))}`}
                     />
                   </div>
+                  {rowErrors.phone ? (
+                    <p className="mt-1 text-[11px] text-[#E11D48]">{rowErrors.phone}</p>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-[#829AB1]">Digits only · 10 numbers</p>
+                  )}
                 </div>
                 <div>
-                  <label className={checkoutLabelClass}>Email</label>
+                  <label className={checkoutLabelClass}>
+                    Email <span className="text-[#E11D48]">*</span>
+                  </label>
                   <input
                     type="email"
                     value={applicant.email}
                     disabled={isSubmitting || isReadOnlyApplication}
                     onChange={(e) => updateExtraApplicant(applicant.id, { email: e.target.value })}
                     placeholder="email@example.com"
-                    className={fieldClass}
+                    className={fieldError(Boolean(rowErrors.email))}
                   />
+                  {rowErrors.email ? (
+                    <p className="mt-1 text-[11px] text-[#E11D48]">{rowErrors.email}</p>
+                  ) : null}
                 </div>
                 <div>
                   <label className={checkoutLabelClass}>Relationship (optional)</label>
@@ -2745,7 +2929,8 @@ if (profileRes.ok) {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {!isReadOnlyApplication ? (
             <button
@@ -2787,7 +2972,7 @@ if (profileRes.ok) {
             <p className="-mt-1 text-[11px] text-[#E11D48]">{errors.visaDuration.message}</p>
           ) : null}
 
-          <label className="flex items-start gap-2">
+          <label className={`flex items-start gap-2 rounded-lg p-2 ${errors.consent ? "bg-[#FEF2F2]" : ""}`}>
             <input
               type="checkbox"
               {...register("consent")}
@@ -2795,7 +2980,8 @@ if (profileRes.ok) {
               className="mt-0.5 h-4 w-4 rounded border-[#C8D7EA] text-[#1A56DB] focus:ring-[#1A56DB]"
             />
             <span className="text-[12px] leading-snug text-[#627D98]">
-              I agree to the Terms & Privacy Policy and consent to be contacted about this application.
+              I agree to the Terms & Privacy Policy and consent to be contacted about this application.{" "}
+              <span className="text-[#E11D48]">*</span>
             </span>
           </label>
           {errors.consent ? <p className="-mt-1 text-[11px] text-[#E11D48]">{errors.consent.message}</p> : null}

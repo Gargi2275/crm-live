@@ -312,7 +312,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   return (
     <ConsoleProvider>
       <AdminPageChromeProvider>
-        <div className="flex min-h-screen w-full bg-[#F5F7FA] overflow-hidden text-slate-900 admin-shell text-[15px] leading-normal">
+        <div className="flex min-h-dvh w-full bg-[#F5F7FA] overflow-hidden text-slate-900 admin-shell text-[15px] leading-normal">
           <Sidebar
             collapsed={collapsed}
             setCollapsed={setCollapsed}
@@ -320,7 +320,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
             setMobileOpen={setMobileOpen}
           />
 
-          <div className="flex-1 min-w-0 h-screen overflow-y-auto flex flex-col">
+          <div className="flex-1 min-w-0 h-dvh overflow-y-auto overflow-x-hidden flex flex-col">
             <TopHeader
               mobileOpen={mobileOpen}
               onToggleMobileNav={() => setMobileOpen((v) => !v)}

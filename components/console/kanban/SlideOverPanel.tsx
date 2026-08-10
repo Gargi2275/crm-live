@@ -1,15 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Clock, FileText, MessageSquare, MoveRight, Send, CheckCircle, AlertTriangle, Download } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ChevronDown, Clock, FileText, MessageSquare, MoveRight, Plus, Send, CheckCircle, AlertTriangle, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { type PipelineCase, isApplicationFullyPaid, isPassportRenewalService, resolvePipelinePaymentStatus, stageAfterPayment } from "@/lib/kanban";
+import { type PipelineCase, isApplicationFullyPaid, isExpressOrUrgentPlan, isPassportRenewalService, resolvePipelinePaymentStatus, stageAfterPayment } from "@/lib/kanban";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   adminAuthenticatedFetch,
+  cancelAdminMiscCharge,
+  createAdminMiscCharge,
   downloadAdminApostilleDocumentBlob,
   getAdminApplicationMessages,
   getAdminApplicationDocuments,
+  listAdminMiscCharges,
+  markPaidAdminMiscCharge,
   patchAdminApostilleCase,
   patchAdminApplication,
   reopenAdminApplication,
@@ -17,6 +22,7 @@ import {
   sendAdminCustomerMessage,
   getAdminApplicationInternalMessages,
   sendAdminApplicationInternalMessage,
+  sendAdminMiscCharge,
   listStaffUsers,
   sendAdminApostilleThreadMessage,
   submitAdminAuditResult,
@@ -25,6 +31,7 @@ import {
   type AdminApplication,
   type AdminApplicationDocument,
   type AdminAuditFindingInput,
+  type AdminMiscCharge,
   type AdminStaffInternalMessage,
   type AdminStaffUser,
 } from "@/lib/admin-auth";
@@ -93,6 +100,36 @@ const toUploadedFileLabel = (document: AdminApplicationDocument) => {
 const normalizeDocValue = (value?: string) => (value || "").trim().toLowerCase();
 
 const toPounds = (pence?: number) => ((pence || 0) / 100).toFixed(2);
+
+function formatChargeWhen(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function miscChargeStatusClass(status: string): string {
+  const key = String(status || "").toLowerCase();
+  if (key === "paid") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (key === "sent") return "border-[#B7D7F7] bg-[#EEF4FF] text-[#0B69B7]";
+  if (key === "cancelled") return "border-[#D9E1EA] bg-[#F5F7FA] text-[#627D98]";
+  return "border-amber-200 bg-amber-50 text-amber-800";
+}
+
+function miscChargeStatusLabel(status: string): string {
+  const key = String(status || "").toLowerCase();
+  if (key === "draft") return "Draft — not emailed";
+  if (key === "sent") return "Awaiting customer payment";
+  if (key === "paid") return "Paid";
+  if (key === "cancelled") return "Voided";
+  return status;
+}
 
 const resolveApostilleAmountDue = (
   details: AdminApplication | null | undefined,
@@ -374,6 +411,29 @@ type InternalNoteRecipientOption = {
   subtitle?: string;
 };
 
+const NEED_HELP_PREFIX = /^\[Need help\s*\/\s*Waiting\]\s*/i;
+
+function parseInternalNoteText(raw: string) {
+  const text = String(raw || "");
+  const isNeedHelp = NEED_HELP_PREFIX.test(text);
+  return {
+    isNeedHelp,
+    body: isNeedHelp ? text.replace(NEED_HELP_PREFIX, "").trim() || text : text,
+  };
+}
+
+function formatInternalNoteTime(value?: string | null) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function InternalNoteRecipientSearch({
   staffRecipients,
   allowAllTeam,
@@ -390,10 +450,10 @@ function InternalNoteRecipientSearch({
   const [open, setOpen] = useState(false);
 
   const selectedLabel = useMemo(() => {
-    if (value === "all") return "All team";
+    if (value === "all") return "Everyone on the team";
     const staff = staffRecipients.find((member) => String(member.id) === value);
     if (!staff) return "";
-    return `${staff.full_name || staff.username} · ${staff.role.replaceAll("_", " ")}`;
+    return `${staff.full_name || staff.username} (${staff.role.replaceAll("_", " ")})`;
   }, [staffRecipients, value]);
 
   const options = useMemo(() => {
@@ -401,7 +461,7 @@ function InternalNoteRecipientSearch({
     const items: InternalNoteRecipientOption[] = [];
 
     if (allowAllTeam && (!q || "all team".includes(q) || q.includes("all") || q.includes("team"))) {
-      items.push({ key: "all", label: "All team", subtitle: "Notify everyone on staff" });
+      items.push({ key: "all", label: "Everyone on the team", subtitle: "Visible to all staff on this case" });
     }
 
     for (const staff of staffRecipients) {
@@ -436,9 +496,9 @@ function InternalNoteRecipientSearch({
 
   return (
     <div ref={wrapperRef} className="relative">
-      <label className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide">Send to</label>
+      <label className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide">Reply to</label>
       {value ? (
-        <div className="mt-1 flex items-center justify-between gap-2 rounded border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2">
+        <div className="mt-1 flex items-center justify-between gap-2 rounded-[10px] border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2">
           <p className="text-sm font-medium text-[#102A43]">{selectedLabel}</p>
           <button
             type="button"
@@ -462,8 +522,8 @@ function InternalNoteRecipientSearch({
               setOpen(true);
             }}
             onFocus={() => setOpen(true)}
-            placeholder={allowAllTeam ? "Search staff or all team..." : "Search staff by name..."}
-            className="w-full rounded border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
+            placeholder={allowAllTeam ? "Pick a person or everyone…" : "Search who to reply to…"}
+            className="w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white"
             autoComplete="off"
           />
           {open && (
@@ -521,7 +581,7 @@ export function SlideOverPanel({
   const canSendToAllTeam = adminUser?.role === "admin" || adminUser?.role === "ops_manager";
   const autoMovedCorrectionRef = useRef<string | null>(null);
   const previousCaseIdRef = useRef<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "messages" | "audit" | "documents">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "messages" | "audit" | "documents" | "charges">("overview");
   const [auditResult, setAuditResult] = useState<"green" | "amber" | "red">("green");
   const [auditorNotes, setAuditorNotes] = useState("");
   const [findings, setFindings] = useState<AdminAuditFindingInput[]>([]);
@@ -530,9 +590,14 @@ export function SlideOverPanel({
   const [apostilleQuotedFee, setApostilleQuotedFee] = useState("");
   const [apostilleReviewNote, setApostilleReviewNote] = useState("");
   const [isSavingApostille, setIsSavingApostille] = useState(false);
+  const [miscCharges, setMiscCharges] = useState<AdminMiscCharge[]>([]);
+  const [miscChargesLoading, setMiscChargesLoading] = useState(false);
+  const [showAddChargeModal, setShowAddChargeModal] = useState(false);
+  const [chargeDescription, setChargeDescription] = useState("");
+  const [chargeAmount, setChargeAmount] = useState("");
+  const [chargeBusy, setChargeBusy] = useState(false);
 
   const [evisaDocOverviewOpen, setEvisaDocOverviewOpen] = useState(false);
-  const [internalNotesOpen, setInternalNotesOpen] = useState(false);
   const [apostilleControlsOpen, setApostilleControlsOpen] = useState(false);
   const [showRequestDocs, setShowRequestDocs] = useState(false);
   const [showSendMessage, setShowSendMessage] = useState(false);
@@ -598,7 +663,6 @@ export function SlideOverPanel({
     setFindings([]);
     setActionBanner("");
     setEvisaDocOverviewOpen(false);
-    setInternalNotesOpen(false);
     setApostilleControlsOpen(false);
     setShowRequestDocs(false);
     setShowSendMessage(false);
@@ -609,6 +673,92 @@ export function SlideOverPanel({
     autoMovedCorrectionRef.current = null;
     setTargetStage(((details?.stage || caseData?.stage) || "NEW_LEAD") as PipelineCase["stage"]);
   }, [caseData?.id, details?.auditor_notes, details?.stage, caseData?.stage]);
+
+  useEffect(() => {
+    if (!details?.id) {
+      setMiscCharges([]);
+      return;
+    }
+    let cancelled = false;
+    setMiscChargesLoading(true);
+    void (async () => {
+      try {
+        const rows = await listAdminMiscCharges({ application_id: details.id, limit: 100 });
+        if (!cancelled) setMiscCharges(rows);
+      } catch {
+        if (!cancelled) setMiscCharges([]);
+      } finally {
+        if (!cancelled) setMiscChargesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [details?.id]);
+
+  const reloadMiscCharges = async () => {
+    if (!details?.id) return;
+    try {
+      const rows = await listAdminMiscCharges({ application_id: details.id, limit: 100 });
+      setMiscCharges(rows);
+    } catch {
+      // keep existing list
+    }
+  };
+
+  const handleCreateMiscCharge = async (andEmail = false) => {
+    if (!details?.id) return;
+    const description = chargeDescription.trim();
+    const amount = Number(chargeAmount);
+    if (!description) {
+      toast.error("Description is required.");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a valid amount in GBP.");
+      return;
+    }
+    setChargeBusy(true);
+    try {
+      const created = await createAdminMiscCharge(details.id, { description, amount });
+      let finalCharge = created;
+      if (andEmail) {
+        finalCharge = await sendAdminMiscCharge(created.id);
+        toast.success("Charge saved and payment email sent to customer.");
+      } else {
+        toast.success("Charge saved as draft. Email the payment link when ready.");
+      }
+      setShowAddChargeModal(false);
+      setChargeDescription("");
+      setChargeAmount("");
+      setMiscCharges((prev) => [finalCharge, ...prev.filter((row) => row.id !== finalCharge.id)]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create charge.");
+    } finally {
+      setChargeBusy(false);
+    }
+  };
+
+  const handleMiscChargeAction = async (chargeId: number, action: "send" | "cancel" | "mark-paid") => {
+    setChargeBusy(true);
+    try {
+      if (action === "send") {
+        await sendAdminMiscCharge(chargeId);
+        toast.success("Payment-link email sent to customer.");
+      } else if (action === "cancel") {
+        await cancelAdminMiscCharge(chargeId);
+        toast.success("Charge voided.");
+      } else {
+        await markPaidAdminMiscCharge(chargeId);
+        toast.success("Charge marked as paid manually.");
+      }
+      await reloadMiscCharges();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Action failed.");
+    } finally {
+      setChargeBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!details?.id) {
@@ -823,6 +973,12 @@ export function SlideOverPanel({
       (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
     );
   }, [details?.admin_messages, details?.audit_logs, threadMessages]);
+
+  const internalThread = useMemo(() => {
+    return [...internalMessages].sort(
+      (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime(),
+    );
+  }, [internalMessages]);
 
   const findingDocumentTypes = useMemo(() => {
     const normalize = (value?: string) => (value || "").trim().toLowerCase();
@@ -1708,10 +1864,89 @@ export function SlideOverPanel({
 
   if (!isOpen) return null;
 
-  return (
+  const addChargeModal =
+    showAddChargeModal && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/45 p-4"
+            onClick={() => {
+              setShowAddChargeModal(false);
+              setChargeDescription("");
+              setChargeAmount("");
+            }}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-[#D9E1EA] bg-white p-5 shadow-xl space-y-4"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h3 className="text-base font-semibold text-[#102A43]">Add miscellaneous charge</h3>
+              <p className="text-xs text-[#627D98] leading-relaxed">
+                Saved as a draft first, or email the customer a dashboard payment link right away. Amount is fixed — the customer cannot change it.
+              </p>
+              <label className="block text-xs font-semibold text-[#627D98]">
+                What is this charge for?
+                <span className="font-normal text-[#9AA5B1]"> (shown to the customer)</span>
+                <input
+                  value={chargeDescription}
+                  onChange={(e) => setChargeDescription(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#D9E1EA] px-3 py-2 text-sm text-[#102A43]"
+                  placeholder="e.g. Extra courier fee"
+                  autoFocus
+                />
+              </label>
+              <label className="block text-xs font-semibold text-[#627D98]">
+                Amount (GBP)
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={chargeAmount}
+                  onChange={(e) => setChargeAmount(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#D9E1EA] px-3 py-2 text-sm text-[#102A43]"
+                  placeholder="25.00"
+                />
+              </label>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddChargeModal(false);
+                    setChargeDescription("");
+                    setChargeAmount("");
+                  }}
+                  className="rounded-lg border border-[#D9E1EA] px-3 py-2 text-xs font-semibold text-[#486581]"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  disabled={chargeBusy}
+                  onClick={() => void handleCreateMiscCharge(false)}
+                  className="rounded-lg border border-[#D9E1EA] bg-white px-3 py-2 text-xs font-semibold text-[#334E68] disabled:opacity-50"
+                >
+                  {chargeBusy ? "Saving…" : "Save as draft"}
+                </button>
+                <button
+                  type="button"
+                  disabled={chargeBusy}
+                  onClick={() => void handleCreateMiscCharge(true)}
+                  className="rounded-lg bg-[#0B69B7] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {chargeBusy ? "Sending…" : "Save & email payment link"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
+  const panel = (
     <div
         className={cn(
-          "absolute inset-0 z-50 bg-white overflow-y-auto flex flex-col transform transition-transform duration-300 ease-in-out",
+          // fixed + portal: cover the viewport even when the page scroll container is scrolled
+          // (absolute inset-0 was opening above the fold — looked like “nothing opens” on Workload).
+          "fixed inset-0 z-[100] bg-white overflow-y-auto flex flex-col transform transition-transform duration-300 ease-in-out",
           isOpen ? "translate-y-0" : "translate-y-full"
         )}
       >
@@ -1733,7 +1968,7 @@ export function SlideOverPanel({
             <p className="text-sm text-[#486581] truncate">{caseData?.customer || "—"}</p>
             <span className="text-[#D9E1EA]">·</span>
             <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#33A1FD]/10 text-[#0B69B7] shrink-0">{caseData?.serviceType || "—"}</span>
-            {(caseData?.isExpress || details?.is_express || String(details?.fee_plan_code || "").toLowerCase() === "express") ? (
+            {(caseData?.isExpress || details?.is_express || isExpressOrUrgentPlan(details?.fee_plan_code)) ? (
               <>
                 <span className="text-[#D9E1EA]">·</span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#FFF7ED] text-[#C2410C] border border-[#C2410C]/30 shrink-0">
@@ -1743,15 +1978,15 @@ export function SlideOverPanel({
             ) : null}
             <span className="text-[#D9E1EA]">·</span>
             <span className="text-xs font-semibold text-[#486581] shrink-0">{toStageLabel(effectiveStage)}</span>
-            <span className={cn("text-xs font-semibold shrink-0", caseData.slaBreached ? "text-[#B42318]" : "text-[#006F57]")}>
-              SLA {caseData.slaTimer}
+            <span className={cn("text-xs font-semibold shrink-0", caseData?.slaBreached ? "text-[#B42318]" : "text-[#006F57]")}>
+              SLA {caseData?.slaTimer}
             </span>
           </div>
         </div>
 
         <div className="shrink-0 border-b border-[#E5EAF0] bg-white px-6 py-2">
           <div className="inline-flex rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-1">
-            {(["overview", "messages", "audit", "documents"] as const).map((tab) => (
+            {(["overview", "messages", "audit", "documents", "charges"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -1761,9 +1996,19 @@ export function SlideOverPanel({
                 )}
               >
                 {tab === "audit" ? "assessment" : tab}
-                {tab === "messages" && (threadUnreadCount > 0 || customerMessageTimeline.some((m) => m.sender === "customer")) ? (
+                {tab === "messages" && (threadUnreadCount > 0 || customerMessageTimeline.some((m) => m.sender === "customer") || internalMessages.length > 0) ? (
                   <span className="inline-flex min-w-[16px] h-4 items-center justify-center rounded-full bg-[#0B69B7] px-1 text-[10px] font-bold text-white">
-                    {threadUnreadCount > 0 ? threadUnreadCount : customerMessageTimeline.filter((m) => m.sender === "customer").length}
+                    {threadUnreadCount > 0
+                      ? threadUnreadCount
+                      : Math.max(
+                          customerMessageTimeline.filter((m) => m.sender === "customer").length,
+                          internalMessages.length,
+                        )}
+                  </span>
+                ) : null}
+                {tab === "charges" && miscCharges.filter((c) => c.status === "draft" || c.status === "sent").length > 0 ? (
+                  <span className="inline-flex min-w-[16px] h-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                    {miscCharges.filter((c) => c.status === "draft" || c.status === "sent").length}
                   </span>
                 ) : null}
               </button>
@@ -1801,81 +2046,6 @@ export function SlideOverPanel({
                     )}
                   </div>
 
-                  <div className="bg-white rounded-[12px] border border-[#E5EAF0] overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setInternalNotesOpen((prev) => !prev)}
-                      className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-[#F8FAFC] transition-colors"
-                      aria-expanded={internalNotesOpen}
-                    >
-                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Internal Notes</span>
-                      <span className="inline-flex items-center gap-1.5 shrink-0">
-                        {internalMessages.length > 0 ? (
-                          <span className="text-[10px] font-semibold text-[#627D98] normal-case">
-                            {internalMessages.length} note{internalMessages.length === 1 ? "" : "s"}
-                          </span>
-                        ) : null}
-                        <ChevronDown
-                          className={cn(
-                            "w-4 h-4 text-[#627D98] transition-transform duration-200",
-                            internalNotesOpen ? "rotate-180" : "rotate-0",
-                          )}
-                        />
-                      </span>
-                    </button>
-
-                    {internalNotesOpen ? (
-                      <div className="px-4 pb-4 space-y-3 border-t border-[#E5EAF0]">
-                        {isLoadingInternalMessages ? (
-                          <p className="text-sm text-[#627D98]">Loading notes...</p>
-                        ) : internalMessages.length > 0 ? (
-                          <div className="max-h-48 overflow-y-auto space-y-2">
-                            {internalMessages.map((message) => (
-                              <div key={message.id} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] p-3">
-                                <div className="flex items-start justify-between gap-2">
-                                  <p className="text-xs font-semibold text-[#102A43]">
-                                    {message.sender_name} → {message.recipient_name}
-                                  </p>
-                                  <p className="text-[10px] text-[#627D98] shrink-0">
-                                    {message.created_at ? new Date(message.created_at).toLocaleString() : ""}
-                                  </p>
-                                </div>
-                                <p className="mt-1.5 text-sm text-[#334E68] whitespace-pre-wrap">{message.message_text}</p>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-[#9AA5B4]">No internal notes yet.</p>
-                        )}
-                        <div className="space-y-2">
-                          <InternalNoteRecipientSearch
-                            staffRecipients={staffRecipients}
-                            allowAllTeam={canSendToAllTeam}
-                            value={internalNoteRecipientId}
-                            onChange={setInternalNoteRecipientId}
-                          />
-                          <textarea
-                            value={internalNoteDraft}
-                            onChange={(event) => setInternalNoteDraft(event.target.value)}
-                            placeholder="Write an internal note for your team..."
-                            className="w-full min-h-[88px] rounded border border-[#D9E1EA] px-3 py-2 text-sm"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handleSendInternalNote();
-                            }}
-                            disabled={isSendingInternalNote || !internalNoteDraft.trim() || !internalNoteRecipientId}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#102A43] text-white px-3 py-2 text-xs font-semibold disabled:opacity-50"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                            {isSendingInternalNote ? "Sending..." : "Send"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-
                   <div className="flex items-center justify-between py-2 mb-1">
                     <div>
                       <p className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide">Current Task</p>
@@ -1910,46 +2080,162 @@ export function SlideOverPanel({
               )}
 
               {activeTab === "messages" && (
-                <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Messages</h3>
-                    <p className="text-[10px] text-[#627D98]">Customer ↔ FlyOCI</p>
-                  </div>
-                  {customerMessageTimeline.length > 0 ? (
-                    customerMessageTimeline.map((message, index) => (
-                      <div
-                        key={`${message.createdAt}-${message.sender}-${message.message.slice(0, 24)}-${index}`}
-                        className={cn(
-                          "rounded-lg border p-3",
-                          message.sender === "customer"
-                            ? "border-[#B7D7F7] bg-[#EFF7FF]"
-                            : "border-[#D9E1EA] bg-[#F8FAFC]",
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-xs font-semibold text-[#102A43]">{message.subject}</p>
-                            <p className="text-[10px] text-[#627D98] mt-1">
-                              {message.createdAt ? new Date(message.createdAt).toLocaleString() : "Date unknown"}
-                            </p>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className="bg-white p-4 rounded-xl border border-blue-200 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Messages</h3>
+                      <p className="text-[10px] text-[#627D98]">Customer ↔ FlyOCI</p>
+                    </div>
+                    {customerMessageTimeline.length > 0 ? (
+                      customerMessageTimeline.map((message, index) => (
+                        <div
+                          key={`${message.createdAt}-${message.sender}-${message.message.slice(0, 24)}-${index}`}
+                          className={cn(
+                            "rounded-lg border p-3",
+                            message.sender === "customer"
+                              ? "border-[#B7D7F7] bg-[#EFF7FF]"
+                              : "border-[#D9E1EA] bg-[#F8FAFC]",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-semibold text-[#102A43]">{message.subject}</p>
+                              <p className="text-[10px] text-[#627D98] mt-1">
+                                {message.createdAt ? new Date(message.createdAt).toLocaleString() : "Date unknown"}
+                              </p>
+                            </div>
+                            <span
+                              className={cn(
+                                "text-[10px] font-semibold px-2 py-0.5 rounded-full border",
+                                message.sender === "customer"
+                                  ? "bg-white text-[#0B69B7] border-[#B7D7F7]"
+                                  : "bg-white text-[#486581] border-[#D9E1EA]",
+                              )}
+                            >
+                              {message.sender === "customer" ? "Customer" : "FlyOCI"}
+                            </span>
                           </div>
-                          <span
-                            className={cn(
-                              "text-[10px] font-semibold px-2 py-0.5 rounded-full border",
-                              message.sender === "customer"
-                                ? "bg-white text-[#0B69B7] border-[#B7D7F7]"
-                                : "bg-white text-[#486581] border-[#D9E1EA]",
-                            )}
-                          >
-                            {message.sender === "customer" ? "Customer" : "FlyOCI"}
-                          </span>
+                          <p className="mt-2 text-sm text-[#334E68] whitespace-pre-wrap">{message.message}</p>
                         </div>
-                        <p className="mt-2 text-sm text-[#334E68] whitespace-pre-wrap">{message.message}</p>
+                      ))
+                    ) : (
+                      <p className="text-sm text-[#9AA5B4]">No messages yet.</p>
+                    )}
+                  </div>
+
+                  <div className="bg-white p-4 rounded-xl border border-[#D9E1EA] flex flex-col min-h-[320px]">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Team chat</h3>
+                        <p className="mt-0.5 text-[11px] text-[#627D98]">
+                          Private notes on this case. Your messages appear on the right.
+                        </p>
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-[#9AA5B4]">No messages yet.</p>
-                  )}
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[#D9E1EA] bg-[#F8FAFC] px-2 py-0.5 text-[10px] font-semibold text-[#486581]">
+                        <MessageSquare className="h-3 w-3" />
+                        {internalMessages.length}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex-1 max-h-[min(48vh,380px)] overflow-y-auto rounded-[12px] border border-[#EEF2F6] bg-[#F5F7FA] px-3 py-3 space-y-3">
+                      {isLoadingInternalMessages ? (
+                        <p className="text-sm text-[#627D98]">Loading notes…</p>
+                      ) : internalThread.length === 0 ? (
+                        <p className="text-sm text-[#9AA5B4] text-center py-6">
+                          No team notes yet. Need help requests and replies show up here.
+                        </p>
+                      ) : (
+                        internalThread.map((message) => {
+                          const mine = Number(message.sender_id) === Number(adminUser?.id);
+                          const toMe = Number(message.recipient_id) === Number(adminUser?.id);
+                          const { isNeedHelp, body } = parseInternalNoteText(message.message_text);
+                          const fromLabel = mine ? "You" : message.sender_name || "Staff";
+                          const toLabel =
+                            message.recipient_name === "All team"
+                              ? "Everyone"
+                              : toMe
+                                ? "You"
+                                : message.recipient_name || "Team";
+                          return (
+                            <div
+                              key={message.id}
+                              className={cn("flex w-full", mine ? "justify-end" : "justify-start")}
+                            >
+                              <div
+                                className={cn(
+                                  "max-w-[92%] rounded-[14px] px-3 py-2.5 shadow-sm",
+                                  mine
+                                    ? "bg-[#009877] text-white rounded-br-md"
+                                    : isNeedHelp
+                                      ? "bg-white border border-[#F6C177] text-[#102A43] rounded-bl-md"
+                                      : "bg-white border border-[#D9E1EA] text-[#102A43] rounded-bl-md",
+                                )}
+                              >
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <p
+                                    className={cn(
+                                      "text-[11px] font-semibold",
+                                      mine ? "text-white/90" : "text-[#486581]",
+                                    )}
+                                  >
+                                    {fromLabel}
+                                    <span className={mine ? "text-white/70" : "text-[#829AB1]"}> → {toLabel}</span>
+                                  </p>
+                                  {isNeedHelp ? (
+                                    <span className="rounded-full bg-[#FFF4E5] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#9C4F17]">
+                                      Need help
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p
+                                  className={cn(
+                                    "mt-1 text-sm whitespace-pre-wrap leading-relaxed",
+                                    mine ? "text-white" : "text-[#334E68]",
+                                  )}
+                                >
+                                  {body}
+                                </p>
+                                <p
+                                  className={cn(
+                                    "mt-1.5 text-[10px]",
+                                    mine ? "text-white/70 text-right" : "text-[#829AB1]",
+                                  )}
+                                >
+                                  {formatInternalNoteTime(message.created_at)}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="mt-3 space-y-2 border-t border-[#E5EAF0] pt-3">
+                      <InternalNoteRecipientSearch
+                        staffRecipients={staffRecipients}
+                        allowAllTeam={canSendToAllTeam}
+                        value={internalNoteRecipientId}
+                        onChange={setInternalNoteRecipientId}
+                      />
+                      <textarea
+                        value={internalNoteDraft}
+                        onChange={(event) => setInternalNoteDraft(event.target.value)}
+                        placeholder="Type your reply…"
+                        className="w-full min-h-[72px] rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleSendInternalNote();
+                        }}
+                        disabled={isSendingInternalNote || !internalNoteDraft.trim() || !internalNoteRecipientId}
+                        className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#009877] text-white px-3 py-2 text-xs font-semibold hover:bg-[#007B61] disabled:opacity-50"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        {isSendingInternalNote ? "Sending…" : "Send reply"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2200,6 +2486,101 @@ export function SlideOverPanel({
             </div>
               )}
 
+              {activeTab === "charges" && (
+                <div className="bg-white p-4 rounded-xl border border-[#D9E1EA] space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Miscellaneous Charges</h3>
+                      <p className="mt-1 text-xs text-[#627D98]">
+                        Email a dashboard payment link to the customer, or mark paid if they paid offline.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddChargeModal(true)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#0B69B7]/30 bg-[#EEF4FF] px-2.5 py-1.5 text-xs font-semibold text-[#0B69B7]"
+                    >
+                      <Plus className="w-3 h-3" /> Add Charge
+                    </button>
+                  </div>
+                  {miscChargesLoading ? (
+                    <p className="text-sm text-[#627D98]">Loading charges…</p>
+                  ) : miscCharges.length === 0 ? (
+                    <p className="text-sm text-[#627D98]">No miscellaneous charges for this case.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {miscCharges.map((charge) => {
+                        const createdLabel = formatChargeWhen(charge.created_at);
+                        const sentLabel = formatChargeWhen(charge.sent_at);
+                        const paidLabel = formatChargeWhen(charge.paid_at);
+                        return (
+                          <li key={charge.id} className="rounded-lg border border-[#E5EAF0] bg-[#F8FAFC] p-3 space-y-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 space-y-1.5">
+                                <p className="text-sm font-semibold text-[#102A43]">{charge.description}</p>
+                                <span
+                                  className={cn(
+                                    "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                                    miscChargeStatusClass(charge.status),
+                                  )}
+                                >
+                                  {miscChargeStatusLabel(charge.status)}
+                                </span>
+                                <div className="text-[11px] text-[#627D98] space-y-0.5">
+                                  {createdLabel ? <p>Created {createdLabel}</p> : null}
+                                  {sentLabel ? <p>Payment email sent {sentLabel}</p> : null}
+                                  {paidLabel ? <p>Paid {paidLabel}</p> : null}
+                                </div>
+                              </div>
+                              <p className="shrink-0 text-sm font-bold text-[#0B69B7]">GBP {toPounds(charge.amount_pence)}</p>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {charge.status === "draft" || charge.status === "sent" ? (
+                                <button
+                                  type="button"
+                                  disabled={chargeBusy}
+                                  title={
+                                    charge.status === "sent"
+                                      ? "Send the payment-link email to the customer again"
+                                      : "Email the customer a link to pay this charge from their dashboard"
+                                  }
+                                  onClick={() => void handleMiscChargeAction(charge.id, "send")}
+                                  className="rounded-md border border-[#009877]/35 bg-[#009877]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#006F57] disabled:opacity-50"
+                                >
+                                  {charge.status === "sent" ? "Resend payment email" : "Email payment link"}
+                                </button>
+                              ) : null}
+                              {charge.status !== "paid" && charge.status !== "cancelled" ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={chargeBusy}
+                                    title="Customer paid outside Stripe (bank transfer, cash, etc.)"
+                                    onClick={() => void handleMiscChargeAction(charge.id, "mark-paid")}
+                                    className="rounded-md border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#334E68] disabled:opacity-50"
+                                  >
+                                    Mark paid manually
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={chargeBusy}
+                                    title="Void this charge so the customer can no longer pay it"
+                                    onClick={() => void handleMiscChargeAction(charge.id, "cancel")}
+                                    className="rounded-md border border-[#F1A7A0]/45 bg-[#FDECEC] px-2.5 py-1.5 text-[11px] font-semibold text-[#B42318] disabled:opacity-50"
+                                  >
+                                    Void charge
+                                  </button>
+                                </>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               {activeTab === "overview" && (
               <div className="space-y-4">
               <div className="bg-white p-4 rounded-xl border border-blue-200">
@@ -2218,16 +2599,19 @@ export function SlideOverPanel({
                   </span>
                 </div>
                 {isApostilleCase ? (
-                  <p className="mt-2 text-sm text-[#334E68]">
-                    Quoted fee:{" "}
-                    <span className="font-semibold text-[#102A43]">
-                      {apostilleQuotedFee.trim()
-                        ? `GBP ${apostilleQuotedFee.trim()}`
-                        : details?.quoted_fee
-                          ? `${details.quote_currency || "GBP"} ${details.quoted_fee}`
-                          : "Not set"}
-                    </span>
-                  </p>
+                  (() => {
+                    const feeText = apostilleQuotedFee.trim()
+                      ? `GBP ${apostilleQuotedFee.trim()}`
+                      : details?.quoted_fee
+                        ? `${details.quote_currency || "GBP"} ${details.quoted_fee}`
+                        : "";
+                    if (!feeText) return null;
+                    return (
+                      <p className="mt-2 text-sm text-[#334E68]">
+                        Quoted fee: <span className="font-semibold text-[#102A43]">{feeText}</span>
+                      </p>
+                    );
+                  })()
                 ) : null}
               </div>
 
@@ -2456,9 +2840,18 @@ export function SlideOverPanel({
                     Amount due: {isApostilleCase ? `GBP ${apostilleAmountDue}` : `GBP ${toPounds(details?.amount_due_pence)}`}
                   </p>
                   <p className="text-sm text-[#334E68]">Status: Customer has not yet paid</p>
-                  <button onClick={() => { void handleReminder("payment"); }} className="inline-flex items-center gap-1 rounded-lg border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#334E68]">
-                    <Send className="w-3 h-3" /> Send Payment Reminder
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => { void handleReminder("payment"); }} className="inline-flex items-center gap-1 rounded-lg border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#334E68]">
+                      <Send className="w-3 h-3" /> Send Payment Reminder
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("charges")}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#0B69B7]/30 bg-[#EEF4FF] px-3 py-1.5 text-xs font-semibold text-[#0B69B7]"
+                    >
+                      <Plus className="w-3 h-3" /> Charges
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -2920,5 +3313,21 @@ export function SlideOverPanel({
         </div>
       </div>
     </div>
+  );
+
+  if (typeof document === "undefined") {
+    return (
+      <>
+        {panel}
+        {addChargeModal}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {createPortal(panel, document.body)}
+      {addChargeModal}
+    </>
   );
 }

@@ -83,7 +83,8 @@ export default function DashboardPaymentPage() {
         await verifyFullPayment(refNum, sessionId);
         if (!active) return;
         clearStripeReturnParams();
-        router.replace("/dashboard");
+        // Pay-first flows still need document upload — land on the docs journey, not the dashboard home.
+        router.replace(`/dashboard/document-audit?reference=${encodeURIComponent(refNum)}&resume=1`);
       } catch (e) {
         if (!active) return;
         setConfirmingReturn(false);
@@ -112,10 +113,26 @@ export default function DashboardPaymentPage() {
     };
   }, [application]);
 
+  const hasAssessmentFlow =
+    Number(application?.audit_fee_pence || 0) > 0 ||
+    Boolean(application?.audit_fee_paid) ||
+    String(application?.audit_payment_status || "").toLowerCase() === "paid" ||
+    Number(application?.audit_credit_pence || 0) > 0;
+
+  const showAssessmentCredit = hasAssessmentFlow && summary.auditCredit > 0;
+
   const isAlreadyPaid = Boolean(application?.payment_confirmed) || String(application?.full_payment_status || "").toLowerCase() === "paid";
   const isRejected =
     String(application?.audit_result || "").toLowerCase() === "red" ||
     String(application?.application_status || "").toLowerCase() === "rejected";
+
+  const resumeHref = `/dashboard/document-audit?reference=${encodeURIComponent(referenceNumber)}&resume=1`;
+  const backLabel = hasAssessmentFlow ? "Back to assessment" : "Back to uploads";
+  const returnResultLabel = hasAssessmentFlow ? "Return to assessment result" : "Back to application";
+  const processingLabel = hasAssessmentFlow ? "Go to processing tracker" : "Go to application";
+  const introCopy = hasAssessmentFlow
+    ? "After document check approval, complete payment to move your application into processing."
+    : "Complete payment to confirm your application and start processing.";
 
   const handlePayment = async () => {
     if (!referenceNumber || isAlreadyPaid) return;
@@ -147,8 +164,8 @@ export default function DashboardPaymentPage() {
         <main className="flex flex-1 items-center justify-center px-4 pt-28 pb-20">
           <div className="w-full max-w-md rounded-3xl border border-[#d7e5fb] bg-white p-8 text-center shadow-[0_18px_48px_rgba(30,74,135,0.08)]">
             <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
-            <p className="mt-4 text-base font-semibold text-primary">Confirming your payment…</p>
-            <p className="mt-1 text-sm text-slate-600">Taking you to your dashboard.</p>
+            <p className="mt-4 text-base font-semibold text-[#0F1F3D]">Confirming your payment…</p>
+            <p className="mt-1 text-sm text-slate-600">Taking you to document upload.</p>
             {error ? (
               <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
             ) : null}
@@ -170,10 +187,8 @@ export default function DashboardPaymentPage() {
               <p className="inline-flex items-center rounded-full border border-[#cfe2ff] bg-[#eef6ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2b5e93]">
                 Dashboard / Payment
               </p>
-              <h1 className="mt-3 text-3xl font-heading font-bold text-primary">Complete Full Service Payment</h1>
-              <p className="mt-2 text-sm text-slate-600">
-                After document check approval, complete payment to move your application into processing.
-              </p>
+              <h1 className="mt-3 text-3xl font-heading font-bold text-[#0F1F3D]">Complete Full Service Payment</h1>
+              <p className="mt-2 text-sm text-slate-600">{introCopy}</p>
 
               {loading ? (
                 <div className="mt-8 flex items-center gap-2 text-slate-600">
@@ -182,12 +197,17 @@ export default function DashboardPaymentPage() {
               ) : (
                 <>
                   <div className="mt-7 rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
-                    <h2 className="text-lg font-semibold text-primary">Payment Summary</h2>
+                    <h2 className="text-lg font-semibold text-[#0F1F3D]">Payment Summary</h2>
                     <div className="mt-4 space-y-2 text-sm text-slate-700">
-                      <p className="flex justify-between"><span>Reference</span><strong>{referenceNumber || "-"}</strong></p>
-                      <p className="flex justify-between"><span>Service ({summary.serviceLabel})</span><strong>£{summary.serviceFee.toFixed(2)}</strong></p>
-                      <p className="flex justify-between"><span>Assessment credit</span><strong>- £{summary.auditCredit.toFixed(2)}</strong></p>
-                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-primary">
+                      <p className="flex justify-between"><span>Reference</span><strong className="text-[#0F1F3D]">{referenceNumber || "-"}</strong></p>
+                      <p className="flex justify-between"><span>Service ({summary.serviceLabel})</span><strong className="text-[#0F1F3D]">£{summary.serviceFee.toFixed(2)}</strong></p>
+                      {showAssessmentCredit ? (
+                        <p className="flex justify-between">
+                          <span>Assessment credit</span>
+                          <strong className="text-[#0F1F3D]">- £{summary.auditCredit.toFixed(2)}</strong>
+                        </p>
+                      ) : null}
+                      <p className="flex justify-between border-t border-slate-200 pt-2 text-base text-[#0F1F3D]">
                         <span className="font-semibold">Total due</span>
                         <strong>£{summary.totalDue.toFixed(2)}</strong>
                       </p>
@@ -213,16 +233,16 @@ export default function DashboardPaymentPage() {
                   ) : null}
 
                   <div className="mt-6 flex flex-wrap gap-3">
-                    <Button variant="outline" onClick={() => router.push(`/dashboard/document-audit?reference=${encodeURIComponent(referenceNumber)}&resume=1`)}>
-                      Back to Audit
+                    <Button variant="outline" onClick={() => router.push(resumeHref)}>
+                      {backLabel}
                     </Button>
                     {isRejected ? (
-                      <Button variant="outline" onClick={() => router.push(`/dashboard/document-audit?reference=${encodeURIComponent(referenceNumber)}&resume=1`)}>
-                        Return to Audit Result
+                      <Button variant="outline" onClick={() => router.push(resumeHref)}>
+                        {returnResultLabel}
                       </Button>
                     ) : isAlreadyPaid ? (
-                      <Button onClick={() => router.push(`/dashboard/document-audit?reference=${encodeURIComponent(referenceNumber)}&resume=1`)}>
-                        Go to Processing Tracker
+                      <Button onClick={() => router.push(resumeHref)}>
+                        {processingLabel}
                       </Button>
                     ) : (
                       <Button onClick={() => void handlePayment()} isLoading={paying} disabled={!consentsAccepted || !referenceNumber}>

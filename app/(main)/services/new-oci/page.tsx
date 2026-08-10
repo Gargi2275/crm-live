@@ -7,6 +7,7 @@ export const metadata = buildPageMetadata(PAGE_SEO.newOci);
 export default function NewOCIPage() {
   return (
     <ServicePageLayout
+      serviceType="new_oci"
       eyebrow="New OCI Service"
       title="New OCI Card Application"
       description="If you're applying for OCI for the first time, FlyOCI handles forms, document checks, and process guidance from start to finish."

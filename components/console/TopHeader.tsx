@@ -63,7 +63,16 @@ export function TopHeader({
   const loadAlertSummary = useCallback(async (markRead = false) => {
     try {
       const payload = await getAdminAlerts(markRead);
-      const notificationsData = payload?.notifications ?? [];
+      const notificationsData = [...(payload?.notifications ?? [])].sort((a, b) => {
+        const priority = (t: string) =>
+          ["task_reassign_pending", "staff_help_needed"].includes(String(t || "").toLowerCase()) ? 0 : 1;
+        const aPending = priority(String(a.type || ""));
+        const bPending = priority(String(b.type || ""));
+        if (aPending !== bPending) return aPending - bPending;
+        const aUnread = a.is_read ? 1 : 0;
+        const bUnread = b.is_read ? 1 : 0;
+        return aUnread - bUnread;
+      });
       setNotifications(notificationsData);
 
       const unreadFromSummary = payload?.summary?.unread;
@@ -119,6 +128,21 @@ export function TopHeader({
   const openNotification = (notification: import("@/lib/admin-auth").AdminNotification) => {
     setShowNotificationMenu(false);
     const applicationId = notification.application_id;
+    const notifType = String(notification.type || "").toLowerCase();
+    if (notifType === "task_reassign_pending") {
+      router.push("/admin/workload?tab=reassigns");
+      return;
+    }
+    if (notifType === "staff_help_needed") {
+      if (applicationId) {
+        const openedInPlace = dispatchOpenAdminCase({ applicationId: Number(applicationId) });
+        if (openedInPlace) return;
+        router.push(`/admin/kanban?applicationId=${encodeURIComponent(String(applicationId))}`);
+        return;
+      }
+      router.push("/admin/workload");
+      return;
+    }
     const isStaffRole = ["case_processor", "reviewer", "support_agent"].includes(adminUser?.role || "");
     if (applicationId) {
       const openedInPlace = dispatchOpenAdminCase({ applicationId: Number(applicationId) });
@@ -145,7 +169,7 @@ export function TopHeader({
 
   return (
     <header className="bg-white border-b border-[#D9E1EA] sticky top-0 z-20 shadow-[0_1px_0_rgba(15,42,67,0.03)]">
-      <div className="min-h-[3.75rem] flex items-center gap-2.5 md:gap-3.5 px-3 md:px-5 py-2.5 sm:py-0">
+      <div className="min-h-[3.75rem] flex items-center gap-2 md:gap-3 px-3 md:px-5 py-2 sm:py-0">
         {onToggleMobileNav ? (
           <button
             type="button"
@@ -158,20 +182,22 @@ export function TopHeader({
           </button>
         ) : null}
 
-        {/* Page identity — shrinks when search is present */}
+        {/* Page identity — allows shrink so search stays usable on phones */}
         <div
-          className={`min-w-0 shrink-0 ${
-            hasSearch ? "max-w-[36%] sm:max-w-[220px] md:max-w-[260px] lg:max-w-[300px]" : "max-w-[55%] sm:max-w-[300px] md:max-w-[360px]"
+          className={`min-w-0 shrink ${
+            hasSearch
+              ? "max-w-[30%] sm:max-w-[180px] md:max-w-[220px] lg:max-w-[280px]"
+              : "max-w-[50%] sm:max-w-[280px] md:max-w-[340px]"
           }`}
         >
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             {PageIcon ? (
-              <span className="hidden md:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#009877]/10 text-[#006F57]">
+              <span className="hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#009877]/10 text-[#006F57]">
                 <PageIcon className="h-[18px] w-[18px]" />
               </span>
             ) : null}
             <div className="min-w-0">
-              <h1 className="truncate text-base sm:text-[17px] md:text-lg font-heading font-semibold text-[#102A43] leading-tight">
+              <h1 className="truncate text-sm sm:text-base md:text-[17px] lg:text-lg font-heading font-semibold text-[#102A43] leading-tight">
                 {pageTitle}
               </h1>
               {chrome?.subtitle ? (
@@ -184,7 +210,7 @@ export function TopHeader({
         </div>
 
         {/* Search + Filters — primary focus of the bar */}
-        <div className="flex-1 min-w-0 flex items-center justify-center gap-2 sm:gap-2.5">
+        <div className="flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2.5">
           {hasSearch ? (
             <div className="relative w-full max-w-lg group">
               <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8A9BB0] group-focus-within:text-[#009877]" />
@@ -193,7 +219,7 @@ export function TopHeader({
                 value={chrome?.search?.value ?? ""}
                 onChange={(e) => chromeRef.current?.search?.onChange(e.target.value)}
                 placeholder={chrome?.search?.placeholder || "Search…"}
-                className="w-full rounded-[10px] border border-[#D9E1EA] bg-[#F8FAFC] py-2 sm:py-2.5 pl-9 sm:pl-10 pr-9 text-[15px] text-[#102A43] placeholder:text-[#8A9BB0] focus:outline-none focus:ring-2 focus:ring-[#009877]/20 focus:border-[#009877] transition-all"
+                className="w-full rounded-[10px] border border-[#D9E1EA] bg-[#F8FAFC] py-2 sm:py-2.5 pl-9 sm:pl-10 pr-9 text-base text-[#102A43] placeholder:text-[#8A9BB0] focus:outline-none focus:ring-2 focus:ring-[#009877]/20 focus:border-[#009877] transition-all"
               />
               {chrome?.search?.value ? (
                 <button
@@ -219,7 +245,7 @@ export function TopHeader({
                   setShowNotificationMenu(false);
                   setShowProfileMenu(false);
                 }}
-                className={`inline-flex items-center gap-1.5 rounded-[10px] border px-2.5 sm:px-3 py-2 sm:py-2.5 text-[15px] font-semibold transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-[10px] border px-2 sm:px-3 py-2 sm:py-2.5 text-sm sm:text-[15px] font-semibold transition-colors ${
                   filtersOpen || activeFilterCount > 0
                     ? "border-[#009877] bg-[#E6F7F2] text-[#006F57]"
                     : "border-[#D9E1EA] bg-white text-[#486581] hover:bg-[#F5F7FA]"
@@ -244,7 +270,7 @@ export function TopHeader({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -8, scale: 0.98 }}
                     transition={{ duration: 0.15, ease: "easeOut" }}
-                    className="absolute right-0 top-full mt-2 w-[min(calc(100vw-1.5rem),420px)] rounded-[14px] border border-[#D9E1EA] bg-white shadow-[0_20px_40px_rgba(15,42,67,0.14)] z-40 overflow-hidden"
+                    className="fixed left-3 right-3 top-[3.75rem] z-40 w-auto max-h-[min(70vh,520px)] overflow-hidden rounded-[14px] border border-[#D9E1EA] bg-white shadow-[0_20px_40px_rgba(15,42,67,0.14)] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[min(calc(100vw-1.5rem),420px)]"
                     role="dialog"
                     aria-label="Page filters"
                   >
@@ -270,7 +296,7 @@ export function TopHeader({
                         </button>
                       </div>
                     </div>
-                    <div className="max-h-[min(70vh,480px)] overflow-y-auto p-4 space-y-3.5 text-[15px]">
+                    <div className="max-h-[min(60vh,440px)] overflow-y-auto p-4 space-y-3.5 text-[15px]">
                       {chrome?.filtersContent}
                     </div>
                     {(chromeRef.current ?? chrome)?.meta ? (
@@ -288,9 +314,7 @@ export function TopHeader({
         {/* Actions + notifications + profile */}
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {hasActions ? (
-            <div className="hidden md:flex items-center gap-1.5 max-w-[280px] lg:max-w-none overflow-hidden">
-              {chrome?.actions}
-            </div>
+            <div className="hidden lg:flex items-center gap-1.5">{chrome?.actions}</div>
           ) : null}
 
           <div ref={notificationMenuRef} className="relative">
@@ -375,16 +399,16 @@ export function TopHeader({
               className="inline-flex items-center gap-2 rounded-[12px] px-1 sm:px-1.5 py-1 hover:bg-[#F5F7FA] transition-colors"
               aria-label="Profile menu"
             >
-              <div className="hidden sm:flex min-w-0 max-w-[200px] md:max-w-[280px] lg:max-w-[340px] items-center gap-2 rounded-[10px] border border-[#009877]/35 bg-[#E6F7F2] px-2.5 py-1.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+              <div className="hidden lg:flex min-w-0 max-w-[220px] xl:max-w-[300px] items-center gap-2 rounded-[10px] border border-[#009877]/35 bg-[#E6F7F2] px-2.5 py-1.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] md:text-sm font-heading font-bold text-[#006F57] leading-tight">
+                  <p className="truncate text-[13px] xl:text-sm font-heading font-bold text-[#006F57] leading-tight">
                     Welcome,{" "}
                     <span className="text-[#102A43]">
                       {adminUser?.full_name || adminUser?.username || "Staff"}
                     </span>
                   </p>
                   <p className="mt-0.5">
-                    <span className="inline-flex max-w-full truncate rounded-full bg-[#009877] px-2 py-0.5 text-[10px] md:text-[11px] font-bold uppercase tracking-wide text-white">
+                    <span className="inline-flex max-w-full truncate rounded-full bg-[#009877] px-2 py-0.5 text-[10px] xl:text-[11px] font-bold uppercase tracking-wide text-white">
                       {roleLabel}
                     </span>
                   </p>
@@ -396,7 +420,7 @@ export function TopHeader({
             </button>
 
             {showProfileMenu && (
-              <div className="absolute right-0 mt-2 w-[240px] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-30">
+              <div className="absolute right-0 mt-2 w-[min(240px,calc(100vw-1.5rem))] rounded-[12px] border border-[#D9E1EA] bg-white shadow-[0_18px_36px_rgba(15,42,67,0.12)] p-3 z-30">
                 <div className="mb-3 rounded-[10px] border border-[#009877]/30 bg-[#E6F7F2] px-3 py-2.5">
                   <p className="text-[15px] font-heading font-bold text-[#006F57] truncate">
                     Welcome,{" "}
@@ -441,10 +465,10 @@ export function TopHeader({
         onClose={() => setShowChangePassword(false)}
       />
 
-      {/* Mobile / tablet actions — only when needed, compact scroll row */}
+      {/* Mobile / tablet actions — scroll row until lg */}
       {hasActions ? (
-        <div className="md:hidden flex items-center gap-2 px-3 pb-2.5 overflow-x-auto scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {chrome?.actions}
+        <div className="lg:hidden flex items-center gap-2 px-3 pb-2.5 overflow-x-auto scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">{chrome?.actions}</div>
         </div>
       ) : null}
     </header>

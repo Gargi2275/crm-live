@@ -281,11 +281,22 @@ export default function ConsoleDashboard() {
   const [staffTaskKpi, setStaffTaskKpi] = useState<"all" | "pending" | "assigned" | "completed">("all");
   const [embeddedPage, setEmbeddedPage] = useState<{ href: string; label: string } | null>(null);
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
+  const [workloadFocusTab, setWorkloadFocusTab] = useState<string | null>(null);
+  const [workloadFocusNonce, setWorkloadFocusNonce] = useState(0);
+  const [needHelpTask, setNeedHelpTask] = useState<{
+    id: number;
+    applicationId: number;
+    reference: string;
+    notes: string;
+  } | null>(null);
+  const [needHelpBusy, setNeedHelpBusy] = useState(false);
+  const [needHelpMessage, setNeedHelpMessage] = useState("");
 
   const openDashTab = useCallback((tab: DashTab) => {
     setActiveKpi("all");
     setPendingServiceFilter(null);
     setEmbeddedPage(null);
+    setWorkloadFocusTab(null);
     setDashTab(tab);
     if (tab !== "cases") setCaseStatusFilter(null);
   }, []);
@@ -296,6 +307,7 @@ export default function ConsoleDashboard() {
     setPendingServiceFilter(null);
     setCaseStatusFilter(null);
     setEmbeddedPage(null);
+    setWorkloadFocusTab(null);
     setDashTab(tab);
   }, []);
 
@@ -305,15 +317,27 @@ export default function ConsoleDashboard() {
     setCaseStatusFilter(null);
 
     const path = href.split("?")[0] || href;
+    const query = href.includes("?") ? href.slice(href.indexOf("?") + 1) : "";
+    const tabFromQuery = new URLSearchParams(query).get("tab");
     const ownRevenue = isStaffOwnRevenueDashboard(dashboardData, adminUser?.role);
 
     // Workload / Pipeline: stay on dashboard (native tabs for admins, embed for staff home).
     if (path === "/admin/workload" || path === "/admin/kanban") {
       if (ownRevenue) {
-        setEmbeddedPage({ href: path, label });
+        setEmbeddedPage({ href, label });
+        if (path === "/admin/workload") {
+          setWorkloadFocusTab(tabFromQuery);
+          setWorkloadFocusNonce((n) => n + 1);
+        }
         return;
       }
       setEmbeddedPage(null);
+      if (path === "/admin/workload") {
+        setWorkloadFocusTab(tabFromQuery);
+        setWorkloadFocusNonce((n) => n + 1);
+      } else {
+        setWorkloadFocusTab(null);
+      }
       setDashTab(path === "/admin/workload" ? "workload" : "pipeline");
       return;
     }
@@ -460,16 +484,39 @@ export default function ConsoleDashboard() {
   const pendingTaskStatuses = useMemo(() => new Set(["new", "in_progress", "blocked"]), []);
 
   const formatTaskDeadline = (deadline?: string | null) => {
-    if (!deadline) {
-      return "No deadline";
-    }
-
+    if (!deadline) return "No deadline";
     const parsed = new Date(deadline);
-    if (Number.isNaN(parsed.getTime())) {
-      return "No deadline";
-    }
-
+    if (Number.isNaN(parsed.getTime())) return "No deadline";
     return parsed.toLocaleString();
+  };
+
+  const formatTaskDueShort = (deadline?: string | null) => {
+    if (!deadline) return "No due";
+    const parsed = new Date(deadline);
+    if (Number.isNaN(parsed.getTime())) return "No due";
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startDue = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+    const days = Math.round((startDue - startToday) / 86400000);
+    if (days < 0) return `${Math.abs(days)}d overdue`;
+    if (days === 0) return "Due today";
+    if (days === 1) return "Tomorrow";
+    if (days <= 3) return `${days}d left`;
+    return parsed.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+  };
+
+  const formatTaskDueTone = (deadline?: string | null) => {
+    if (!deadline) return "border-[#D9E1EA] bg-[#F5F7FA] text-[#627D98]";
+    const parsed = new Date(deadline);
+    if (Number.isNaN(parsed.getTime())) return "border-[#D9E1EA] bg-[#F5F7FA] text-[#627D98]";
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startDue = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+    const days = Math.round((startDue - startToday) / 86400000);
+    if (days < 0) return "border-[#F1A7A0] bg-[#FDECEC] text-[#B42318]";
+    if (days === 0) return "border-[#F4D89A] bg-[#FFF8E8] text-[#8D5E12]";
+    if (days <= 3) return "border-[#FCD34D]/70 bg-[#FEF9C3]/70 text-[#854D0E]";
+    return "border-[#D9E1EA] bg-white text-[#486581]";
   };
 
  
@@ -516,31 +563,35 @@ const handleOpenCase = (taskId: number) => {
 };
 
 
-const handleMarkProgress = async (task: { id: number; applicationId: number; reference: string; notes: string }) => {
-  try {
-    await patchAdminTask(task.id, { status: "in_progress" });
-    await patchAdminApplication(task.applicationId, {
-      notes: appendTimestampedNote(task.notes, `Progress updated by staff for ${task.reference}`),
-    });
-    await loadDashboard({ background: true });
-    toast.success(`Progress updated for ${task.reference}`);
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : "Failed to update progress.");
-  }
-};
-
 const handleEscalate = async (task: { id: number; applicationId: number; reference: string; notes: string }) => {
+  const helpMessage = needHelpMessage.trim();
+  if (!helpMessage) {
+    toast.error("Please write what you need help with.");
+    return;
+  }
+  setNeedHelpBusy(true);
   try {
-    await patchAdminTask(task.id, { status: "blocked" });
-    await patchAdminApplication(task.applicationId, {
-      stage: "DOCUMENTS_REQUIRED",
-      correction_cause: "staff_error",
-      notes: appendTimestampedNote(task.notes, `Escalated by staff for review: ${task.reference}`),
+    await patchAdminTask(task.id, {
+      status: "blocked",
+      completion_notes: helpMessage,
+      need_help: true,
+      help_message: helpMessage,
     });
+    try {
+      await patchAdminApplication(task.applicationId, {
+        notes: appendTimestampedNote(task.notes, `Staff needs help: ${helpMessage}`),
+      });
+    } catch {
+      // Case notes are optional; help alert + internal note come from the task patch.
+    }
     await loadDashboard({ background: true });
-    toast.success(`Escalation recorded for ${task.reference}`);
+    toast.success(`Help request sent for ${task.reference}. Admin sees it in the bell and Internal notes.`);
+    setNeedHelpTask(null);
+    setNeedHelpMessage("");
   } catch (error) {
     toast.error(error instanceof Error ? error.message : "Failed to escalate case.");
+  } finally {
+    setNeedHelpBusy(false);
   }
 };
 
@@ -755,6 +806,16 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                 My cases
               </button>
             )}
+            {isFounderView ? (
+              <button
+                type="button"
+                onClick={() => openAdminInDash("/admin/workload?tab=reassigns", "Workload")}
+                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#F0D2A8] bg-[#FFF8F1] px-2.5 py-1.5 text-xs font-semibold text-[#9C4F17] hover:bg-[#FFF1E0]"
+              >
+                <UserCog className="h-3.5 w-3.5" />
+                Reassigns {Number(dashboardData?.pending_reassign_count || 0)}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => openNativeDashTab("workload")}
@@ -798,89 +859,115 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
     ),
   });
 
-  const renderStaffTaskCard = (task: AdminTaskItem, showActions = true) => {
-    const status = String(task.status || "").toLowerCase();
-    const isCompleted = status === "completed";
-    const isCancelled = status === "cancelled";
-    const isClosedOut = isCompleted || isCancelled;
-    const priority = String(task.priority || "").toLowerCase();
-    const nextActionMap: Record<string, string> = {
-      audit: "Start review",
-      document_review: "Review documents",
-      form_filling: "Continue form filling",
-      submission: "Submit application",
-      delivery_follow_up: "Send delivery follow-up",
-      other: "Open task",
-    };
-    const nextAction = status === "blocked"
-      ? "Follow up (waiting)"
-      : nextActionMap[String(task.task_type || "").toLowerCase()] || "Open task";
-    const blocker = isClosedOut
-      ? "None"
-      : status === "blocked"
-        ? "Waiting on correction or customer"
-        : priority === "urgent"
-          ? "SLA pressure"
-          : priority === "high"
-            ? "High priority"
-            : "None";
-    const customerWaiting = !isClosedOut && (status === "blocked" || status === "new" || ["audit", "document_review", "form_filling", "submission"].includes(String(task.task_type || "").toLowerCase()));
-    const actionNote = `${task.application_reference} • ${task.task_type.replace(/_/g, " ")} • staff worklist action`;
+  const renderStaffTaskTable = (tasks: AdminTaskItem[], showActions = true) => {
+    if (tasks.length === 0) {
+      return <p className="px-3 py-6 text-sm text-[#627D98]">No cases for this filter.</p>;
+    }
 
     return (
-      <div
-        key={task.id}
-        className={`rounded-[12px] border p-3 ${
-          isCompleted
-            ? "border-[#009877]/30 bg-[#F0FBF8]"
-            : isCancelled
-              ? "border-[#D9E1EA] bg-[#F5F7FA] opacity-60"
-              : "border-[#D9E1EA] bg-[#F8FAFC]"
-        }`}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-heading font-semibold text-[#102A43]">{task.application_reference}</p>
-            <p className="text-xs text-[#627D98] capitalize">{task.task_type.replace(/_/g, " ")} • {task.customer_name || "Customer"}</p>
-            <p className="text-xs text-[#627D98] mt-1">Due: {formatTaskDeadline(task.deadline)}</p>
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[#486581]">
-              <p><span className="text-[#627D98]">Next action:</span> {nextAction}</p>
-              <p><span className="text-[#627D98]">Owner:</span> {task.assigned_staff_name || "Unassigned"}</p>
-              <p><span className="text-[#627D98]">Blocker:</span> {blocker}</p>
-              <p><span className="text-[#627D98]">Customer waiting:</span> {customerWaiting ? "Yes" : "No"}</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 text-[11px]">
-            <span
-              className={`rounded-full px-2.5 py-1 ${
-                isCompleted
-                  ? "bg-[#009877]/20 text-[#006F57] font-semibold"
-                  : status === "blocked"
-                    ? "bg-[#B87333]/12 text-[#9C4F17]"
-                    : status === "in_progress"
-                      ? "bg-[#33A1FD]/12 text-[#0B69B7]"
-                      : "bg-[#009877]/12 text-[#006F57]"
-              }`}
-            >
-              {isCompleted ? "✓ Completed" : formatTaskStatusLabel(task.status)}
-            </span>
-            <span className="rounded-full bg-[#B87333]/12 px-2.5 py-1 text-[#9C4F17]">{task.priority}</span>
-            <span className="rounded-full bg-[#33A1FD]/12 px-2.5 py-1 text-[#0B69B7]">{task.assigned_staff_name || "Unassigned"}</span>
-          </div>
-        </div>
-
-        {isClosedOut ? (
-          <div className="mt-3 rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-2 text-xs text-[#627D98]">
-            {isCompleted ? "This task has been completed. No further action needed." : "This task has been cancelled."}
-          </div>
-        ) : showActions ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button className="text-xs bg-[#33A1FD]/12 text-[#0B69B7] border-[0.5px] border-[#33A1FD]/35 px-2 py-1 rounded-full" onClick={() => handleOpenCase(task.id)}>Open Case</button>
-            <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full" onClick={() => void handleMarkProgress({ id: task.id, applicationId: task.application, reference: task.application_reference, notes: actionNote })}>Mark Progress</button>
-            <button className="text-xs bg-[#B87333]/12 text-[#9C4F17] border-[0.5px] border-[#B87333]/35 px-2 py-1 rounded-full" onClick={() => void handleEscalate({ id: task.id, applicationId: task.application, reference: task.application_reference, notes: actionNote })}>Escalate</button>
-            <button className="text-xs bg-[#009877]/12 text-[#006F57] border-[0.5px] border-[#009877]/35 px-2 py-1 rounded-full" onClick={() => void handleMarkComplete({ id: task.id, applicationId: task.application, reference: task.application_reference, notes: actionNote })}>Mark Complete</button>
-          </div>
-        ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[880px] border-collapse text-left text-sm">
+          <thead className="bg-[#F8FAFC] text-[11px] uppercase tracking-wide text-[#627D98]">
+            <tr className="border-b border-[#E5EAF0]">
+              <th className="px-3 py-2 font-semibold">Due</th>
+              <th className="px-3 py-2 font-semibold">Case</th>
+              <th className="px-3 py-2 font-semibold">Customer</th>
+              <th className="px-3 py-2 font-semibold">Service</th>
+              <th className="px-3 py-2 font-semibold">Task</th>
+              <th className="px-3 py-2 font-semibold">Status</th>
+              <th className="px-3 py-2 font-semibold text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => {
+              const status = String(task.status || "").toLowerCase();
+              const isCompleted = status === "completed";
+              const isCancelled = status === "cancelled";
+              const isClosedOut = isCompleted || isCancelled;
+              const actionNote = `${task.application_reference} • ${String(task.task_type || "").replace(/_/g, " ")} • staff worklist action`;
+              const taskLabel = String(task.task_type || "")
+                .replace(/_/g, " ")
+                .replace(/\b\w/g, (ch) => ch.toUpperCase());
+              return (
+                <tr
+                  key={task.id}
+                  className={`border-b border-[#EEF2F6] hover:bg-[#F8FAFC] ${isClosedOut ? "opacity-70" : ""}`}
+                >
+                  <td className="whitespace-nowrap px-3 py-1.5">
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${formatTaskDueTone(task.deadline)}`}>
+                      {formatTaskDueShort(task.deadline)}
+                    </span>
+                  </td>
+                  <td className="max-w-[130px] truncate px-3 py-1.5 font-medium text-[#0B69B7]">
+                    <button type="button" onClick={() => handleOpenCase(task.id)} className="truncate hover:underline">
+                      {task.application_reference || `Task #${task.id}`}
+                    </button>
+                  </td>
+                  <td className="max-w-[130px] truncate px-3 py-1.5 text-[#102A43]" title={task.customer_name || ""}>
+                    {task.customer_name || "—"}
+                  </td>
+                  <td className="max-w-[150px] truncate px-3 py-1.5 text-[#486581]" title={task.service_name || ""}>
+                    {task.service_name || "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-1.5 font-medium text-[#102A43]">{taskLabel || "Task"}</td>
+                  <td className="whitespace-nowrap px-3 py-1.5">
+                    <span className="text-[11px] font-semibold text-[#486581]">
+                      {isCompleted ? "Completed" : formatTaskStatusLabel(task.status)}
+                      <span className="ml-1 font-normal capitalize text-[#829AB1]">{task.priority || "medium"}</span>
+                    </span>
+                  </td>
+                  <td className="px-3 py-1.5">
+                    {isClosedOut || !showActions ? (
+                      <div className="text-right text-[11px] text-[#829AB1]">
+                        {isCompleted ? "Done" : isCancelled ? "Cancelled" : "—"}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          className="rounded-[6px] border border-[#D9E1EA] px-2 py-1 text-[11px] font-semibold text-[#0B69B7] hover:bg-white"
+                          onClick={() => handleOpenCase(task.id)}
+                        >
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          title="Marks this task as Waiting and notes that you need admin/ops help. Does not change case stage."
+                          className="rounded-[6px] border border-[#B87333]/40 bg-[#B87333]/10 px-2 py-1 text-[11px] font-semibold text-[#9C4F17]"
+                          onClick={() => {
+                            setNeedHelpMessage("");
+                            setNeedHelpTask({
+                              id: task.id,
+                              applicationId: task.application,
+                              reference: task.application_reference,
+                              notes: actionNote,
+                            });
+                          }}
+                        >
+                          Need help
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-[6px] border border-[#009877]/35 bg-[#009877]/10 px-2 py-1 text-[11px] font-semibold text-[#006F57]"
+                          onClick={() =>
+                            void handleMarkComplete({
+                              id: task.id,
+                              applicationId: task.application,
+                              reference: task.application_reference,
+                              notes: actionNote,
+                            })
+                          }
+                        >
+                          Complete
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     );
   };
@@ -908,20 +995,27 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
       paid_cases_30d: 0,
     };
     const myAssignedTasks = taskItems.filter((task) => staffIdsMatch(task.assigned_staff, adminUser?.id));
+    const taskRecencyTs = (task: AdminTaskItem) => {
+      const raw = task.updated_at || task.created_at || task.deadline;
+      if (!raw) return 0;
+      const ts = new Date(raw).getTime();
+      return Number.isNaN(ts) ? 0 : ts;
+    };
+    // Latest first — dashboard shows only a short recent slice.
+    const RECENT_CASE_LIMIT = 5;
     const pendingCases = [...myAssignedTasks]
       .filter((task) => pendingTaskStatuses.has(String(task.status || "").toLowerCase()))
-      .sort((a, b) => {
-        const left = new Date(a.deadline || a.updated_at || a.created_at || 0).getTime();
-        const right = new Date(b.deadline || b.updated_at || b.created_at || 0).getTime();
-        return left - right;
-      })
-      .slice(0, 8);
-    const completedCases = staffTaskSummary.recentCompletions;
+      .sort((a, b) => taskRecencyTs(b) - taskRecencyTs(a))
+      .slice(0, RECENT_CASE_LIMIT);
+    const latestAssigned = [...myAssignedTasks]
+      .sort((a, b) => taskRecencyTs(b) - taskRecencyTs(a))
+      .slice(0, RECENT_CASE_LIMIT);
+    const completedCases = staffTaskSummary.recentCompletions.slice(0, RECENT_CASE_LIMIT);
     const shownCases =
       staffTaskKpi === "completed"
         ? completedCases
         : staffTaskKpi === "assigned"
-          ? myAssignedTasks.slice(0, 8)
+          ? latestAssigned
           : pendingCases;
 
     return (
@@ -938,6 +1032,68 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
           documentsError={documentsError}
           onStageResolved={handleStageResolved}
         />
+        {needHelpTask ? (
+          <div
+            className="fixed inset-0 z-[300] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget && !needHelpBusy) {
+                setNeedHelpTask(null);
+                setNeedHelpMessage("");
+              }
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="need-help-title"
+              className="w-full rounded-t-[16px] border border-[#D9E1EA] bg-white shadow-[0_24px_48px_rgba(15,42,67,0.2)] sm:max-w-md sm:rounded-[14px]"
+            >
+              <div className="border-b border-[#E5EAF0] px-4 py-3">
+                <h2 id="need-help-title" className="text-base font-heading font-semibold text-[#102A43]">
+                  Need help on {needHelpTask.reference}?
+                </h2>
+                <p className="mt-1 text-sm text-[#627D98]">
+                  Task becomes Waiting. Admin gets a notification and your message appears in Internal notes so they can reply.
+                </p>
+              </div>
+              <div className="px-4 py-3">
+                <label className="block text-xs font-semibold text-[#486581]" htmlFor="need-help-message">
+                  What do you need help with?
+                </label>
+                <textarea
+                  id="need-help-message"
+                  value={needHelpMessage}
+                  onChange={(e) => setNeedHelpMessage(e.target.value)}
+                  rows={4}
+                  disabled={needHelpBusy}
+                  placeholder="Write the issue or question for admin…"
+                  className="mt-1.5 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm text-[#102A43] outline-none focus:border-[#009877]"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 px-4 py-3">
+                <button
+                  type="button"
+                  disabled={needHelpBusy}
+                  onClick={() => {
+                    setNeedHelpTask(null);
+                    setNeedHelpMessage("");
+                  }}
+                  className="rounded-[8px] border border-[#D9E1EA] bg-white px-3 py-1.5 text-xs font-semibold text-[#486581] hover:bg-[#F5F7FA] disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={needHelpBusy || !needHelpMessage.trim()}
+                  onClick={() => void handleEscalate(needHelpTask)}
+                  className="rounded-[8px] bg-[#009877] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
+                >
+                  {needHelpBusy ? "Sending…" : "Send to admin"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {embeddedPage ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-1 rounded-[10px] border border-[#D9E1EA] bg-white p-1">
@@ -1036,42 +1192,34 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
           </div>
         </div>
 
-        <div className="bg-white rounded-[10px] border border-[#D9E1EA] p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <h2 className="text-base font-heading font-semibold text-[#102A43] flex items-center gap-2">
+        <div className="overflow-hidden rounded-[10px] border border-[#D9E1EA] bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#EEF2F6] px-3 py-2.5">
+            <h2 className="text-sm font-heading font-semibold text-[#102A43] flex items-center gap-2">
               <ClipboardList className="w-4 h-4 text-[#0B69B7]" />
               {staffTaskKpi === "completed" ? "Recently completed" : staffTaskKpi === "assigned" ? "Assigned cases" : "Recent cases"}
             </h2>
-            <button type="button" onClick={() => openAdminInDash("/admin/my-cases", "My cases")} className="text-sm font-semibold text-[#0B69B7] hover:underline">
+            <button type="button" onClick={() => openAdminInDash("/admin/my-cases", "My cases")} className="text-xs font-semibold text-[#0B69B7] hover:underline">
               View all my cases
             </button>
           </div>
-          {shownCases.length === 0 ? (
-            <p className="text-sm text-[#627D98]">No cases for this KPI filter.</p>
-          ) : (
-            <div className="space-y-2">
-              {shownCases.map((task) => renderStaffTaskCard(task, staffTaskKpi !== "completed"))}
-            </div>
-          )}
+          {renderStaffTaskTable(shownCases, staffTaskKpi !== "completed")}
         </div>
 
         {staffTaskKpi !== "completed" ? (
-        <div className="bg-white rounded-[10px] border border-[#D9E1EA] p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <h2 className="text-base font-heading font-semibold text-[#102A43] flex items-center gap-2">
+        <div className="overflow-hidden rounded-[10px] border border-[#D9E1EA] bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#EEF2F6] px-3 py-2.5">
+            <h2 className="text-sm font-heading font-semibold text-[#102A43] flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-[#006F57]" />
               Recently completed
             </h2>
-            <button type="button" onClick={() => openAdminInDash("/admin/my-cases", "My cases")} className="text-sm font-semibold text-[#0B69B7] hover:underline">
+            <button type="button" onClick={() => openAdminInDash("/admin/my-cases", "My cases")} className="text-xs font-semibold text-[#0B69B7] hover:underline">
               View all completed
             </button>
           </div>
           {staffTaskSummary.recentCompletions.length === 0 ? (
-            <p className="text-sm text-[#627D98]">No completed tasks yet. Tasks auto-complete when you submit audit or advance the case.</p>
+            <p className="px-3 py-6 text-sm text-[#627D98]">No completed tasks yet.</p>
           ) : (
-            <div className="space-y-2">
-              {staffTaskSummary.recentCompletions.map((task) => renderStaffTaskCard(task, false))}
-            </div>
+            renderStaffTaskTable(staffTaskSummary.recentCompletions, false)
           )}
         </div>
         ) : null}
@@ -1143,6 +1291,40 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
         documentsError={documentsError}
         onStageResolved={handleStageResolved}
       />
+      {isFounderView ? (
+        <button
+          type="button"
+          onClick={() => openAdminInDash("/admin/workload?tab=reassigns", "Workload")}
+          className={`w-full text-left rounded-[12px] border px-4 py-3.5 transition-colors ${
+            Number(dashboardData?.pending_reassign_count || 0) > 0
+              ? "border-[#F0D2A8] bg-[#FFF8F1] hover:bg-[#FFF1E0]"
+              : "border-[#D9E1EA] bg-white hover:bg-[#F8FAFC]"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-heading font-semibold text-[#102A43]">
+                Pending staff reassign requests
+              </p>
+              <p className="text-xs text-[#627D98] mt-0.5">
+                {Number(dashboardData?.pending_reassign_count || 0) > 0
+                  ? `${Number(dashboardData?.pending_reassign_count || 0)} request(s) waiting for your approval. Opens Workload → Reassigns.`
+                  : "No pending reassign requests right now. New ones also appear in the top notification bell."}
+              </p>
+            </div>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-semibold ${
+                Number(dashboardData?.pending_reassign_count || 0) > 0
+                  ? "bg-[#9C4F17] text-white"
+                  : "bg-[#F0F4F8] text-[#486581]"
+              }`}
+            >
+              <UserCog className="h-3.5 w-3.5" />
+              {Number(dashboardData?.pending_reassign_count || 0)} pending →
+            </span>
+          </div>
+        </button>
+      ) : null}
       {!isOwnRevenueDashboard && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-2">
           <StatCard
@@ -1657,6 +1839,20 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
               </div>
 
               <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5 text-xs">
+                {isFounderView ? (
+                  <button
+                    type="button"
+                    onClick={() => openAdminInDash("/admin/workload?tab=reassigns", "Workload")}
+                    className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 font-semibold ${
+                      Number(dashboardData?.pending_reassign_count || 0) > 0
+                        ? "border-[#F0D2A8] bg-[#FFF8F1] text-[#9C4F17] hover:bg-[#FFF1E0]"
+                        : "border-[#B6E3D8] bg-[#F0FDFA] text-[#0F766E] hover:bg-[#CCFBF1]"
+                    }`}
+                  >
+                    <UserCog className="h-3.5 w-3.5" />
+                    Pending reassigns {Number(dashboardData?.pending_reassign_count || 0)}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => openAdminInDash("/admin/alerts", "Alerts")}
@@ -1836,7 +2032,13 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
             </div>
           ) : null}
 
-          {!embeddedPage && dashTab === "workload" ? <WorkloadView embedded /> : null}
+          {!embeddedPage && dashTab === "workload" ? (
+            <WorkloadView
+              key={`workload-${workloadFocusNonce}-${workloadFocusTab || "default"}`}
+              embedded
+              focusTab={workloadFocusTab}
+            />
+          ) : null}
 
           {!embeddedPage && dashTab === "pipeline" ? <KanbanView embedded /> : null}
 

@@ -21,7 +21,10 @@ function routeFromNextStep(nextStepRaw: string, caseNumber: string): string {
   const nextStep = (nextStepRaw || "").trim().toLowerCase();
 
   if (["registration", "confirm_email"].includes(nextStep)) {
-    return buildCaseUrl("/indian-e-visa", caseNumber);
+    // confirm_email is retired — treat as registration/payment handoff
+    return nextStep === "confirm_email"
+      ? buildCaseUrl("/indian-e-visa/payment", caseNumber)
+      : buildCaseUrl("/indian-e-visa", caseNumber);
   }
   if (nextStep === "payment") {
     return buildCaseUrl("/indian-e-visa/payment", caseNumber);
@@ -56,9 +59,7 @@ export function resolveCanonicalEVisaRoute(resume: ResumeLike | null | undefined
     const stage = String(app.current_stage || "").toLowerCase();
     const status = String(app.application_status || "").toLowerCase();
 
-    if (!app.email_confirmed) {
-      return buildCaseUrl("/indian-e-visa/confirm-email", safeCase);
-    }
+    // Email confirmation step removed — unpaid cases go straight to payment
     if (!app.payment_confirmed) {
       return buildCaseUrl("/indian-e-visa/payment", safeCase);
     }

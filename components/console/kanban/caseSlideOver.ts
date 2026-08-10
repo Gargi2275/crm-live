@@ -8,6 +8,7 @@ import {
 import {
   displayServiceLabel,
   isApplicationFullyPaid,
+  isExpressOrUrgentPlan,
   isPassportRenewalService,
   normalizeServiceCategory,
   resolvePipelinePaymentStatus,
@@ -202,7 +203,6 @@ export const adminApplicationToKanbanCase = (item: AdminApplication): AdminKanba
       ? String(item.file_number).trim()
       : item.reference_number || `APP-${item.id}`;
   const stage = resolveAdminCaseStage(item);
-  const feePlan = String(item.fee_plan_code || "").trim().toLowerCase();
   return {
     applicationId: item.id,
     createdAt,
@@ -222,7 +222,7 @@ export const adminApplicationToKanbanCase = (item: AdminApplication): AdminKanba
     assignedTo: item.assigned_staff ? String(item.assigned_staff) : null,
     slaTimer: `${ageHours}h`,
     slaBreached: ageHours >= 24 * 7,
-    isExpress: feePlan === "express" || feePlan.startsWith("express") || Boolean(item.is_express),
+    isExpress: isExpressOrUrgentPlan(item.fee_plan_code, item.is_express),
   };
 };
 
@@ -242,14 +242,18 @@ export async function loadAdminCaseSlideOver(applicationId: number): Promise<Adm
   if (isApostilleCase) {
     let mergedDetails: AdminApplication | null = details;
     let detailsError: string | null = null;
+    // Prefer file_number; fall back to FO reference / numeric id (some apostille rows lack file_number).
+    const apostilleLookup = String(
+      details.file_number || details.reference_number || applicationId || "",
+    ).trim();
     try {
-      const apostilleData = (await getAdminApostilleDetail(caseData.id)) as Record<string, unknown>;
+      const apostilleData = (await getAdminApostilleDetail(apostilleLookup)) as Record<string, unknown>;
       mergedDetails = {
         ...details,
         ...(apostilleData as Partial<AdminApplication>),
         id: details.id ?? applicationId,
         reference_number: String(details.reference_number || apostilleData.reference_number || caseData.id),
-        file_number: String(apostilleData.file_number || details.file_number || caseData.id),
+        file_number: String(apostilleData.file_number || details.file_number || ""),
         service_type: String(details.service_type || apostilleData.service_type || "Apostille Services"),
         flagged_documents: (apostilleData.flagged_documents as AdminApplication["flagged_documents"]) || details.flagged_documents,
         document_overview: (apostilleData.document_overview as AdminApplication["document_overview"]) || details.document_overview,
@@ -274,7 +278,7 @@ export async function loadAdminCaseSlideOver(applicationId: number): Promise<Adm
         ) || undefined,
       } as AdminApplication;
       caseData = adminApplicationToKanbanCase(mergedDetails);
-      caseData.id = String(mergedDetails.file_number || caseData.id);
+      caseData.id = String(mergedDetails.file_number || mergedDetails.reference_number || caseData.id);
 
       const referenceNumber = String(mergedDetails.reference_number || "").trim();
       let documents: AdminApplicationDocument[] = [];
@@ -307,14 +311,25 @@ export async function loadAdminCaseSlideOver(applicationId: number): Promise<Adm
         documentsError,
       };
     } catch (error) {
-      detailsError = error instanceof Error ? error.message : "Failed to load apostille details.";
+      // Keep base application details so the panel still opens (common when file_number is missing).
+      detailsError = null;
+    }
+    const referenceNumber = String(details.reference_number || "").trim();
+    let documents: AdminApplicationDocument[] = [];
+    let documentsError: string | null = null;
+    if (referenceNumber) {
+      try {
+        documents = await getAdminApplicationDocuments(referenceNumber);
+      } catch (error) {
+        documentsError = error instanceof Error ? error.message : "Failed to load documents.";
+      }
     }
     return {
       caseData,
       details: mergedDetails,
-      documents: [],
+      documents,
       detailsError,
-      documentsError: null,
+      documentsError,
     };
   }
 

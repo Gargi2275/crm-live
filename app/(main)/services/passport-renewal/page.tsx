@@ -19,6 +19,7 @@ export default async function PassportRenewalPage() {
 
   return (
     <ServicePageLayout
+      serviceType="passport_renewal"
       eyebrow="Passport Renewal Service"
       title="Indian Passport Renewal for UK & US Applicants"
       description="We help you renew Indian passports with the right category, correct document set, and complete submission guidance."

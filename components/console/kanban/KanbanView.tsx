@@ -26,6 +26,36 @@ const LIVE_STAGES: KanbanStage[] = ["DOCUMENTS_REQUIRED", "PAYMENT_PENDING", "RE
 const filterFieldClass =
   "mt-1 w-full rounded-[8px] border border-[#D9E1EA] bg-white px-2.5 py-1.5 text-sm text-[#102A43]";
 
+function todayLocalIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function toLocalDayKey(iso?: string | null): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, "0");
+  const d = String(parsed.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function matchesDateRange(iso: string | null | undefined, dateFrom: string, dateTo: string): boolean {
+  const day = toLocalDayKey(iso);
+  if (!day) {
+    if (dateFrom && !dateTo) return true;
+    if (!dateFrom && dateTo) return false;
+    return true;
+  }
+  if (dateFrom && day < dateFrom) return false;
+  if (dateTo && day > dateTo) return false;
+  return true;
+}
+
 const normalizeStage = (stage?: string): KanbanStage => {
   const normalized = (stage || "").trim().toUpperCase().replace(/\s+/g, "_");
   if (normalized === "PASSPORT_QUOTE_PENDING") return "PAYMENT_PENDING";
@@ -61,6 +91,9 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
   const [serviceFilter, setServiceFilter] = useState("All");
   const [staffFilter, setStaffFilter] = useState("All");
   const [ageingFilter, setAgeingFilter] = useState("Any");
+  /** Default: from today, open end → present + future */
+  const [dateFrom, setDateFrom] = useState(todayLocalIso);
+  const [dateTo, setDateTo] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<KanbanViewMode>("pipeline");
 
@@ -193,23 +226,31 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
     return ["All", ...values, "Unassigned"];
   }, [applications]);
 
+  const todayIso = todayLocalIso();
+  const isDefaultDateRange = dateFrom === todayIso && dateTo === "";
+
   const activeFilterCount =
     (searchQuery.trim() ? 1 : 0) +
     (serviceFilter !== "All" ? 1 : 0) +
     (staffFilter !== "All" ? 1 : 0) +
-    (ageingFilter !== "Any" ? 1 : 0);
+    (ageingFilter !== "Any" ? 1 : 0) +
+    (isDefaultDateRange ? 0 : 1);
 
   const clearFilters = () => {
     setSearchQuery("");
     setServiceFilter("All");
     setStaffFilter("All");
     setAgeingFilter("Any");
+    setDateFrom(todayLocalIso());
+    setDateTo("");
   };
 
   const searchedApplications = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return applications;
     return applications.filter((application) => {
+      const dateIso = application.application_date || application.created_at;
+      if (!matchesDateRange(dateIso, dateFrom, dateTo)) return false;
+      if (!q) return true;
       const haystack = [
         application.reference_number,
         application.customer_name,
@@ -226,16 +267,23 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [applications, searchQuery]);
+  }, [applications, searchQuery, dateFrom, dateTo]);
+
+  const dateRangeLabel = (() => {
+    if (isDefaultDateRange) return "From today";
+    if (!dateFrom && !dateTo) return "All dates";
+    if (dateFrom && dateTo && dateFrom === dateTo) return dateFrom;
+    if (dateFrom && dateTo) return `${dateFrom} → ${dateTo}`;
+    if (dateFrom) return `From ${dateFrom}`;
+    return `Until ${dateTo}`;
+  })();
 
   useSetAdminPageChrome(
     {
     title: "Pipeline",
     subtitle: isLoading
       ? "Loading…"
-      : searchQuery.trim()
-        ? `${searchedApplications.length} of ${applications.length} cases`
-        : `${applications.length} cases`,
+      : `${searchedApplications.length} of ${applications.length} cases · ${dateRangeLabel}`,
     icon: KanbanSquare,
     search: {
       value: searchQuery,
@@ -244,8 +292,8 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
     },
     activeFilterCount,
     onClearFilters: clearFilters,
-    meta: isLoading ? "Loading…" : `${applications.length} cases`,
-    syncKey: `${searchQuery}|${serviceFilter}|${staffFilter}|${ageingFilter}|${isLoading}|${applications.length}|${viewMode}|${activeStatsTab}|${activeQuickFilter}`,
+    meta: isLoading ? "Loading…" : `${searchedApplications.length} shown · ${applications.length} total`,
+    syncKey: `${searchQuery}|${serviceFilter}|${staffFilter}|${ageingFilter}|${dateFrom}|${dateTo}|${isLoading}|${applications.length}|${viewMode}|${activeStatsTab}|${activeQuickFilter}`,
     actions: (
       <button
         type="button"
@@ -259,6 +307,66 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
     ),
     filtersContent: (
       <>
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-[#486581]">Date (application)</span>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-sm">
+              <span className="text-[11px] text-[#829AB1]">From</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className={filterFieldClass}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-[11px] text-[#829AB1]">To</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+                className={filterFieldClass}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom(todayLocalIso());
+                setDateTo("");
+              }}
+              className="rounded border border-[#D9E1EA] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+            >
+              From today
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const t = todayLocalIso();
+                setDateFrom(t);
+                setDateTo(t);
+              }}
+              className="rounded border border-[#D9E1EA] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="rounded border border-[#D9E1EA] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#486581] hover:bg-[#F5F7FA]"
+            >
+              All dates
+            </button>
+          </div>
+          <p className="text-[11px] text-[#829AB1]">
+            Default: from today (hides past). Leave To empty for open end.
+          </p>
+        </div>
         <label className="block text-sm">
           <span className="text-xs font-semibold text-[#486581]">Service Type</span>
           <select
@@ -436,6 +544,8 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
           serviceFilter={serviceFilter}
           staffFilter={staffFilter}
           ageingFilter={ageingFilter}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
           searchQuery={searchQuery}
           viewMode={viewMode}
         />

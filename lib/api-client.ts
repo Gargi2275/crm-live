@@ -28,13 +28,25 @@ export type EVisaUpdateRegistrationPayload = EVisaRegisterPayload & {
 export type EVisaRegisterResponse = ApiEnvelope<{
   case_number: string;
   masked_email: string;
-  next_step: "confirm_email";
+  next_step: "payment" | "confirm_email";
   confirm_url: string;
+  payment_url?: string;
   application_id: number;
   otp_expires_in_minutes: number;
   resend_cooldown_minutes?: number;
   resend_cooldown_seconds: number;
   max_resends: number;
+  user?: {
+    id: number;
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+  };
+  tokens?: {
+    access: string;
+    refresh: string;
+  };
 }>;
 
 export type EVisaConfirmEmailResponse = ApiEnvelope<{

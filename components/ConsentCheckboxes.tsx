@@ -33,21 +33,21 @@ export function ConsentCheckboxes({
 
   return (
     <div className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${className}`}>
-      <p className="text-sm font-semibold text-primary">{title}</p>
+      <p className="text-sm font-semibold text-[#0F1F3D]">{title}</p>
       <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-700">
         {mode === "payment" ? (
           <>
             <li>
               I have read and agree to FlyOCI’s{" "}
-              <Link href="/terms-and-conditions" className="font-semibold text-primary hover:underline">
+              <Link href="/terms-and-conditions" className="font-semibold text-[#0F1F3D] underline underline-offset-2 hover:text-[#1A56DB]">
                 Terms and Conditions
               </Link>
               ,{" "}
-              <Link href="/refund-policy" className="font-semibold text-primary hover:underline">
+              <Link href="/refund-policy" className="font-semibold text-[#0F1F3D] underline underline-offset-2 hover:text-[#1A56DB]">
                 Refund Policy
               </Link>{" "}
               and{" "}
-              <Link href="/privacy-policy" className="font-semibold text-primary hover:underline">
+              <Link href="/privacy-policy" className="font-semibold text-[#0F1F3D] underline underline-offset-2 hover:text-[#1A56DB]">
                 Privacy Policy
               </Link>
               .
@@ -67,7 +67,7 @@ export function ConsentCheckboxes({
           <>
             <li>
               I agree to the{" "}
-              <Link href="/privacy-policy" className="font-semibold text-primary hover:underline">
+              <Link href="/privacy-policy" className="font-semibold text-[#0F1F3D] underline underline-offset-2 hover:text-[#1A56DB]">
                 Privacy Policy
               </Link>
               .

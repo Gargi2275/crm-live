@@ -8,16 +8,32 @@ import {
   CheckoutShell,
   VisamentOrderSummary,
   checkoutFieldClass,
+  checkoutFieldErrorClass,
   checkoutLabelClass,
+  isValidMobile10,
+  sanitizeMobileDigits,
   type VisamentSummaryApplicant,
 } from "@/components/checkout/CheckoutShell";
 import { OTPInput } from "@/components/OTPInput";
+import { SearchableDialCode } from "@/components/checkout/SearchableDialCode";
 import {
   listCustomerApplications,
   requestApplicantEmailOtp,
   verifyApplicantEmailOtp,
   type CustomerApplicationSummary,
 } from "@/lib/api";
+import {
+  dialCodeForCountryName,
+  FALLBACK_DIAL_OPTIONS,
+  fetchCountryDialOptions,
+  pricingSlugFromCountryName,
+  type CountryDialOption,
+} from "@/lib/country-dial-codes";
+import {
+  fetchServicePrice,
+  formatGbpAmount,
+  setStoredPricingCountrySlug,
+} from "@/lib/service-country-pricing";
 
 export type StartOrderServiceOption = {
   id: string;
@@ -40,6 +56,8 @@ export type StartOrderApplicant = {
   fullName: string;
   email: string;
   mobile: string;
+  /** E.164 dial prefix, e.g. "+44" */
+  countryCode: string;
   applyingFrom: string;
   emailVerified?: boolean;
   emailVerificationToken?: string;
@@ -70,7 +88,18 @@ export type StartOrderCartEntry = {
   serviceIds: string[];
 };
 
-const APPLYING_FROM_OPTIONS = ["United Kingdom", "United States", "Canada", "Australia", "UAE", "Other"];
+const APPLYING_FROM_FALLBACK = [
+  "United Kingdom",
+  "United States",
+  "Canada",
+  "Australia",
+  "United Arab Emirates",
+  "India",
+  "Ireland",
+  "Singapore",
+  "Germany",
+  "France",
+] as const;
 
 function parsePrice(price: string, feeNumber: number | null): number {
   if (typeof feeNumber === "number" && Number.isFinite(feeNumber)) return feeNumber;
@@ -123,7 +152,7 @@ export function StartOrderPanel({
   const [applicantServices, setApplicantServices] = useState<Record<string, string[]>>(() => ({
     [primaryApplicant.id]: selectedServiceId ? [selectedServiceId] : [],
   }));
-  const [touched, setTouched] = useState({ name: false, email: false });
+  const [touched, setTouched] = useState({ name: false, email: false, mobile: false });
   const [otpTarget, setOtpTarget] = useState<{
     applicantId: string;
     email: string;
@@ -137,6 +166,109 @@ export function StartOrderPanel({
   const [otpSent, setOtpSent] = useState(false);
   const [existingApps, setExistingApps] = useState<CustomerApplicationSummary[]>([]);
   const [existingAppsLoading, setExistingAppsLoading] = useState(false);
+  const [dialOptions, setDialOptions] = useState<CountryDialOption[]>(FALLBACK_DIAL_OPTIONS);
+  const [dialOptionsLoading, setDialOptionsLoading] = useState(true);
+  /** Country-resolved fees keyed by `${catalogId}:${countrySlug}` — driven by Applying From only. */
+  const [countryFeeByKey, setCountryFeeByKey] = useState<Record<string, number>>({});
+
+  const applyingFromOptions = useMemo(() => {
+    const names = dialOptions
+      .map((row) => row.country)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    if (names.length > 0) return names;
+    return [...APPLYING_FROM_FALLBACK];
+  }, [dialOptions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDialOptionsLoading(true);
+    fetchCountryDialOptions()
+      .then((rows) => {
+        if (!cancelled && rows.length) setDialOptions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setDialOptions(FALLBACK_DIAL_OPTIONS);
+      })
+      .finally(() => {
+        if (!cancelled) setDialOptionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Live prices on this page only: when Applying From changes, refetch country fees.
+  const applyingFromKey = useMemo(
+    () => allApplicants.map((row) => row.applyingFrom || "").join("|"),
+    [allApplicants],
+  );
+  const catalogIdsKey = useMemo(
+    () =>
+      services
+        .map((row) => Number(row.catalogId) || 0)
+        .filter((id) => id > 0)
+        .join(","),
+    [services],
+  );
+
+  useEffect(() => {
+    const catalogServices = services.filter((row) => {
+      const id = Number(row.catalogId);
+      return Number.isFinite(id) && id > 0 && row.id !== "undecided";
+    });
+    if (!catalogServices.length) return;
+
+    const slugs = new Set<string>();
+    for (const name of applyingFromKey.split("|")) {
+      const slug = pricingSlugFromCountryName(name);
+      if (slug) slugs.add(slug);
+    }
+    if (!slugs.size) return;
+
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        catalogServices.flatMap((service) => {
+          const catalogId = Number(service.catalogId);
+          return Array.from(slugs).map(async (slug) => {
+            const key = `${catalogId}:${slug}`;
+            const payload = await fetchServicePrice(catalogId, slug);
+            const fee = Number(payload?.total_fee ?? payload?.service_fee);
+            return { key, fee: Number.isFinite(fee) ? fee : null };
+          });
+        }),
+      );
+      if (cancelled) return;
+      setCountryFeeByKey((current) => {
+        const next = { ...current };
+        for (const row of entries) {
+          if (row.fee != null) next[row.key] = row.fee;
+        }
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyingFromKey, catalogIdsKey, services]);
+
+  const pricedService = useCallback(
+    (service: StartOrderServiceOption, applyingFrom: string): StartOrderServiceOption => {
+      const catalogId = Number(service.catalogId);
+      const slug = pricingSlugFromCountryName(applyingFrom || "");
+      if (!Number.isFinite(catalogId) || catalogId <= 0 || !slug) return service;
+      const fee = countryFeeByKey[`${catalogId}:${slug}`];
+      if (typeof fee !== "number" || !Number.isFinite(fee)) return service;
+      return {
+        ...service,
+        feeNumber: fee,
+        price: formatGbpAmount(fee),
+      };
+    },
+    [countryFeeByKey],
+  );
 
   useEffect(() => {
     if (!showExistingApplications) {
@@ -355,11 +487,12 @@ export function StartOrderPanel({
       for (const serviceId of applicantServices[applicant.id] || []) {
         const row = serviceById.get(serviceId);
         if (!row) continue;
-        total += parsePrice(row.price, row.feeNumber);
+        const priced = pricedService(row, applicant.applyingFrom);
+        total += parsePrice(priced.price, priced.feeNumber);
       }
     }
     return total;
-  }, [allApplicants, applicantServices, serviceById]);
+  }, [allApplicants, applicantServices, serviceById, pricedService]);
 
   const summaryApplicants: VisamentSummaryApplicant[] = useMemo(() => {
     return allApplicants.map((applicant, index) => {
@@ -368,12 +501,15 @@ export function StartOrderPanel({
         .map((serviceId) => {
           const row = serviceById.get(serviceId);
           if (!row) return null;
-          return { id: `${applicant.id}-${serviceId}`, label: row.name, amountLabel: row.price };
+          const priced = pricedService(row, applicant.applyingFrom);
+          return { id: `${applicant.id}-${serviceId}`, label: priced.name, amountLabel: priced.price };
         })
         .filter((row): row is { id: string; label: string; amountLabel: string } => Boolean(row));
       const subtotal = selected.reduce((sum, serviceId) => {
         const row = serviceById.get(serviceId);
-        return sum + (row ? parsePrice(row.price, row.feeNumber) : 0);
+        if (!row) return sum;
+        const priced = pricedService(row, applicant.applyingFrom);
+        return sum + parsePrice(priced.price, priced.feeNumber);
       }, 0);
       return {
         id: applicant.id,
@@ -382,7 +518,7 @@ export function StartOrderPanel({
         items,
       };
     });
-  }, [allApplicants, applicantServices, serviceById]);
+  }, [allApplicants, applicantServices, serviceById, pricedService]);
 
   const toggleApplicantService = (applicantId: string, serviceId: string) => {
     setActiveApplicantId(applicantId);
@@ -483,6 +619,9 @@ export function StartOrderPanel({
   );
 
   const nameError = touched.name && !primaryApplicant.fullName.trim();
+  const mobileError =
+    touched.mobile &&
+    (!primaryApplicant.mobile.trim() || !isValidMobile10(primaryApplicant.mobile));
   const emailError =
     touched.email &&
     (!primaryApplicant.email.trim() || !isValidEmail(primaryApplicant.email.trim()));
@@ -496,7 +635,7 @@ export function StartOrderPanel({
     return (
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {verified ? (
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-700">
             <Check className="h-3 w-3" strokeWidth={3} />
             {sameAsAccount ? "Your account email" : "Email verified"}
           </span>
@@ -505,15 +644,15 @@ export function StartOrderPanel({
             type="button"
             disabled={apiLoading || otpSending}
             onClick={() => openOtpModal(applicant, isPrimary)}
-            className="text-[11px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
+            className="text-[12px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
           >
             {otpSending && otpTarget?.applicantId === applicant.id ? "Sending…" : "Verify email"}
           </button>
         ) : (
-          <p className="text-[11px] text-[#829AB1]">We&apos;ll send a verification code to this email.</p>
+          <p className="text-[12px] text-[#829AB1]">We&apos;ll send a verification code to this email.</p>
         )}
         {needsOtp && email && isValidEmail(email) ? (
-          <span className="text-[11px] font-medium text-amber-700">Verification required to continue</span>
+          <span className="text-[12px] font-medium text-amber-700">Verification required to continue</span>
         ) : null}
       </div>
     );
@@ -544,23 +683,65 @@ export function StartOrderPanel({
           }
         />
         {opts.isPrimary && nameError ? (
-          <p className="mt-1 text-[11px] font-medium text-[#E11D48]">Name is required</p>
+          <p className="mt-1 text-[12px] font-medium text-[#E11D48]">Name is required</p>
         ) : null}
       </div>
       <div>
-        <label className={checkoutLabelClass}>Mobile Number</label>
-        <input
-          type="tel"
-          value={applicant.mobile}
-          disabled={apiLoading}
-          placeholder="+44 7000 000000"
-          className={checkoutFieldClass}
-          onChange={(e) =>
-            opts.isPrimary
-              ? onPrimaryChange({ mobile: e.target.value })
-              : onUpdateApplicant(applicant.id, { mobile: e.target.value })
-          }
-        />
+        <label className={checkoutLabelClass}>
+          Mobile Number {opts.isPrimary ? <span className="text-[#E11D48]">*</span> : null}
+        </label>
+        <div className="flex gap-2">
+          <SearchableDialCode
+            value={applicant.countryCode || dialCodeForCountryName(applicant.applyingFrom, dialOptions)}
+            options={dialOptions}
+            loading={dialOptionsLoading}
+            disabled={apiLoading}
+            className={`${checkoutFieldClass} flex w-[118px] shrink-0 items-center justify-between gap-1 px-2 text-left`}
+            onChange={(countryCode) => {
+              if (opts.isPrimary) onPrimaryChange({ countryCode });
+              else onUpdateApplicant(applicant.id, { countryCode });
+            }}
+          />
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            maxLength={10}
+            value={applicant.mobile}
+            disabled={apiLoading}
+            placeholder="10-digit mobile number"
+            className={`min-w-0 flex-1 ${checkoutFieldClass} ${
+              opts.isPrimary && mobileError ? checkoutFieldErrorClass : ""
+            }`}
+            onBlur={() => {
+              if (opts.isPrimary) setTouched((t) => ({ ...t, mobile: true }));
+            }}
+            onKeyDown={(e) => {
+              if (e.ctrlKey || e.metaKey || e.altKey) return;
+              const allowed = ["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"];
+              if (allowed.includes(e.key)) return;
+              if (!/^\d$/.test(e.key)) e.preventDefault();
+            }}
+            onPaste={(e) => {
+              e.preventDefault();
+              const next = sanitizeMobileDigits(e.clipboardData.getData("text"), 10);
+              if (opts.isPrimary) onPrimaryChange({ mobile: next });
+              else onUpdateApplicant(applicant.id, { mobile: next });
+            }}
+            onChange={(e) => {
+              const next = sanitizeMobileDigits(e.target.value, 10);
+              if (opts.isPrimary) onPrimaryChange({ mobile: next });
+              else onUpdateApplicant(applicant.id, { mobile: next });
+            }}
+          />
+        </div>
+        {opts.isPrimary && mobileError ? (
+          <p className="mt-1 text-[12px] font-medium text-[#E11D48]">
+            Enter a valid 10-digit mobile number
+          </p>
+        ) : (
+          <p className="mt-1 text-[12px] text-[#829AB1]">Digits only · exactly 10 numbers</p>
+        )}
       </div>
       <div>
         <label className={checkoutLabelClass}>
@@ -578,7 +759,7 @@ export function StartOrderPanel({
           onChange={(e) => patchEmailField(opts.isPrimary, applicant.id, e.target.value)}
         />
         {opts.isPrimary && emailError ? (
-          <p className="mt-1 text-[11px] font-medium text-[#E11D48]">Valid email is required</p>
+          <p className="mt-1 text-[12px] font-medium text-[#E11D48]">Valid email is required</p>
         ) : (
           renderEmailStatus(applicant, opts.isPrimary)
         )}
@@ -589,15 +770,23 @@ export function StartOrderPanel({
         </label>
         <select
           value={applicant.applyingFrom}
-          disabled={apiLoading}
+          disabled={apiLoading || dialOptionsLoading}
           className={checkoutFieldClass}
-          onChange={(e) =>
-            opts.isPrimary
-              ? onPrimaryChange({ applyingFrom: e.target.value })
-              : onUpdateApplicant(applicant.id, { applyingFrom: e.target.value })
-          }
+          onChange={(e) => {
+            const applyingFrom = e.target.value;
+            const countryCode = dialCodeForCountryName(applyingFrom, dialOptions);
+            const slug = pricingSlugFromCountryName(applyingFrom);
+            if (slug) setStoredPricingCountrySlug(slug);
+            if (opts.isPrimary) onPrimaryChange({ applyingFrom, countryCode });
+            else onUpdateApplicant(applicant.id, { applyingFrom, countryCode });
+          }}
         >
-          {APPLYING_FROM_OPTIONS.map((option) => (
+          {!applicant.applyingFrom ? (
+            <option value="" disabled>
+              Select country…
+            </option>
+          ) : null}
+          {applyingFromOptions.map((option) => (
             <option key={option} value={option}>
               {option}
             </option>
@@ -611,8 +800,8 @@ export function StartOrderPanel({
     const selected = applicantServices[applicant.id] || [];
     return (
       <div className="mt-5">
-        <p className="text-[14px] font-semibold text-[#0F1F3D]">What documents do you need?</p>
-        <p className="mt-0.5 text-[12px] text-[#829AB1]">
+        <p className="text-[15px] font-semibold text-[#0F1F3D]">What documents do you need?</p>
+        <p className="mt-0.5 text-[13px] text-[#829AB1]">
           All categories are listed below. Pick one or more services for this applicant.
         </p>
 
@@ -621,9 +810,12 @@ export function StartOrderPanel({
             const expandKey = `${applicant.id}:${group.key}`;
             const open = Boolean(expandedCategories[expandKey]);
             const isSingle = group.services.length === 1;
+            const pricedGroupServices = group.services.map((service) =>
+              pricedService(service, applicant.applyingFrom),
+            );
 
             if (isSingle) {
-              const service = group.services[0];
+              const service = pricedGroupServices[0];
               const checked = isServiceSelected(selected, service.id);
               return (
                 <button
@@ -645,14 +837,16 @@ export function StartOrderPanel({
                     >
                       {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
                     </span>
-                    <span className="truncate text-[13px] font-semibold text-[#0F1F3D]">{service.name}</span>
+                    <span className="truncate text-[14px] font-semibold text-[#0F1F3D]">{service.name}</span>
                   </span>
-                  <span className="shrink-0 text-[13px] font-bold text-[#102A43]">{service.price}</span>
+                  <span className="shrink-0 text-[14px] font-bold text-[#102A43]">{service.price}</span>
                 </button>
               );
             }
 
-            const groupSelectedCount = group.services.filter((s) => isServiceSelected(selected, s.id)).length;
+            const groupSelectedCount = pricedGroupServices.filter((s) =>
+              isServiceSelected(selected, s.id),
+            ).length;
             return (
               <div
                 key={`${applicant.id}-${group.key}`}
@@ -667,13 +861,13 @@ export function StartOrderPanel({
                       [expandKey]: !current[expandKey],
                     }))
                   }
-                  className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left"
+                  className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left hover:bg-[#F8FAFC]"
                 >
                   <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-semibold text-[#0F1F3D]">{group.label}</span>
-                    <span className="text-[11px] text-[#829AB1]">
-                      {group.services.length} services
-                      {groupSelectedCount ? ` · ${groupSelectedCount} selected` : ""}
+                    <span className="block text-[14px] font-semibold text-[#0F1F3D]">{group.label}</span>
+                    <span className="mt-0.5 block text-[12px] text-[#829AB1]">
+                      {pricedGroupServices.length} options
+                      {groupSelectedCount > 0 ? ` · ${groupSelectedCount} selected` : ""}
                     </span>
                   </span>
                   <ChevronDown
@@ -681,8 +875,8 @@ export function StartOrderPanel({
                   />
                 </button>
                 {open ? (
-                  <div className="space-y-1 border-t border-[#EEF2F7] bg-[#F8FBFF] p-2">
-                    {group.services.map((service) => {
+                  <div className="space-y-1 border-t border-[#E8EEF5] px-2 py-2">
+                    {pricedGroupServices.map((service) => {
                       const checked = isServiceSelected(selected, service.id);
                       return (
                         <button
@@ -690,23 +884,32 @@ export function StartOrderPanel({
                           type="button"
                           disabled={apiLoading}
                           onClick={() => toggleApplicantService(applicant.id, service.id)}
-                          className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition ${
-                            checked ? "bg-[#1A56DB] text-white" : "hover:bg-white"
+                          className={`flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-left transition ${
+                            checked ? "bg-[#EFF6FF]" : "hover:bg-[#F8FAFC]"
                           }`}
                         >
-                          <span className="flex min-w-0 items-center gap-2">
+                          <span className="flex min-w-0 items-center gap-2.5">
                             <span
                               className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                                checked ? "border-white bg-white text-[#1A56DB]" : "border-[#C7D4E8] bg-white"
+                                checked
+                                  ? "border-[#1A56DB] bg-[#1A56DB] text-white"
+                                  : "border-[#C7D4E8] bg-white"
                               }`}
                             >
                               {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
                             </span>
-                            <span className={`truncate text-[12px] font-semibold ${checked ? "text-white" : ""}`}>
-                              {service.name}
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px] font-semibold text-[#0F1F3D]">
+                                {service.name}
+                              </span>
+                              {service.description ? (
+                                <span className="mt-0.5 block truncate text-[11px] text-[#829AB1]">
+                                  {service.description}
+                                </span>
+                              ) : null}
                             </span>
                           </span>
-                          <span className={`shrink-0 text-[12px] font-bold ${checked ? "text-white" : "text-[#102A43]"}`}>
+                          <span className="shrink-0 text-[13px] font-bold text-[#102A43]">
                             {service.price}
                           </span>
                         </button>
@@ -797,7 +1000,7 @@ export function StartOrderPanel({
                 type="button"
                 onClick={onAddApplicant}
                 disabled={apiLoading}
-                className="inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 text-[14px] font-semibold text-[#1A56DB] hover:underline disabled:opacity-60"
               >
                 <Plus className="h-4 w-4" />
                 Add Applicant
@@ -807,12 +1010,23 @@ export function StartOrderPanel({
                 type="button"
                 disabled={apiLoading || primarySelectedServices.length === 0}
                 onClick={() => {
-                  setTouched({ name: true, email: true });
+                  setTouched({ name: true, email: true, mobile: true });
                   if (!primaryApplicant.fullName.trim() || !primaryApplicant.email.trim()) return;
+                  if (!isValidMobile10(primaryApplicant.mobile)) {
+                    toast.error("Enter a valid 10-digit mobile number.");
+                    return;
+                  }
                   const incomplete = extraApplicants.find(
                     (row) => !row.fullName.trim() || !row.email.trim(),
                   );
                   if (incomplete) return;
+                  const badMobile = extraApplicants.find(
+                    (row) => row.mobile.trim() && !isValidMobile10(row.mobile),
+                  );
+                  if (badMobile) {
+                    toast.error("Each applicant mobile must be exactly 10 digits.");
+                    return;
+                  }
                   const withoutServices = allApplicants.find(
                     (row) => !(applicantServices[row.id] || []).length,
                   );
@@ -829,7 +1043,7 @@ export function StartOrderPanel({
                     })),
                   );
                 }}
-                className="inline-flex w-full items-center justify-center rounded-xl bg-[#1A56DB] px-10 py-3 text-[14px] font-semibold text-white transition hover:bg-[#1648B5] disabled:cursor-not-allowed disabled:bg-[#C5D0DE] sm:w-auto sm:min-w-[200px]"
+                className="inline-flex w-full items-center justify-center rounded-xl bg-[#1A56DB] px-10 py-3 text-[15px] font-semibold text-white transition hover:bg-[#1648B5] disabled:cursor-not-allowed disabled:bg-[#C5D0DE] sm:w-auto sm:min-w-[200px]"
               >
                 {apiLoading ? "Please wait…" : "Continue"}
               </button>
@@ -884,6 +1098,7 @@ export function StartOrderPanel({
                       fullName: otpTarget.fullName,
                       email: otpTarget.email,
                       mobile: otpTarget.mobile,
+                      countryCode: "+44",
                       applyingFrom: "United Kingdom",
                     },
                     otpTarget.isPrimary,

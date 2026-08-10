@@ -6,21 +6,18 @@ import type { AdminDashboardOverview, TeamPerformancePeriod } from "@/lib/admin-
 
 type StaffMember = AdminDashboardOverview["staff_members"][number];
 
-type KpiFilterKey =
-  | "all"
-  | "cases"
-  | "assigned"
-  | "completed"
-  | "cases_done"
-  | "pending"
-  | "accuracy"
-  | "revenue";
+type KpiFilterKey = "all" | "assigned" | "completed" | "pending" | "accuracy" | "revenue";
 
 type TeamPerformanceGridProps = {
   staffMembers: StaffMember[];
   periodLabel: string;
   teamPeriod: TeamPerformancePeriod;
 };
+
+function formatAccuracy(value: number) {
+  if (!Number.isFinite(value)) return "0%";
+  return `${Number(value).toFixed(1)}%`;
+}
 
 export function TeamPerformanceGrid({
   staffMembers,
@@ -42,14 +39,10 @@ export function TeamPerformanceGrid({
     if (kpiFilter === "all") return nonAdminStaff;
     return nonAdminStaff.filter((staff) => {
       switch (kpiFilter) {
-        case "cases":
-          return (staff.cases_generated ?? 0) > 0;
         case "assigned":
           return staff.assigned > 0;
         case "completed":
           return staff.completed > 0;
-        case "cases_done":
-          return (staff.cases_completed ?? 0) > 0;
         case "pending":
           return staff.pending > 0;
         case "accuracy":
@@ -69,83 +62,67 @@ export function TeamPerformanceGrid({
   const totals = useMemo(() => {
     return nonAdminStaff.reduce(
       (acc, staff) => ({
-        cases_generated: acc.cases_generated + (staff.cases_generated ?? 0),
-        cases_completed: acc.cases_completed + (staff.cases_completed ?? 0),
         assigned: acc.assigned + staff.assigned,
         completed: acc.completed + staff.completed,
         pending: acc.pending + staff.pending,
         revenue_period: acc.revenue_period + Number(staff.revenue_30d ?? 0),
-        revenue_total: acc.revenue_total + Number(staff.revenue_total ?? 0),
-        accuracy_sum: acc.accuracy_sum + staff.accuracy,
-        accuracy_count: acc.accuracy_count + (staff.assigned > 0 ? 1 : 0),
       }),
       {
-        cases_generated: 0,
-        cases_completed: 0,
         assigned: 0,
         completed: 0,
         pending: 0,
         revenue_period: 0,
-        revenue_total: 0,
-        accuracy_sum: 0,
-        accuracy_count: 0,
       },
     );
   }, [nonAdminStaff]);
 
-  const avgAccuracy = totals.accuracy_count
-    ? Math.round((totals.accuracy_sum / totals.accuracy_count) * 10) / 10
-    : 0;
+  // Weighted team accuracy = completed / assigned (not average of row %).
+  const teamAccuracy =
+    totals.assigned > 0 ? Math.round((totals.completed / totals.assigned) * 1000) / 10 : 0;
 
   const displayTotals = useMemo(() => {
     const rows = kpiFilter === "all" ? nonAdminStaff : filteredStaff;
     return rows.reduce(
       (acc, staff) => ({
-        cases_generated: acc.cases_generated + (staff.cases_generated ?? 0),
-        cases_completed: acc.cases_completed + (staff.cases_completed ?? 0),
         assigned: acc.assigned + staff.assigned,
         completed: acc.completed + staff.completed,
         pending: acc.pending + staff.pending,
         revenue_period: acc.revenue_period + Number(staff.revenue_30d ?? 0),
-        revenue_total: acc.revenue_total + Number(staff.revenue_total ?? 0),
-        accuracy_sum: acc.accuracy_sum + staff.accuracy,
-        accuracy_count: acc.accuracy_count + (staff.assigned > 0 ? 1 : 0),
       }),
       {
-        cases_generated: 0,
-        cases_completed: 0,
         assigned: 0,
         completed: 0,
         pending: 0,
         revenue_period: 0,
-        revenue_total: 0,
-        accuracy_sum: 0,
-        accuracy_count: 0,
       },
     );
   }, [filteredStaff, kpiFilter, nonAdminStaff]);
 
-  const displayAvgAccuracy = displayTotals.accuracy_count
-    ? Math.round((displayTotals.accuracy_sum / displayTotals.accuracy_count) * 10) / 10
-    : 0;
+  const displayAccuracy =
+    displayTotals.assigned > 0
+      ? Math.round((displayTotals.completed / displayTotals.assigned) * 1000) / 10
+      : 0;
 
   return (
     <div className="bg-white rounded-[12px] border-[0.5px] border-[#D9E1EA] overflow-hidden">
       <div className="p-5 border-b border-[#E5EAF0]">
         <h2 className="text-lg font-heading font-semibold text-[#102A43]">Team performance</h2>
         <p className="text-xs text-[#627D98] mt-0.5">
-          All team · accuracy & revenue · {periodLabel}
+          Accuracy = completed ÷ assigned · leave today · {periodLabel}
         </p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 px-5 py-3 border-b border-[#E5EAF0] bg-[#F8FAFC]">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 px-5 py-3 border-b border-[#E5EAF0] bg-[#F8FAFC]">
         {[
-          { key: "cases" as const, label: "Cases", value: totals.cases_generated, tone: "text-[#102A43]" },
           { key: "assigned" as const, label: "Assigned", value: totals.assigned, tone: "text-[#0B69B7]" },
           { key: "completed" as const, label: "Completed", value: totals.completed, tone: "text-[#006F57]" },
-          { key: "cases_done" as const, label: "Cases done", value: totals.cases_completed, tone: "text-[#006F57]" },
           { key: "pending" as const, label: "Pending", value: totals.pending, tone: "text-[#9C4F17]" },
-          { key: "accuracy" as const, label: "Accuracy", value: `${avgAccuracy}%`, tone: "text-[#102A43]" },
+          {
+            key: "accuracy" as const,
+            label: "Accuracy",
+            value: formatAccuracy(teamAccuracy),
+            tone: "text-[#102A43]",
+          },
           {
             key: "revenue" as const,
             label: `Revenue (${periodLabel})`,
@@ -190,21 +167,17 @@ export function TeamPerformanceGrid({
       ) : null}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left align-middle min-w-[1100px]">
+        <table className="w-full text-sm text-left align-middle min-w-[720px]">
           <thead className="bg-[#F5F7FA] text-[#486581] font-heading font-medium">
             <tr>
               <th className="px-4 py-3 font-medium">Staff</th>
-              <th className="px-3 py-3 font-medium text-center">Cases</th>
+              <th className="px-3 py-3 font-medium text-center">Today</th>
               <th className="px-3 py-3 font-medium text-center">Assigned</th>
               <th className="px-3 py-3 font-medium text-center">Completed</th>
-              <th className="px-3 py-3 font-medium text-center">Cases done</th>
               <th className="px-3 py-3 font-medium text-center">Pending</th>
               <th className="px-3 py-3 font-medium text-center">Accuracy</th>
               <th className="px-3 py-3 font-medium text-center">Avg time</th>
-              <th className="px-3 py-3 font-medium text-center">SLA</th>
-              <th className="px-3 py-3 font-medium text-center">Audits P/F</th>
-              <th className="px-3 py-3 font-medium text-center">Revenue ({periodLabel})</th>
-              <th className="px-3 py-3 font-medium text-center">Revenue (all)</th>
+              <th className="px-3 py-3 font-medium text-center">Revenue</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#E5EAF0]">
@@ -214,77 +187,97 @@ export function TeamPerformanceGrid({
                   {staff.name}
                   <span className="ml-2 text-[11px] text-[#627D98] font-normal">{staff.role}</span>
                 </td>
-                <td className="px-3 py-3 text-center font-semibold text-[#102A43]">
-                  {staff.cases_generated ?? 0}
+                <td className="px-3 py-3 text-center">
+                  {staff.on_leave_today ? (
+                    <span
+                      className={`inline-flex flex-col items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                        staff.blocks_auto_assign_today
+                          ? "border-[#F8B4B4] bg-[#FEE2E2] text-[#9B1C1C]"
+                          : "border-[#FCD34D] bg-[#FEF3C7] text-[#92400E]"
+                      }`}
+                      title={
+                        staff.blocks_auto_assign_today && (staff.pending_on_leave || 0) > 0
+                          ? `${staff.pending_on_leave} pending task(s) still on this staff — reassign from Workload`
+                          : staff.leave_label_today || "On leave"
+                      }
+                    >
+                      {staff.leave_label_today || "Leave"}
+                      {staff.blocks_auto_assign_today && (staff.pending_on_leave || 0) > 0 ? (
+                        <span className="font-normal">{staff.pending_on_leave} pending</span>
+                      ) : null}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-medium text-[#006F57]">Available</span>
+                  )}
                 </td>
                 <td className="px-3 py-3 text-center font-semibold text-[#0B69B7]">{staff.assigned}</td>
                 <td className="px-3 py-3 text-center font-semibold text-[#006F57]">{staff.completed}</td>
-                <td className="px-3 py-3 text-center font-semibold text-[#006F57]">
-                  {staff.cases_completed ?? 0}
+                <td
+                  className={`px-3 py-3 text-center font-semibold ${
+                    staff.blocks_auto_assign_today && staff.pending > 0
+                      ? "text-[#B42318]"
+                      : "text-[#9C4F17]"
+                  }`}
+                  title={
+                    staff.blocks_auto_assign_today && staff.pending > 0
+                      ? "Still assigned while on leave — reassign from Workload"
+                      : undefined
+                  }
+                >
+                  {staff.pending}
                 </td>
-                <td className="px-3 py-3 text-center font-semibold text-[#9C4F17]">{staff.pending}</td>
                 <td className="px-3 py-3 text-center">
                   <span
                     className={`font-semibold ${
-                      staff.accuracy >= 90
-                        ? "text-[#006F57]"
-                        : staff.accuracy >= 70
-                          ? "text-[#9C4F17]"
-                          : "text-[#B42318]"
+                      staff.assigned === 0
+                        ? "text-[#627D98]"
+                        : staff.accuracy >= 90
+                          ? "text-[#006F57]"
+                          : staff.accuracy >= 70
+                            ? "text-[#9C4F17]"
+                            : "text-[#B42318]"
                     }`}
+                    title={
+                      staff.assigned > 0
+                        ? `${staff.completed} completed ÷ ${staff.assigned} assigned`
+                        : "No assigned tasks in this period"
+                    }
                   >
-                    {staff.accuracy}%
+                    {formatAccuracy(staff.accuracy)}
                   </span>
                 </td>
-                <td className="px-3 py-3 text-center text-[#486581]">{staff.avgTime}</td>
-                <td className="px-3 py-3 text-center">
-                  <span className={staff.slaBreach > 0 ? "text-[#B42318] font-semibold" : "text-[#486581]"}>
-                    {staff.slaBreach}
-                  </span>
-                </td>
-                <td className="px-3 py-3 text-center">
-                  <span className="text-[#006F57] font-semibold">{staff.auditsPassed}</span>
-                  <span className="text-[#627D98] mx-0.5">/</span>
-                  <span className="text-[#B42318] font-semibold">{staff.auditsFailed}</span>
+                <td className="px-3 py-3 text-center text-[#486581]">
+                  {staff.completed > 0 ? staff.avgTime : "—"}
                 </td>
                 <td className="px-3 py-3 text-center font-semibold text-[#102A43]">
                   ₹{Number(staff.revenue_30d ?? 0).toLocaleString("en-IN")}
-                </td>
-                <td className="px-3 py-3 text-center text-[#486581]">
-                  ₹{Number(staff.revenue_total ?? 0).toLocaleString("en-IN")}
                 </td>
               </tr>
             ))}
             {filteredStaff.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-5 py-6 text-center text-sm text-[#627D98]">
+                <td colSpan={8} className="px-5 py-6 text-center text-sm text-[#627D98]">
                   {nonAdminStaff.length === 0
                     ? "No staff members found for this period."
                     : "No staff match this KPI filter."}
                 </td>
               </tr>
-            ) : filteredStaff.length > 0 ? (
+            ) : (
               <tr className="bg-[#F8FAFC] font-semibold">
                 <td className="px-4 py-3 text-[#102A43]">
                   {kpiFilter === "all" ? "Team total" : "Filtered total"}
                 </td>
-                <td className="px-3 py-3 text-center">{displayTotals.cases_generated}</td>
+                <td className="px-3 py-3 text-center text-[#627D98]">—</td>
                 <td className="px-3 py-3 text-center text-[#0B69B7]">{displayTotals.assigned}</td>
                 <td className="px-3 py-3 text-center text-[#006F57]">{displayTotals.completed}</td>
-                <td className="px-3 py-3 text-center text-[#006F57]">{displayTotals.cases_completed}</td>
                 <td className="px-3 py-3 text-center text-[#9C4F17]">{displayTotals.pending}</td>
-                <td className="px-3 py-3 text-center">{displayAvgAccuracy}%</td>
-                <td className="px-3 py-3 text-center text-[#627D98]">—</td>
-                <td className="px-3 py-3 text-center text-[#627D98]">—</td>
+                <td className="px-3 py-3 text-center">{formatAccuracy(displayAccuracy)}</td>
                 <td className="px-3 py-3 text-center text-[#627D98]">—</td>
                 <td className="px-3 py-3 text-center">
                   ₹{displayTotals.revenue_period.toLocaleString("en-IN")}
                 </td>
-                <td className="px-3 py-3 text-center">
-                  ₹{displayTotals.revenue_total.toLocaleString("en-IN")}
-                </td>
               </tr>
-            ) : null}
+            )}
           </tbody>
         </table>
       </div>

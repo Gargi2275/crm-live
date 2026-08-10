@@ -7,8 +7,10 @@ import { KanbanCard } from "./KanbanCard";
 import { SlideOverPanel } from "./SlideOverPanel";
 import {
   KANBAN_COLUMNS,
+  comparePipelinePriority,
   displayServiceLabel,
   isApplicationFullyPaid,
+  isExpressOrUrgentPlan,
   isPassportRenewalService,
   matchesServiceFilter,
   normalizeServiceCategory,
@@ -31,6 +33,7 @@ import toast from "react-hot-toast";
 type KanbanCase = PipelineCase & {
   applicationId: number;
   createdAt: string;
+  applicationDate: string;
   updatedAt: string;
   applicationStatus: string;
   auditResult: string;
@@ -59,8 +62,36 @@ interface KanbanBoardProps {
   serviceFilter?: string;
   staffFilter?: string;
   ageingFilter?: string;
+  /** YYYY-MM-DD inclusive lower bound; empty = no lower bound */
+  dateFrom?: string;
+  /** YYYY-MM-DD inclusive upper bound; empty = no upper bound */
+  dateTo?: string;
   searchQuery?: string;
   viewMode?: KanbanViewMode;
+}
+
+function toLocalDayKey(iso?: string | null): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, "0");
+  const d = String(parsed.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function matchesDateRange(iso: string | null | undefined, dateFrom: string, dateTo: string): boolean {
+  const day = toLocalDayKey(iso);
+  if (!day) {
+    // Missing date: keep when showing open-ended “from today”, drop only if a strict past window is set
+    if (dateFrom && dateTo && dateTo < dateFrom) return false;
+    if (dateFrom && !dateTo) return true;
+    if (!dateFrom && dateTo) return false;
+    return true;
+  }
+  if (dateFrom && day < dateFrom) return false;
+  if (dateTo && day > dateTo) return false;
+  return true;
 }
 
 const STAGE_ALIAS: Record<string, PipelineCase["stage"]> = {
@@ -311,6 +342,7 @@ const getPaymentStatus = (item: AdminApplication): PipelineCase["paymentStatus"]
 
 const toKanbanCase = (item: AdminApplication): KanbanCase => {
   const createdAt = item.created_at || new Date().toISOString();
+  const applicationDate = String(item.application_date || item.created_at || createdAt);
   const ageHours = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60)));
   const serviceCategory = normalizeServiceCategory(item.service_type, item.case_type, item.service_name);
   const isApostille = serviceCategory === "Apostille";
@@ -319,10 +351,10 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
       ? String(item.file_number).trim()
       : item.reference_number || `APP-${item.id}`;
   const stage = resolveStage(item);
-  const feePlan = String(item.fee_plan_code || "").trim().toLowerCase();
   return {
     applicationId: item.id,
     createdAt,
+    applicationDate,
     updatedAt: item.updated_at || item.created_at || new Date().toISOString(),
     applicationStatus: String(item.application_status || ""),
     auditResult: String(item.audit_result || ""),
@@ -339,7 +371,7 @@ const toKanbanCase = (item: AdminApplication): KanbanCase => {
     assignedTo: item.assigned_staff ? String(item.assigned_staff) : null,
     slaTimer: `${ageHours}h`,
     slaBreached: ageHours >= 24 * 7,
-    isExpress: feePlan === "express" || feePlan.startsWith("express") || Boolean(item.is_express),
+    isExpress: isExpressOrUrgentPlan(item.fee_plan_code, item.is_express),
   };
 };
 
@@ -410,6 +442,8 @@ export function KanbanBoard({
   serviceFilter = "All",
   staffFilter = "All",
   ageingFilter = "Any",
+  dateFrom = "",
+  dateTo = "",
   searchQuery = "",
   viewMode = "pipeline",
 }: KanbanBoardProps) {
@@ -709,6 +743,7 @@ export function KanbanBoard({
     const byStaff = staffFilter === "All" || (staffFilter === "Unassigned" ? !item.assignedTo : item.assignedTo === staffFilter);
     const ageDays = ageInDays(item.createdAt);
     const byAgeing = ageingFilter === "Any" || (ageingFilter === "3d+" && ageDays >= 3) || (ageingFilter === "5d+" && ageDays >= 5) || (ageingFilter === "7d+" && ageDays >= 7);
+    const byDateRange = matchesDateRange(item.applicationDate || item.createdAt, dateFrom, dateTo);
 
     const status = String(item.applicationStatus || "").toLowerCase();
     const stage = item.stage;
@@ -753,23 +788,21 @@ export function KanbanBoard({
       }
     })();
 
-    return bySearch && byService && byStaff && byAgeing && byQuickFilter;
+    return bySearch && byService && byStaff && byAgeing && byDateRange && byQuickFilter;
   });
+
+  const prioritizedCases = useMemo(
+    () => filteredCases.slice().sort(comparePipelinePriority),
+    [filteredCases],
+  );
 
   const renderColumns = (staffView: boolean) => (
     <div className="flex gap-4 h-[560px] max-h-[64vh] min-h-[420px] overflow-x-auto pb-2 custom-scrollbar">
       {(quickFilter
-        ? KANBAN_COLUMNS.filter((column) => filteredCases.some((c) => c.stage === column.id))
+        ? KANBAN_COLUMNS.filter((column) => prioritizedCases.some((c) => c.stage === column.id))
         : KANBAN_COLUMNS
       ).map((column) => {
-        const columnCases = filteredCases
-          .filter((c) => c.stage === column.id)
-          .slice()
-          .sort((a, b) => {
-            // Priority / Express paid cases stay on top of the working portal column.
-            if (a.isExpress !== b.isExpress) return a.isExpress ? -1 : 1;
-            return 0;
-          });
+        const columnCases = prioritizedCases.filter((c) => c.stage === column.id);
         return (
           <KanbanColumn
             key={column.id}
@@ -822,14 +855,14 @@ export function KanbanBoard({
             </tr>
           </thead>
           <tbody>
-            {filteredCases.length === 0 ? (
+            {prioritizedCases.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-sm text-[#627D98]">
                   No cases found for current filters.
                 </td>
               </tr>
             ) : (
-              filteredCases.map((item) => {
+              prioritizedCases.map((item) => {
                 const stageLabel = KANBAN_COLUMNS.find((column) => column.id === item.stage)?.title || item.stage;
                 return (
                   <tr key={item.id} className="border-b border-[#EEF2F6] hover:bg-[#FAFCFF]">

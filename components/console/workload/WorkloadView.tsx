@@ -1,18 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Shuffle, UserCog } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, Shuffle, UserCog } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeContext";
+import { SlideOverPanel } from "@/components/console/kanban/SlideOverPanel";
+import { useAdminCaseSlideOver } from "@/components/console/kanban/useAdminCaseSlideOver";
 import {
   StaffWorkloadSlideOver,
   type StaffWorkloadSummary,
 } from "@/components/console/workload/StaffWorkloadSlideOver";
+import { WorkloadCalendarTab } from "@/components/console/workload/WorkloadCalendarTab";
 import {
   adminDirectAssignTask,
   assignAdminTask,
   autoAssignAdminTasks,
+  decideTaskReassignRequest,
   getAdminDashboardOverview,
   getAdminInternalMessagesFeed,
   getTaskEffectiveStatus,
@@ -23,17 +28,25 @@ import {
   formatTaskStatusLabel,
   taskStatusBadgeClass,
   listAdminTasks,
+  listOwnStaffLeave,
+  listTaskReassignRequests,
+  peerReassignAdminTask,
   staffIdsMatch,
   type AdminDashboardOverview,
   type AdminStaffInternalMessage,
   type AdminTaskItem,
+  type TaskReassignRequestItem,
 } from "@/lib/admin-auth";
 
 const filterFieldClass =
   "mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white";
 
 type KpiFilterKey = "all" | "assigned" | "pending" | "completed" | "unassigned";
-type WorkloadTab = "overview" | "notes";
+type WorkloadTab = "overview" | "calendar" | "notes" | "reassigns";
+type TaskSortKey = "created" | "deadline" | "application" | "customer" | "task" | "status" | "assignee";
+type SortDir = "asc" | "desc";
+/** Staff My Cases: open work by default; closed/cancelled via filter. */
+type MyTasksStatusFilter = "open" | "completed" | "cancelled" | "all";
 
 const TASK_TYPE_LABELS: Record<string, string> = {
   audit: "Assessment",
@@ -50,12 +63,99 @@ function formatTaskTypeLabel(taskType: string) {
   return TASK_TYPE_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
+function taskCreatedTs(task: AdminTaskItem): number {
+  const raw =
+    (task as AdminTaskItem & { createdAt?: string | null }).created_at ??
+    (task as { createdAt?: string }).createdAt ??
+    null;
+  if (!raw) return 0;
+  const ts = new Date(raw).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function taskDeadlineTs(task: AdminTaskItem): number {
+  if (!task.deadline) return Number.POSITIVE_INFINITY;
+  const ts = new Date(task.deadline).getTime();
+  return Number.isFinite(ts) ? ts : Number.POSITIVE_INFINITY;
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onSort,
+}: {
+  label: string;
+  sortKey: TaskSortKey;
+  activeKey: TaskSortKey;
+  dir: SortDir;
+  onSort: (key: TaskSortKey) => void;
+}) {
+  const active = activeKey === sortKey;
+  return (
+    <th className="px-3 py-2 text-left font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 rounded px-0.5 py-0.5 transition hover:text-[#102A43] ${
+          active ? "text-[#006F57]" : "text-[#486581]"
+        }`}
+        title={active ? `Sorted ${dir === "desc" ? "descending" : "ascending"} — click to toggle` : `Sort by ${label}`}
+      >
+        <span>{label}</span>
+        {active ? (
+          dir === "asc" ? (
+            <ArrowUp className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <ArrowDown className="h-3.5 w-3.5 shrink-0" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3.5 w-3.5 shrink-0 opacity-40" />
+        )}
+      </button>
+    </th>
+  );
+}
+
+function resolveWorkloadTab(
+  raw: string | null | undefined,
+  opts: { isFounderView: boolean; canManageTasks: boolean },
+): WorkloadTab {
+  const tab = String(raw || "").trim().toLowerCase();
+  if (tab === "reassigns" && opts.isFounderView) return "reassigns";
+  if (tab === "calendar" || tab === "notes" || tab === "overview") return tab;
+  return opts.canManageTasks ? "overview" : "calendar";
+}
+
+export function WorkloadView({
+  embedded = false,
+  focusTab = null,
+}: {
+  embedded?: boolean;
+  /** When opened from dashboard (no URL ?tab=), force Overview/Reassigns/etc. */
+  focusTab?: string | null;
+}) {
   const { adminUser } = useAdminAuth();
-  const userRole = adminUser?.role;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const userRole = String(adminUser?.role || "").trim().toLowerCase();
   const isFounderView = userRole === "admin";
   const isOpsView = userRole === "ops_manager";
   const canManageTasks = isFounderView || isOpsView;
+  const {
+    selectedCase,
+    selectedCaseDetails,
+    selectedCaseDocuments,
+    detailsLoading,
+    detailsError,
+    documentsLoading,
+    documentsError,
+    openCaseByApplicationId,
+    closeCase,
+    handleStageResolved,
+    isOpen: isCasePanelOpen,
+  } = useAdminCaseSlideOver();
 
   const [dashboardData, setDashboardData] = useState<AdminDashboardOverview | null>(null);
   const [taskItems, setTaskItems] = useState<AdminTaskItem[]>([]);
@@ -64,13 +164,110 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [selectedStaff, setSelectedStaff] = useState<StaffWorkloadSummary | null>(null);
   const [internalMessages, setInternalMessages] = useState<AdminStaffInternalMessage[]>([]);
-  const [activeTab, setActiveTab] = useState<WorkloadTab>("overview");
+  const initialTabParam = String(focusTab || searchParams.get("tab") || "").trim().toLowerCase();
+  const [activeTab, setActiveTab] = useState<WorkloadTab>(() =>
+    resolveWorkloadTab(initialTabParam, { isFounderView, canManageTasks }),
+  );
+
+  const goToWorkloadTab = (tab: WorkloadTab) => {
+    setActiveTab(tab);
+    if (embedded) return;
+    const current = String(searchParams.get("tab") || "").trim().toLowerCase();
+    if (current === tab) return;
+    router.replace(`/admin/workload?tab=${tab}`, { scroll: false });
+  };
+
+  const openCaseFromTask = (task: AdminTaskItem) => {
+    if (!task.application) {
+      toast.error("Application not found for this task.");
+      return;
+    }
+    void openCaseByApplicationId(task.application, {
+      reference: task.application_reference,
+      customer: task.customer_name,
+    });
+  };
+
+  const openCaseFromApplicationId = (
+    applicationId: number | null | undefined,
+    preview?: { reference?: string; customer?: string },
+  ) => {
+    const id = Number(applicationId || 0);
+    if (!id) {
+      toast.error("Application not found.");
+      return;
+    }
+    void openCaseByApplicationId(id, preview);
+  };
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey | null>(null);
   const [staffSearch, setStaffSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [loadFilter, setLoadFilter] = useState("all");
   const [staffIdFilter, setStaffIdFilter] = useState("all");
   const [taskTypeFilter, setTaskTypeFilter] = useState("all");
+  /** Default: newest tasks first (managers: created; staff My Cases: Case column) */
+  const [taskSortKey, setTaskSortKey] = useState<TaskSortKey>(canManageTasks ? "created" : "application");
+  const [taskSortDir, setTaskSortDir] = useState<SortDir>("desc");
+  const [myTasksStatusFilter, setMyTasksStatusFilter] = useState<MyTasksStatusFilter>("open");
+  const [peerColleagues, setPeerColleagues] = useState<Array<{ id: number; name: string; role: string }>>([]);
+  const [onLeaveToday, setOnLeaveToday] = useState(false);
+  const [pendingReassigns, setPendingReassigns] = useState<TaskReassignRequestItem[]>([]);
+  const [reassignBusyId, setReassignBusyId] = useState<number | null>(null);
+
+  const handleTaskSort = (key: TaskSortKey) => {
+    if (taskSortKey === key) {
+      setTaskSortDir((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setTaskSortKey(key);
+    // Newest / latest first when opening Case, Created, or Deadline
+    setTaskSortDir(key === "created" || key === "deadline" || key === "application" ? "desc" : "asc");
+  };
+
+  const compareTasks = (a: AdminTaskItem, b: AdminTaskItem, key: TaskSortKey, dir: SortDir) => {
+    const dirMul = dir === "asc" ? 1 : -1;
+    let cmp = 0;
+    switch (key) {
+      case "created":
+        cmp = taskCreatedTs(a) - taskCreatedTs(b);
+        break;
+      case "deadline": {
+        const ad = taskDeadlineTs(a);
+        const bd = taskDeadlineTs(b);
+        if (ad === bd) cmp = 0;
+        else if (!Number.isFinite(ad)) cmp = 1;
+        else if (!Number.isFinite(bd)) cmp = -1;
+        else cmp = ad - bd;
+        break;
+      }
+      case "application":
+        cmp = String(a.application_reference || "").localeCompare(String(b.application_reference || ""), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+        break;
+      case "customer":
+        cmp = String(a.customer_name || "").localeCompare(String(b.customer_name || ""), undefined, {
+          sensitivity: "base",
+        });
+        break;
+      case "task":
+        cmp = String(a.task_type || "").localeCompare(String(b.task_type || ""), undefined, { sensitivity: "base" });
+        break;
+      case "status":
+        cmp = getTaskEffectiveStatus(a).localeCompare(getTaskEffectiveStatus(b), undefined, { sensitivity: "base" });
+        break;
+      case "assignee":
+        cmp = String(a.assigned_staff_name || "").localeCompare(String(b.assigned_staff_name || ""), undefined, {
+          sensitivity: "base",
+        });
+        break;
+      default:
+        cmp = 0;
+    }
+    if (cmp !== 0) return cmp * dirMul;
+    return (Number(b.id) || 0) - (Number(a.id) || 0);
+  };
 
   const staffMembers = dashboardData?.staff_members ?? [];
   const isTaskUnassigned = (task: AdminTaskItem) => {
@@ -226,6 +423,11 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
       })
       .map((staff) => {
         const live = workloadByStaff[staff.id];
+        // Prefer API leave status so Workload matches Team Performance / calendar.
+        const leaveStatus =
+          staff.blocks_auto_assign_today || String(staff.loadStatus || "").toLowerCase() === "on leave"
+            ? "On leave"
+            : null;
         return {
           id: staff.id,
           name: staff.name,
@@ -233,7 +435,7 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
           assigned: live?.assigned ?? staff.assigned,
           pending: live?.pending ?? staff.pending,
           completed: live?.completed ?? staff.completed,
-          loadStatus: live?.loadStatus ?? staff.loadStatus,
+          loadStatus: leaveStatus || live?.loadStatus || staff.loadStatus,
           slaBreach: staff.slaBreach,
         };
       });
@@ -370,6 +572,8 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
       );
     }
 
+    tasks.sort((a, b) => compareTasks(a, b, taskSortKey, taskSortDir));
+
     return tasks;
   }, [
     filteredStaffRows,
@@ -381,7 +585,33 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
     staffSearch,
     taskItems,
     taskTypeFilter,
+    taskSortDir,
+    taskSortKey,
   ]);
+
+  const myOpenTaskCount = useMemo(() => {
+    const selfId = adminUser?.id;
+    return taskItems.filter(
+      (task) => staffIdsMatch(task.assigned_staff, selfId) && isTaskPending(task),
+    ).length;
+  }, [taskItems, adminUser?.id]);
+
+  const myTasks = useMemo(() => {
+    const selfId = adminUser?.id;
+    // Strict isolation: only tasks currently assigned to this staffer.
+    let tasks = taskItems.filter((task) => staffIdsMatch(task.assigned_staff, selfId));
+
+    if (myTasksStatusFilter === "open") {
+      tasks = tasks.filter((task) => isTaskPending(task));
+    } else if (myTasksStatusFilter === "completed") {
+      tasks = tasks.filter((task) => isTaskCompleted(task));
+    } else if (myTasksStatusFilter === "cancelled") {
+      tasks = tasks.filter((task) => getTaskEffectiveStatus(task) === "cancelled");
+    }
+
+    tasks.sort((a, b) => compareTasks(a, b, taskSortKey, taskSortDir));
+    return tasks;
+  }, [taskItems, adminUser?.id, myTasksStatusFilter, taskSortKey, taskSortDir]);
 
   const showStaffTable = effectiveKpi !== "unassigned" && staffIdFilter !== "unassigned";
 
@@ -391,6 +621,8 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
     setLoadFilter("all");
     setStaffIdFilter("all");
     setTaskTypeFilter("all");
+    setTaskSortKey("created");
+    setTaskSortDir("desc");
   };
 
   const panelFilterCount =
@@ -448,6 +680,7 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
 
   const loadStatusStyles = (status: string) => {
     const normalized = String(status || "").toLowerCase();
+    if (normalized === "on leave") return "bg-[#FEE2E2] text-[#9B1C1C] border-[#F8B4B4]";
     if (normalized === "overloaded") return "bg-[#FEE4E2] text-[#B42318] border-[#FECDCA]";
     if (normalized === "busy") return "bg-[#FFF4E5] text-[#9C4F17] border-[#F9DBAF]";
     return "bg-[#E6F7F2] text-[#006F57] border-[#B7EBD8]";
@@ -470,13 +703,33 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
   };
 
   const loadDashboard = async () => {
-    if (!canManageTasks) {
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     try {
+      if (!canManageTasks) {
+        const selfId = Number(adminUser?.id || 0);
+        const now = new Date();
+        const [taskPayload, ownLeave] = await Promise.all([
+          selfId ? listAdminTasks({ limit: 200, assignedStaffId: selfId }) : Promise.resolve([]),
+          listOwnStaffLeave({ month: now.getMonth() + 1, year: now.getFullYear() }).catch(() => null),
+        ]);
+        // Keep only tasks still assigned to this staffer (drops peer-reassigned rows).
+        const ownTasks = taskPayload.filter((task) => staffIdsMatch(task.assigned_staff, selfId));
+        setDashboardData(null);
+        setTaskItems(ownTasks);
+        setInternalMessages([]);
+        setPeerColleagues(ownLeave?.colleagues || []);
+        setOnLeaveToday(Boolean(ownLeave?.on_leave_today));
+        setTaskSelections(
+          Object.fromEntries(
+            ownTasks.map((task) => [
+              task.id,
+              isTaskUnassigned(task) ? "" : String(Number(task.assigned_staff)),
+            ]),
+          ),
+        );
+        return;
+      }
+
       const [payload, taskPayload, messageFeed] = await Promise.all([
         getAdminDashboardOverview(),
         listAdminTasks({ limit: 500 }),
@@ -493,12 +746,57 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
           ]),
         ),
       );
+      if (isFounderView) {
+        void loadPendingReassigns();
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load workload.");
     } finally {
       setLoading(false);
     }
   };
+
+  const loadPendingReassigns = async () => {
+    if (!isFounderView) {
+      setPendingReassigns([]);
+      return;
+    }
+    try {
+      const rows = await listTaskReassignRequests("pending");
+      setPendingReassigns(rows);
+    } catch {
+      setPendingReassigns([]);
+    }
+  };
+
+  const handleDecideReassign = async (requestId: number, decision: "approve" | "reject") => {
+    setReassignBusyId(requestId);
+    try {
+      await decideTaskReassignRequest(requestId, decision);
+      toast.success(decision === "approve" ? "Reassign approved." : "Reassign rejected.");
+      await Promise.all([loadPendingReassigns(), loadDashboard()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update request.");
+    } finally {
+      setReassignBusyId(null);
+    }
+  };
+
+  useEffect(() => {
+    const fromFocus = String(focusTab || "").trim().toLowerCase();
+    const fromUrl = String(searchParams.get("tab") || "").trim().toLowerCase();
+    const next = resolveWorkloadTab(fromFocus || fromUrl, { isFounderView, canManageTasks });
+    if (fromFocus || fromUrl) {
+      setActiveTab(next);
+    }
+  }, [focusTab, searchParams, isFounderView, canManageTasks]);
+
+  useEffect(() => {
+    if (activeTab === "reassigns" && isFounderView) {
+      void loadPendingReassigns();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isFounderView]);
 
   useEffect(() => {
     if (adminUser) void loadDashboard();
@@ -514,18 +812,49 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
       toast.error("Select a staff member first.");
       return;
     }
-
-    setTaskActionLoading(task.id);
+    const assignedToSelf = staffIdsMatch(task.assigned_staff, adminUser?.id);
     try {
-      const updatedTask = isFounderView
-        ? await adminDirectAssignTask(task.id, Number(selectedStaffId))
-        : await assignAdminTask(task.id, Number(selectedStaffId));
-
-      setTaskItems((prev) => prev.map((item) => (item.id === updatedTask.id ? updatedTask : item)));
-      setTaskSelections((prev) => ({ ...prev, [task.id]: String(selectedStaffId) }));
+      setTaskActionLoading(task.id);
+      if (assignedToSelf) {
+        const result = await peerReassignAdminTask(task.id, Number(selectedStaffId));
+        if ("pending_approval" in result && result.pending_approval) {
+          toast.success(result.message || "Reassign sent for admin approval.");
+          return;
+        }
+        const updated = result as AdminTaskItem;
+        // After peer reassign, task leaves this staffer's queue — drop it from My Cases.
+        if (!canManageTasks) {
+          setTaskItems((current) => current.filter((row) => row.id !== task.id));
+          setTaskSelections((prev) => {
+            const next = { ...prev };
+            delete next[task.id];
+            return next;
+          });
+        } else {
+          setTaskItems((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+          setTaskSelections((prev) => ({ ...prev, [updated.id]: String(Number(updated.assigned_staff) || "") }));
+        }
+        toast.success("Task reassigned.");
+        return;
+      }
+      let updated: AdminTaskItem;
+      if (isFounderView) {
+        updated = await adminDirectAssignTask(task.id, Number(selectedStaffId));
+      } else if (canManageTasks) {
+        const result = await assignAdminTask(task.id, Number(selectedStaffId));
+        if ("pending_approval" in result && result.pending_approval) {
+          toast.success(result.message || "Assign sent for admin approval.");
+          return;
+        }
+        updated = result as AdminTaskItem;
+      } else {
+        throw new Error("You can only reassign tasks assigned to you.");
+      }
+      setTaskItems((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+      setTaskSelections((prev) => ({ ...prev, [updated.id]: String(Number(updated.assigned_staff) || "") }));
       toast.success("Task assigned.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to assign task.");
+      toast.error(error instanceof Error ? error.message : "Could not assign task.");
     } finally {
       setTaskActionLoading(null);
     }
@@ -579,7 +908,7 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
           },
           activeFilterCount: panelFilterCount,
           onClearFilters: clearFilters,
-          syncKey: `${staffSearch}|${roleFilter}|${loadFilter}|${staffIdFilter}|${taskTypeFilter}|${kpiFilter}|${loading}|${taskActionLoading}|${autoAssignEligibleCount}|${staffKpiRows.length}`,
+          syncKey: `${staffSearch}|${roleFilter}|${loadFilter}|${staffIdFilter}|${taskTypeFilter}|${kpiFilter}|${taskSortKey}|${taskSortDir}|${loading}|${taskActionLoading}|${autoAssignEligibleCount}|${staffKpiRows.length}`,
           actions: (
             <>
               <button
@@ -671,6 +1000,27 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                   ))}
                 </select>
               </label>
+              <label className="block text-sm">
+                <span className="text-xs text-[#627D98]">Sort</span>
+                <select
+                  value={`${taskSortKey}:${taskSortDir}`}
+                  onChange={(e) => {
+                    const [key, dir] = e.target.value.split(":") as [TaskSortKey, SortDir];
+                    setTaskSortKey(key);
+                    setTaskSortDir(dir);
+                  }}
+                  className={filterFieldClass}
+                >
+                  <option value="created:desc">Newest first</option>
+                  <option value="created:asc">Oldest first</option>
+                  <option value="deadline:asc">Deadline soonest</option>
+                  <option value="deadline:desc">Deadline latest</option>
+                  <option value="application:asc">Application A–Z</option>
+                  <option value="application:desc">Application Z–A</option>
+                  <option value="status:asc">Status A–Z</option>
+                  <option value="assignee:asc">Assignee A–Z</option>
+                </select>
+              </label>
             </>
           ),
         }
@@ -680,14 +1030,214 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
 
   if (!canManageTasks) {
     return (
-      <div className="space-y-4 font-body">
-        <p className="text-sm text-[#627D98]">Available for admin and operations manager only.</p>
+      <div className="relative min-h-[60vh] space-y-3 font-body">
+        <SlideOverPanel
+          isOpen={isCasePanelOpen}
+          onClose={closeCase}
+          caseData={selectedCase}
+          details={selectedCaseDetails}
+          documents={selectedCaseDocuments}
+          detailsLoading={detailsLoading}
+          detailsError={detailsError}
+          documentsLoading={documentsLoading}
+          documentsError={documentsError}
+          onStageResolved={handleStageResolved}
+        />
+        <div className="flex gap-1 border-b border-[#D9E1EA]">
+          <button
+            type="button"
+            onClick={() => setActiveTab("calendar")}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+              activeTab === "calendar" || activeTab === "overview"
+                ? "border-[#009877] text-[#006F57]"
+                : "border-transparent text-[#627D98] hover:text-[#102A43]"
+            }`}
+          >
+            Calendar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("notes");
+              void loadDashboard();
+            }}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+              activeTab === "notes"
+                ? "border-[#009877] text-[#006F57]"
+                : "border-transparent text-[#627D98] hover:text-[#102A43]"
+            }`}
+          >
+            My tasks ({myOpenTaskCount})
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="rounded-[12px] border border-[#D9E1EA] bg-white p-8 text-center text-sm text-[#627D98]">
+            Loading…
+          </div>
+        ) : activeTab === "notes" ? (
+          <div className="overflow-hidden rounded-[12px] border border-[#D9E1EA] bg-white">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E5EAF0] px-4 py-3">
+              <div>
+                <h2 className="text-sm font-heading font-semibold text-[#102A43]">My tasks</h2>
+                <p className="text-[11px] text-[#627D98]">
+                  {onLeaveToday
+                    ? "You are on leave today — you can reassign open tasks to an available teammate."
+                    : "Open work only by default. Reassign appears only when you are marked on leave today."}
+                </p>
+              </div>
+              <label className="text-[11px] font-medium text-[#486581]">
+                Show
+                <select
+                  value={myTasksStatusFilter}
+                  onChange={(e) => setMyTasksStatusFilter(e.target.value as MyTasksStatusFilter)}
+                  className="ml-2 rounded-[8px] border border-[#D9E1EA] bg-white px-2 py-1.5 text-xs text-[#102A43]"
+                >
+                  <option value="open">Open (present)</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="bg-[#F8FAFC] text-[#486581]">
+                  <tr>
+                    <SortableTh
+                      label="Case"
+                      sortKey="application"
+                      activeKey={taskSortKey}
+                      dir={taskSortDir}
+                      onSort={handleTaskSort}
+                    />
+                    <SortableTh
+                      label="Task"
+                      sortKey="task"
+                      activeKey={taskSortKey}
+                      dir={taskSortDir}
+                      onSort={handleTaskSort}
+                    />
+                    <SortableTh
+                      label="Status"
+                      sortKey="status"
+                      activeKey={taskSortKey}
+                      dir={taskSortDir}
+                      onSort={handleTaskSort}
+                    />
+                    {onLeaveToday ? (
+                      <th className="px-3 py-2 text-left font-medium">Reassign to</th>
+                    ) : null}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5EAF0]">
+                  {myTasks.length === 0 ? (
+                    <tr>
+                      <td colSpan={onLeaveToday ? 4 : 3} className="px-3 py-6 text-center text-[#627D98]">
+                        {myTasksStatusFilter === "open"
+                          ? "No open tasks assigned to you."
+                          : "No tasks match this filter."}
+                      </td>
+                    </tr>
+                  ) : (
+                    myTasks.map((task) => {
+                      const isBusy = taskActionLoading === task.id;
+                      const selectedStaffId = taskSelections[task.id] || "";
+                      return (
+                        <tr
+                          key={task.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openCaseFromTask(task)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openCaseFromTask(task);
+                            }
+                          }}
+                          className="hover:bg-[#EFF7FF] cursor-pointer"
+                        >
+                          <td className="px-3 py-2 font-medium text-[#0B69B7]">
+                            {task.application_reference || `#${task.id}`}
+                          </td>
+                          <td className="px-3 py-2 capitalize text-[#486581]">
+                            {formatTaskTypeLabel(task.task_type)}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${taskStatusBadgeClass(getTaskEffectiveStatus(task))}`}
+                            >
+                              {formatTaskStatusLabel(getTaskEffectiveStatus(task))}
+                            </span>
+                          </td>
+                          {onLeaveToday ? (
+                            <td
+                              className="px-3 py-2"
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            >
+                              {isTaskClosedOut(task) ? (
+                                <span className="text-xs text-[#627D98]">Closed</span>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <select
+                                    value={selectedStaffId}
+                                    onChange={(e) => handleTaskSelectionChange(task.id, e.target.value)}
+                                    className="rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-xs"
+                                  >
+                                    <option value="">Colleague…</option>
+                                    {peerColleagues.map((staff) => (
+                                      <option key={staff.id} value={staff.id}>
+                                        {staff.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    disabled={isBusy || !selectedStaffId}
+                                    onClick={() => void handleAssignTask(task)}
+                                    className="rounded-[8px] bg-[#009877] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                                  >
+                                    {isBusy ? "…" : "Reassign"}
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          ) : null}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {onLeaveToday && !peerColleagues.length ? (
+              <p className="border-t border-[#E5EAF0] px-4 py-2 text-[11px] text-[#829AB1]">
+                No colleagues available to reassign to right now.
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <WorkloadCalendarTab canManageOthers={false} selfStaffId={adminUser?.id} />
+        )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 font-body">
+    <div className="relative min-h-[60vh] space-y-3 font-body">
+      <SlideOverPanel
+        isOpen={isCasePanelOpen}
+        onClose={closeCase}
+        caseData={selectedCase}
+        details={selectedCaseDetails}
+        documents={selectedCaseDocuments}
+        detailsLoading={detailsLoading}
+        detailsError={detailsError}
+        documentsLoading={documentsLoading}
+        documentsError={documentsError}
+        onStageResolved={handleStageResolved}
+      />
       <StaffWorkloadSlideOver
         isOpen={Boolean(selectedStaff)}
         onClose={() => setSelectedStaff(null)}
@@ -725,7 +1275,7 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
       <div className="flex gap-1 border-b border-[#D9E1EA]">
         <button
           type="button"
-          onClick={() => setActiveTab("overview")}
+          onClick={() => goToWorkloadTab("overview")}
           className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
             activeTab === "overview"
               ? "border-[#009877] text-[#006F57]"
@@ -736,7 +1286,34 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("notes")}
+          onClick={() => goToWorkloadTab("calendar")}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+            activeTab === "calendar"
+              ? "border-[#009877] text-[#006F57]"
+              : "border-transparent text-[#627D98] hover:text-[#102A43]"
+          }`}
+        >
+          Calendar
+        </button>
+        {isFounderView ? (
+          <button
+            type="button"
+            onClick={() => goToWorkloadTab("reassigns")}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+              activeTab === "reassigns"
+                ? "border-[#009877] text-[#006F57]"
+                : "border-transparent text-[#627D98] hover:text-[#102A43]"
+            }`}
+          >
+            Reassigns
+            {pendingReassigns.length > 0 || Number(dashboardData?.pending_reassign_count || 0) > 0
+              ? ` (${pendingReassigns.length || dashboardData?.pending_reassign_count || 0})`
+              : ""}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => goToWorkloadTab("notes")}
           className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
             activeTab === "notes"
               ? "border-[#009877] text-[#006F57]"
@@ -749,6 +1326,95 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
 
       {loading ? (
         <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-8 text-center text-sm text-[#627D98]">Loading…</div>
+      ) : activeTab === "reassigns" && isFounderView ? (
+        <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-heading font-semibold text-[#102A43]">Pending staff reassigns</h2>
+              <p className="text-[11px] text-[#627D98]">
+                Approve or reject staff reassign requests. Alerts and notifications also appear in the bell.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadPendingReassigns()}
+              className="rounded-[8px] border border-[#D9E1EA] px-2.5 py-1 text-xs font-semibold text-[#102A43] hover:bg-[#F5F7FA]"
+            >
+              Refresh
+            </button>
+          </div>
+          {pendingReassigns.length === 0 ? (
+            <p className="text-sm text-[#486581]">No pending requests.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="bg-[#F8FAFC] text-[#486581]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Case</th>
+                    <th className="px-3 py-2 text-left font-medium">From</th>
+                    <th className="px-3 py-2 text-left font-medium">To</th>
+                    <th className="px-3 py-2 text-left font-medium">Task</th>
+                    <th className="px-3 py-2 text-left font-medium">Requested by</th>
+                    <th className="px-3 py-2 text-left font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5EAF0]">
+                  {pendingReassigns.map((row) => {
+                    const busy = reassignBusyId === row.id;
+                    return (
+                      <tr key={row.id}>
+                        <td className="px-3 py-2 font-medium text-[#102A43]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const linked = taskItems.find((t) => t.id === row.task_id);
+                              if (linked?.application) {
+                                openCaseFromTask(linked);
+                                return;
+                              }
+                              toast.error("Open the case from Pipeline or My Cases if this task is missing.");
+                            }}
+                            className="text-left font-medium text-[#0B69B7] hover:underline"
+                          >
+                            {row.application_reference || `Task #${row.task_id}`}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 text-[#486581]">{row.from_staff_name}</td>
+                        <td className="px-3 py-2 text-[#486581]">{row.to_staff_name}</td>
+                        <td className="px-3 py-2 capitalize text-[#486581]">
+                          {(row.task_type || "").replace(/_/g, " ")}
+                        </td>
+                        <td className="px-3 py-2 text-[#486581]">{row.requested_by_name}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void handleDecideReassign(row.id, "approve")}
+                              className="rounded-[8px] bg-[#009877] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                            >
+                              {busy ? "…" : "Approve"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void handleDecideReassign(row.id, "reject")}
+                              className="rounded-[8px] border border-[#D9E1EA] px-2.5 py-1 text-xs font-semibold text-[#102A43] disabled:opacity-60"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : activeTab === "calendar" ? (
+        <WorkloadCalendarTab canManageOthers selfStaffId={adminUser?.id} />
       ) : activeTab === "notes" ? (
         <div className="bg-white rounded-[12px] border border-[#D9E1EA] p-4">
           {internalMessages.length === 0 ? (
@@ -756,8 +1422,18 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
           ) : (
             <div className="max-h-[70vh] overflow-y-auto space-y-2">
               {internalMessages.map((message) => (
-                <div key={message.id} className="rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2.5">
-                  <p className="text-sm font-semibold text-[#102A43]">
+                <button
+                  key={message.id}
+                  type="button"
+                  onClick={() =>
+                    openCaseFromApplicationId(message.application_id, {
+                      reference: message.application_reference,
+                      customer: message.customer_name,
+                    })
+                  }
+                  className="w-full rounded-lg border border-[#D9E1EA] bg-[#F8FAFC] px-3 py-2.5 text-left transition hover:border-[#33A1FD]/50 hover:bg-white"
+                >
+                  <p className="text-sm font-semibold text-[#0B69B7]">
                     {message.application_reference}
                     {message.customer_name ? ` · ${message.customer_name}` : ""}
                   </p>
@@ -766,7 +1442,7 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                     {message.created_at ? new Date(message.created_at).toLocaleString() : ""}
                   </p>
                   <p className="text-sm text-[#334E68] mt-1 whitespace-pre-wrap">{message.message_text}</p>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -783,7 +1459,9 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
             <div className="px-4 py-3 border-b border-[#E5EAF0]">
               <h2 className="text-sm font-heading font-semibold text-[#102A43]">Tasks</h2>
               <p className="text-[11px] text-[#627D98]">
-                New tasks appear here unassigned. Use the dropdown + Assign, or Auto assign — nothing is assigned automatically on creation.
+                Newest first by default. Click a column header to sort, or use Sort in filters.
+                New tasks appear here unassigned unless a Case routing rule matches (Auto-assign on).
+                Otherwise use the dropdown + Assign, or Auto assign — routing rules are applied there too.
                 {isOpsView ? (
                   <span className="block mt-0.5">
                     Auto assign is available for ops managers — it distributes to case staff and other ops managers (not you or admins).
@@ -792,17 +1470,68 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                 ) : null}
               </p>
             </div>
-            <div className="max-h-[50vh] overflow-auto">
-              <table className="w-full min-w-[1100px] text-sm">
-                <thead className="bg-[#F8FAFC] text-[#486581] sticky top-0">
+            <div className="max-h-[min(55vh,520px)] overflow-auto">
+              <table className="w-full min-w-[720px] md:min-w-[1100px] text-sm">
+                <thead className="bg-[#F8FAFC] text-[#486581] sticky top-0 z-10">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium">Created</th>
-                    <th className="px-3 py-2 text-left font-medium">Application</th>
-                    <th className="px-3 py-2 text-left font-medium">Customer</th>
-                    <th className="px-3 py-2 text-left font-medium">Task</th>
-                    <th className="px-3 py-2 text-left font-medium">Status</th>
-                    <th className="px-3 py-2 text-left font-medium">Assignee</th>
-                    <th className="px-3 py-2 text-left font-medium">Deadline</th>
+                    <SortableTh label="Created" sortKey="created" activeKey={taskSortKey} dir={taskSortDir} onSort={handleTaskSort} />
+                    <SortableTh label="Application" sortKey="application" activeKey={taskSortKey} dir={taskSortDir} onSort={handleTaskSort} />
+                    <SortableTh label="Customer" sortKey="customer" activeKey={taskSortKey} dir={taskSortDir} onSort={handleTaskSort} />
+                    <th className="hidden md:table-cell px-3 py-2 text-left font-medium">
+                      <button
+                        type="button"
+                        onClick={() => handleTaskSort("task")}
+                        className={`inline-flex items-center gap-1 ${taskSortKey === "task" ? "text-[#006F57]" : ""}`}
+                      >
+                        Task
+                        {taskSortKey === "task" ? (
+                          taskSortDir === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                        )}
+                      </button>
+                    </th>
+                    <SortableTh label="Status" sortKey="status" activeKey={taskSortKey} dir={taskSortDir} onSort={handleTaskSort} />
+                    <th className="hidden lg:table-cell px-3 py-2 text-left font-medium">
+                      <button
+                        type="button"
+                        onClick={() => handleTaskSort("assignee")}
+                        className={`inline-flex items-center gap-1 ${taskSortKey === "assignee" ? "text-[#006F57]" : ""}`}
+                      >
+                        Assignee
+                        {taskSortKey === "assignee" ? (
+                          taskSortDir === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="hidden sm:table-cell px-3 py-2 text-left font-medium">
+                      <button
+                        type="button"
+                        onClick={() => handleTaskSort("deadline")}
+                        className={`inline-flex items-center gap-1 ${taskSortKey === "deadline" ? "text-[#006F57]" : ""}`}
+                      >
+                        Deadline
+                        {taskSortKey === "deadline" ? (
+                          taskSortDir === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+                        )}
+                      </button>
+                    </th>
                     <th className="px-3 py-2 text-left font-medium">Assign</th>
                   </tr>
                 </thead>
@@ -823,15 +1552,29 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                       const displayStatus = formatTaskStatusLabel(effectiveStatus);
                       const createdAt = getTaskCreatedAt(task);
                       return (
-                        <tr key={task.id} className="align-top hover:bg-[#FAFBFC]">
+                        <tr
+                          key={task.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openCaseFromTask(task)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openCaseFromTask(task);
+                            }
+                          }}
+                          className="align-top hover:bg-[#EFF7FF] cursor-pointer"
+                        >
                           <td className="px-3 py-2 text-[#486581] whitespace-nowrap">
                             {formatDateOnly(createdAt)}
                             <br />
                             <span className="text-[11px]">{formatTimeOnly(createdAt)}</span>
                           </td>
-                          <td className="px-3 py-2 font-medium text-[#102A43]">{task.application_reference || `#${task.id}`}</td>
+                          <td className="px-3 py-2 font-medium text-[#0B69B7]">
+                            {task.application_reference || `#${task.id}`}
+                          </td>
                           <td className="px-3 py-2 text-[#486581]">{task.customer_name || "—"}</td>
-                          <td className="px-3 py-2 capitalize text-[#486581]">{task.task_type.replace(/_/g, " ")}</td>
+                          <td className="hidden md:table-cell px-3 py-2 capitalize text-[#486581]">{task.task_type.replace(/_/g, " ")}</td>
                           <td className="px-3 py-2">
                             <span
                               className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${taskStatusBadgeClass(effectiveStatus)}`}
@@ -839,7 +1582,7 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                               {displayStatus}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-[#102A43]">
+                          <td className="hidden lg:table-cell px-3 py-2 text-[#102A43]">
                             {assignedToSelf ? (
                               <span className="inline-flex items-center gap-1.5">
                                 <span className="font-semibold text-[#006F57]">You</span>
@@ -851,16 +1594,20 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                               assigneeLabel(task)
                             )}
                           </td>
-                          <td className="px-3 py-2 text-[#486581] whitespace-nowrap">{formatDateOnly(task.deadline)}</td>
-                          <td className="px-3 py-2">
+                          <td className="hidden sm:table-cell px-3 py-2 text-[#486581] whitespace-nowrap">{formatDateOnly(task.deadline)}</td>
+                          <td
+                            className="px-3 py-2"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
                             {isClosedOut ? (
                               <span className="text-xs text-[#627D98]">Closed</span>
                             ) : (
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 min-w-0">
                                 <select
                                   value={selectedStaffId}
                                   onChange={(e) => handleTaskSelectionChange(task.id, e.target.value)}
-                                  className="min-w-[140px] rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-xs bg-white"
+                                  className="w-full min-w-0 sm:min-w-[120px] sm:max-w-[160px] rounded-[8px] border border-[#D9E1EA] px-2 py-1 text-xs bg-white"
                                 >
                                   <option value="">Staff…</option>
                                   {staffOptionsForTask(task).map((staff) => (
@@ -875,7 +1622,7 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                                   disabled={isBusy}
                                   className="rounded-[8px] bg-[#009877] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[#007B61] disabled:opacity-60"
                                 >
-                                  {isBusy ? "…" : "Assign"}
+                                  {isBusy ? "…" : assignedToSelf ? "Reassign" : "Assign"}
                                 </button>
                               </div>
                             )}
@@ -899,8 +1646,8 @@ export function WorkloadView({ embedded = false }: { embedded?: boolean }) {
                 <span className="text-xs text-[#627D98]">{teamKpis.activeStaff} staff</span>
               </div>
               <div className="max-h-[300px] overflow-auto">
-                <table className="w-full min-w-[600px] text-sm">
-                  <thead className="bg-[#F8FAFC] text-[#486581] sticky top-0">
+                <table className="w-full min-w-[520px] md:min-w-[600px] text-sm">
+                  <thead className="bg-[#F8FAFC] text-[#486581] sticky top-0 z-10">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">Staff</th>
                       <th className="px-3 py-2 text-left font-medium">Role</th>

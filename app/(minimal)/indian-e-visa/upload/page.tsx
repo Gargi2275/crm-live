@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, CheckCircle2, FileText, Lock, Shield, Upload } from "lucide-react";
+import { CheckCircle2, ChevronDown, Lock, Upload } from "lucide-react";
 
 import { useEVisa } from "@/context/EVisaContext";
 import { Reveal } from "@/components/Reveal";
@@ -16,16 +16,31 @@ import { authenticatedFetch } from "@/lib/api";
 import { authService } from "@/lib/auth";
 import { API_BASE_URL } from "@/lib/config";
 import { isCurrentPathAllowed, isMissingCaseError, resolveCanonicalEVisaRoute, resolveMissingCaseRedirect } from "@/lib/evisa-step-guard";
+import {
+  buildUploadSpecHint,
+  fetchDocumentRequirements,
+  fileAcceptFromTypes,
+  formatMaxSizeLabel,
+  mapRequirementToChecklistItem,
+  validateDocumentFile,
+  type ChecklistDocumentItem,
+  type DocumentRequirementRow,
+} from "@/lib/document-requirements";
 
-const PASSPORT_MAX_BYTES = 5 * 1024 * 1024;
-const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
 const SUPPORTING_MAX_BYTES = 5 * 1024 * 1024;
-const PASSPORT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
-const PHOTO_TYPES = new Set(["image/jpeg", "image/png"]);
 const SUPPORTING_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 function formatMb(bytes: number): string {
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n === 0) return "0 B";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) {
+    const kb = n / 1024;
+    return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  }
+  const mb = n / 1024 / 1024;
+  return `${mb < 10 ? mb.toFixed(2) : mb.toFixed(1)} MB`;
 }
 
 type CorrectionDocument = {
@@ -44,8 +59,14 @@ export default function UploadPage() {
   const caseNumber = searchParams.get("case") || data.fileNumber || "";
   const emailFromQuery = searchParams.get("email") || "";
 
-  const [passportRef, setPassportRef] = useState<File | null>(null);
-  const [photoRef, setPhotoRef] = useState<File | null>(null);
+  const [serviceType, setServiceType] = useState(() =>
+    data.visaDuration === "5-Year" ? "evisa_5year" : "evisa_1year",
+  );
+  const [requirements, setRequirements] = useState<DocumentRequirementRow[]>([]);
+  const [requirementsLoading, setRequirementsLoading] = useState(true);
+  const [requirementsError, setRequirementsError] = useState("");
+  const [filesByCode, setFilesByCode] = useState<Record<string, File | null>>({});
+  const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
   const [supportingFiles, setSupportingFiles] = useState<File[]>([]);
   const [applicantEmail, setApplicantEmail] = useState(emailFromQuery || data.email || "");
   
@@ -59,17 +80,26 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
   const [uploadError, setUploadError] = useState("");
-  const [passportError, setPassportError] = useState("");
-  const [photoError, setPhotoError] = useState("");
   const [supportingError, setSupportingError] = useState("");
   const [isCorrectionMode, setIsCorrectionMode] = useState(false);
   const [flaggedDocuments, setFlaggedDocuments] = useState<CorrectionDocument[]>([]);
   const [correctionFiles, setCorrectionFiles] = useState<Record<string, File | null>>({});
   const [correctionErrors, setCorrectionErrors] = useState<Record<string, string>>({});
   const [consentsAccepted, setConsentsAccepted] = useState(false);
+  const [expandedChecklistDocIds, setExpandedChecklistDocIds] = useState<Record<string, boolean>>({});
   const showMinorConsent = searchParams.get("minor") === "1" || searchParams.get("applicant_type")?.toLowerCase() === "minor";
 
   const fileNumber = caseNumber || "FO-EV-...";
+
+  const checklistItems = useMemo(
+    () => requirements.map(mapRequirementToChecklistItem),
+    [requirements],
+  );
+
+  const mandatoryCodes = useMemo(
+    () => checklistItems.filter((item) => item.required).map((item) => item.id),
+    [checklistItems],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -101,6 +131,10 @@ export default function UploadPage() {
               isEmailConfirmed: Boolean(appData.email_confirmed),
             });
           }
+          const resumedType = String(appData?.service_type || "").trim().toLowerCase();
+          if (resumedType.startsWith("evisa")) {
+            setServiceType(resumedType);
+          }
           canonicalRoute = resolveCanonicalEVisaRoute(resume.data, normalizedCase);
         } catch (error) {
           if (isMissingCaseError(error)) {
@@ -128,6 +162,36 @@ export default function UploadPage() {
   }, [caseNumber, data.hasPaid, data.hasUploaded, isSuccess, pathname, router]);
 
   useEffect(() => {
+    let cancelled = false;
+    const loadRequirements = async () => {
+      setRequirementsLoading(true);
+      setRequirementsError("");
+      try {
+        const rows = await fetchDocumentRequirements(serviceType, { force: true });
+        if (cancelled) return;
+        const active = rows.filter((row) => row.is_active !== false);
+        setRequirements(active);
+        if (!active.length) {
+          setRequirementsError(
+            "No documents configured for this e-Visa service yet. Ask an admin to add them under Services → Documents.",
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setRequirements([]);
+          setRequirementsError("Could not load document checklist. Please refresh and try again.");
+        }
+      } finally {
+        if (!cancelled) setRequirementsLoading(false);
+      }
+    };
+    void loadRequirements();
+    return () => {
+      cancelled = true;
+    };
+  }, [serviceType]);
+
+  useEffect(() => {
     if (!caseNumber) {
       return;
     }
@@ -137,6 +201,10 @@ export default function UploadPage() {
         const response = await eVisaApi.getResume(caseNumber);
         const appData = response.data.application_data;
         const normalize = (value: string) => value.trim().toLowerCase();
+        const resumedType = String(appData.service_type || "").trim().toLowerCase();
+        if (resumedType.startsWith("evisa")) {
+          setServiceType(resumedType);
+        }
         const correctionRequested =
           String(appData.application_status || "").toLowerCase() === "correction_requested" ||
           String(appData.current_stage || "").toLowerCase() === "correction_requested" ||
@@ -290,15 +358,18 @@ export default function UploadPage() {
     data.email,
   ]);
 
-  // Validate Required Fields — documents first (Visament-style: simple after pay)
+  // Validate Required Fields — catalog requirements from backend
+  const docsReady =
+    checklistItems.length > 0 &&
+    mandatoryCodes.every((code) => Boolean(filesByCode[code])) &&
+    Object.values(fileErrors).every((err) => !err);
+
   const isRegularFormValid =
-    passportRef &&
-    photoRef &&
-    applicantEmail &&
-    caseNumber &&
-    !passportError &&
-    !photoError &&
-    !supportingError;
+    docsReady &&
+    Boolean(applicantEmail.trim()) &&
+    Boolean(caseNumber) &&
+    !supportingError &&
+    !requirementsError;
 
   const isCorrectionFormValid =
     isCorrectionMode &&
@@ -309,44 +380,23 @@ export default function UploadPage() {
 
   const isFormValid = isCorrectionMode ? isCorrectionFormValid : isRegularFormValid;
 
-  const handlePassportUpload = (file: File | null) => {
+  const handleRequirementUpload = (item: ChecklistDocumentItem, file: File | null) => {
     setUploadError("");
-    setPassportError("");
+    setFileErrors((prev) => ({ ...prev, [item.id]: "" }));
     if (!file) {
-      setPassportRef(null);
+      setFilesByCode((prev) => ({ ...prev, [item.id]: null }));
       return;
     }
-    if (!PASSPORT_TYPES.has(file.type)) {
-      setPassportRef(null);
-      setPassportError("Passport file must be JPG, PNG, or PDF.");
+    const error = validateDocumentFile(file, {
+      allowedFileTypes: item.allowedFileTypes,
+      maxFileSizeMb: item.maxFileSizeMb,
+    });
+    if (error) {
+      setFilesByCode((prev) => ({ ...prev, [item.id]: null }));
+      setFileErrors((prev) => ({ ...prev, [item.id]: error }));
       return;
     }
-    if (file.size > PASSPORT_MAX_BYTES) {
-      setPassportRef(null);
-      setPassportError(`Passport file is too large (${formatMb(file.size)}). Maximum allowed is 5 MB.`);
-      return;
-    }
-    setPassportRef(file);
-  };
-
-  const handlePhotoUpload = (file: File | null) => {
-    setUploadError("");
-    setPhotoError("");
-    if (!file) {
-      setPhotoRef(null);
-      return;
-    }
-    if (!PHOTO_TYPES.has(file.type)) {
-      setPhotoRef(null);
-      setPhotoError("Photograph must be JPG or PNG only.");
-      return;
-    }
-    if (file.size > PHOTO_MAX_BYTES) {
-      setPhotoRef(null);
-      setPhotoError(`Photograph is too large (${formatMb(file.size)}). Maximum allowed is 2 MB.`);
-      return;
-    }
-    setPhotoRef(file);
+    setFilesByCode((prev) => ({ ...prev, [item.id]: file }));
   };
 
   const handleSupportingFilesChange = (files: File[]) => {
@@ -365,46 +415,30 @@ export default function UploadPage() {
       }
       if (file.size > SUPPORTING_MAX_BYTES) {
         setSupportingFiles([]);
-        setSupportingError(`Supporting file ${file.name} is too large (${formatMb(file.size)}). Maximum allowed is 5 MB each.`);
+        setSupportingError(`Supporting file is too large (${formatMb(file.size)}). Maximum allowed is 5 MB.`);
         return;
       }
     }
-
     setSupportingFiles(files);
   };
 
   const validateCorrectionFile = (docTypeOrName: string, file: File): string => {
     const hint = (docTypeOrName || "").trim().toLowerCase();
     const isPhotoDoc = hint.includes("photo") || hint.includes("photograph");
-    const isPassportDoc = hint.includes("passport");
 
     if (isPhotoDoc) {
-      if (!PHOTO_TYPES.has(file.type)) {
-        return "Photograph must be JPG or PNG only.";
-      }
-      if (file.size > PHOTO_MAX_BYTES) {
-        return `Photograph is too large (${formatMb(file.size)}). Maximum allowed is 2 MB.`;
-      }
-      return "";
+      const err = validateDocumentFile(file, {
+        allowedFileTypes: ["jpg", "png"],
+        maxFileSizeMb: 2,
+      });
+      return err || "";
     }
 
-    if (isPassportDoc) {
-      if (!PASSPORT_TYPES.has(file.type)) {
-        return "Passport file must be JPG, PNG, or PDF.";
-      }
-      if (file.size > PASSPORT_MAX_BYTES) {
-        return `Passport file is too large (${formatMb(file.size)}). Maximum allowed is 5 MB.`;
-      }
-      return "";
-    }
-
-    if (!SUPPORTING_TYPES.has(file.type)) {
-      return "Document must be JPG, PNG, or PDF.";
-    }
-    if (file.size > SUPPORTING_MAX_BYTES) {
-      return `Document is too large (${formatMb(file.size)}). Maximum allowed is 5 MB.`;
-    }
-    return "";
+    const err = validateDocumentFile(file, {
+      allowedFileTypes: ["pdf", "jpg", "png"],
+      maxFileSizeMb: 5,
+    });
+    return err || "";
   };
 
   const handleCorrectionUpload = (index: number, file: File | null, docTypeOrName: string) => {
@@ -505,18 +539,37 @@ export default function UploadPage() {
       return;
     }
 
-    if (!passportRef) {
-      setPassportError("Passport bio page is required.");
-    }
-    if (!photoRef) {
-      setPhotoError("Applicant photograph is required.");
+    if (!applicantEmail.trim()) {
+      setUploadError("Email is required.");
+      return;
     }
     if (!consentsAccepted) {
       setUploadError("Please accept all required consents before submitting.");
       return;
     }
+    if (!checklistItems.length) {
+      setUploadError(requirementsError || "Document checklist is not available yet.");
+      return;
+    }
 
-    if (!isFormValid) return;
+    const nextErrors: Record<string, string> = { ...fileErrors };
+    let missing = false;
+    for (const item of checklistItems) {
+      if (item.required && !filesByCode[item.id]) {
+        nextErrors[item.id] = `${item.title} is required.`;
+        missing = true;
+      }
+    }
+    if (missing) {
+      setFileErrors(nextErrors);
+      setUploadError("Please complete all required document fields before submitting.");
+      return;
+    }
+
+    if (!isFormValid) {
+      setUploadError("Please complete all required document fields before submitting.");
+      return;
+    }
 
     setUploadError("");
     setIsUploading(true);
@@ -526,8 +579,10 @@ export default function UploadPage() {
       const formData = new FormData();
       formData.append("case_number", caseNumber);
       formData.append("email", applicantEmail);
-      formData.append("passport_bio_page", passportRef as File);
-      formData.append("applicant_photograph", photoRef as File);
+      for (const item of checklistItems) {
+        const file = filesByCode[item.id];
+        if (file) formData.append(item.id, file);
+      }
       formData.append("intended_arrival_date", arrivalDate);
       formData.append("port_of_entry", portOfEntry);
       formData.append("address_in_india", addressInIndia);
@@ -566,22 +621,15 @@ export default function UploadPage() {
   const inputClasses =
     "w-full px-3.5 py-2.5 border border-[#d5e3f5] rounded-[10px] font-body text-[14px] bg-white outline-none focus:border-[#1c69dd] focus:ring-2 focus:ring-[#1c69dd]/15 transition-all";
 
-  const uploadChecklist = [
-    { label: "Passport bio page", done: Boolean(passportRef) && !passportError },
-    { label: "Applicant photograph", done: Boolean(photoRef) && !photoError },
-    { label: "Registration email", done: Boolean(applicantEmail) },
-    { label: "Consent accepted", done: consentsAccepted },
-  ];
-
   if (isSuccess) {
     return (
-      <div className="flex-1 w-full bg-[linear-gradient(180deg,#eef4fc_0%,#f8fafc_55%,#ffffff_100%)] relative pb-20">
-        <div className="w-full bg-[#0f2f66] py-2.5 px-4 shadow-sm">
-          <div className="max-w-[1000px] mx-auto flex items-center justify-between">
-            <div className="font-mono text-white text-xs sm:text-sm font-bold flex items-center gap-2">
-              <span className="text-white/60">File No:</span> {fileNumber}
+      <div className="flex-1 w-full bg-[#f7f9fc] relative pb-20">
+        <div className="w-full border-b border-[#e2e8f0] bg-white py-2.5 px-4">
+          <div className="max-w-[720px] mx-auto flex items-center justify-between">
+            <div className="font-mono text-[#0F1F3D] text-xs sm:text-sm font-bold flex items-center gap-2">
+              <span className="text-slate-400">File No:</span> {fileNumber}
             </div>
-            <span className="text-[#7ee0b8] font-semibold text-xs sm:text-sm flex items-center gap-1.5">
+            <span className="text-emerald-700 font-semibold text-xs sm:text-sm flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4" /> Documents complete
             </span>
           </div>
@@ -590,7 +638,7 @@ export default function UploadPage() {
 
         <div className="max-w-[480px] mx-auto px-4 mt-10">
           <Reveal direction="up">
-            <div className="bg-white rounded-[16px] border border-[#d8e7f8] shadow-[0_16px_40px_rgba(20,76,160,0.10)] p-6 sm:p-8 text-center">
+            <div className="bg-white rounded-2xl border border-[#dce7f8] p-6 sm:p-8 text-center">
               <div className="mb-5 flex justify-center h-20">
                 <AnimatedCheckmark size={80} color="#16A34A" />
               </div>
@@ -616,7 +664,7 @@ export default function UploadPage() {
                 </motion.button>
                 <button
                   onClick={() => setIsSuccess(false)}
-                  className="w-full border border-[#0f2f66] text-[#0f2f66] font-semibold text-[15px] px-6 py-3 rounded-[10px] hover:bg-[#0f2f66] hover:text-white transition-colors"
+                  className="w-full border border-[#0F1F3D] text-[#0F1F3D] font-semibold text-[15px] px-6 py-3 rounded-[10px] hover:bg-[#0F1F3D] hover:text-white transition-colors"
                 >
                   {isCorrectionMode ? "Upload more corrected documents" : "Upload more documents"}
                 </button>
@@ -629,13 +677,13 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="flex-1 w-full bg-[linear-gradient(180deg,#eef4fc_0%,#f8fafc_45%,#ffffff_100%)] relative pb-24">
-      <div className="w-full bg-[#0f2f66] py-2.5 px-4 shadow-sm sticky top-0 z-30">
-        <div className="max-w-[1000px] mx-auto flex justify-between items-center gap-4">
-          <div className="font-mono text-white text-xs sm:text-sm font-bold flex items-center gap-2 shrink-0">
-            <span className="text-white/60">File No:</span> {fileNumber}
+    <div className="flex-1 w-full bg-[#f7f9fc] relative pb-24">
+      <div className="w-full border-b border-[#e2e8f0] bg-white py-2.5 px-4 sticky top-0 z-30">
+        <div className="max-w-[720px] mx-auto flex justify-between items-center gap-4">
+          <div className="font-mono text-[#0F1F3D] text-xs sm:text-sm font-bold flex items-center gap-2 shrink-0">
+            <span className="text-slate-400">File No:</span> {fileNumber}
           </div>
-          <div className="text-white/75 font-body text-[11px] sm:text-xs hidden sm:flex items-center gap-2">
+          <div className="text-slate-500 font-body text-[11px] sm:text-xs hidden sm:flex items-center gap-2">
             <Lock className="w-3.5 h-3.5" />
             AES-256 encrypted uploads
           </div>
@@ -644,222 +692,310 @@ export default function UploadPage() {
 
       <ProgressStepper currentStep={2} />
 
-      <div className="max-w-[1000px] w-full mx-auto px-4 mt-6 lg:mt-8">
+      <div className="mx-auto mt-6 w-full max-w-[720px] px-4 lg:mt-8">
         <Reveal direction="up" delay={0.05}>
-          <div className="mb-5 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-            <div>
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-[#eaf4ff] border border-[#c5dcf7] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#1f4f8f] mb-2">
-                <Upload className="w-3 h-3" />
-                Documents
-              </span>
-              <h2 className="font-heading font-extrabold text-[#0f2f66] text-2xl sm:text-[28px] tracking-tight">
-                {isCorrectionMode ? "Re-upload Requested Documents" : "Upload your documents"}
-              </h2>
-              <p className="font-body text-[#5f7391] text-sm mt-1 max-w-xl">
-                {isCorrectionMode
-                  ? "Upload only the documents flagged by our team."
-                  : "Passport and photo are required. Supporting files are optional."}
-              </p>
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-lg border border-[#c5dcf7] bg-white/80 px-3 py-2 text-xs text-[#1f4f8f] shrink-0">
-              <Shield className="w-4 h-4 text-[#1c69dd]" />
-              Secure &amp; encrypted storage
-            </div>
+          <div className="mb-6">
+            <h2 className="font-heading font-semibold text-[#0F1F3D] text-2xl tracking-tight">
+              {isCorrectionMode ? "Re-upload requested documents" : "Upload your documents"}
+            </h2>
+            <p className="font-body text-slate-500 text-sm mt-1 max-w-xl">
+              {isCorrectionMode
+                ? "Upload only the documents flagged by our team."
+                : "Tap each document for requirements, then upload. Specs come from your service checklist."}
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-5 items-start">
-            <div className="space-y-4 min-w-0">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {isCorrectionMode ? (
-              <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_12px_32px_rgba(20,76,160,0.08)] overflow-hidden">
-                <div className="px-5 py-3.5 bg-gradient-to-r from-[#7c2d12] to-[#9a3412] border-b border-[#f5c4a8]">
-                  <h3 className="font-body font-bold text-white text-base">Documents to Re-upload</h3>
-                  <p className="text-white/80 text-xs mt-0.5">{flaggedDocuments.length} item(s) requested by our team</p>
-                </div>
-                <div className="p-4 sm:p-5 space-y-3">
-                  {flaggedDocuments.map((item, index) => {
-                    const key = `flagged-${index}`;
-                    const label = item.document_name || item.document_type || `Document ${index + 1}`;
-                    const hintText = item.required_action || item.issue_reason || "Upload corrected document.";
-                    const docHint = (item.document_type || item.document_name || "").toLowerCase();
-                    const isPhotoDoc = docHint.includes("photo") || docHint.includes("photograph");
-                    const accept = isPhotoDoc ? "image/jpeg,image/png" : ".pdf,image/jpeg,image/png";
+              <div className="grid gap-4">
+                {flaggedDocuments.map((item, index) => {
+                  const key = `flagged-${index}`;
+                  const label = item.document_name || item.document_type || `Document ${index + 1}`;
+                  const hintText = item.required_action || item.issue_reason || "Upload corrected document.";
+                  const docHint = (item.document_type || item.document_name || "").toLowerCase();
+                  const isPhotoDoc = docHint.includes("photo") || docHint.includes("photograph");
+                  const accept = isPhotoDoc ? "image/jpeg,image/png" : ".pdf,image/jpeg,image/png";
+                  const isExpanded = expandedChecklistDocIds[key] !== false;
+                  const isUploaded = Boolean(correctionFiles[key]);
 
-                    return (
-                      <div key={key} className="rounded-[10px] border border-[#f0d9b8] bg-[#fffaf3] p-3.5">
-                        <div className="flex items-start gap-2 mb-2">
-                          <FileText className="w-4 h-4 text-[#9a3412] mt-0.5 shrink-0" />
-                          <div>
-                            <p className="font-body font-bold text-[#0f2f66] text-sm">{label}</p>
-                            {item.issue_reason ? (
-                              <p className="font-body text-[11px] text-[#9a3412] mt-0.5">Reason: {item.issue_reason}</p>
-                            ) : null}
-                            <p className="font-body text-[11px] text-[#627d98] mt-0.5">{hintText}</p>
+                  return (
+                    <div key={key} className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedChecklistDocIds((current) => ({
+                            ...current,
+                            [key]: !isExpanded,
+                          }))
+                        }
+                        className="flex w-full items-start justify-between gap-3 text-left"
+                        aria-expanded={isExpanded}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-base font-semibold text-[#0F1F3D]">{label}</p>
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">
+                              Re-upload
+                            </span>
                           </div>
+                          {!isExpanded ? (
+                            <p className="mt-1 text-xs text-slate-500">Tap to view details and upload</p>
+                          ) : null}
                         </div>
-                        <FileDropZone
-                          label={`Upload corrected ${label}`}
-                          accept={accept}
-                          maxSizeMsg={hintText}
-                          file={correctionFiles[key] || null}
-                          onUpload={(file) => handleCorrectionUpload(index, file, item.document_type || item.document_name)}
-                          error={correctionErrors[key] || ""}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                              isUploaded
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-amber-200 bg-amber-50 text-amber-700"
+                            }`}
+                          >
+                            {isUploaded ? "Ready" : "Pending re-upload"}
+                          </span>
+                          <ChevronDown className={`mt-0.5 h-4 w-4 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                        </div>
+                      </button>
+                      {isExpanded ? (
+                        <div className="mt-3 space-y-3">
+                          {item.issue_reason ? (
+                            <p className="text-xs font-medium text-amber-800">Issue: {item.issue_reason}</p>
+                          ) : null}
+                          <p className="text-sm text-slate-600">{hintText}</p>
+                          <FileDropZone
+                            label={`Upload corrected ${label}`}
+                            accept={accept}
+                            maxSizeMsg={hintText}
+                            file={correctionFiles[key] || null}
+                            onUpload={(file) => handleCorrectionUpload(index, file, item.document_type || item.document_name)}
+                            error={correctionErrors[key] || ""}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             ) : null}
 
             {!isCorrectionMode ? (
               <>
-                <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_12px_32px_rgba(20,76,160,0.08)] overflow-hidden">
-                  <div className="px-5 py-3.5 bg-gradient-to-r from-[#0f2f66] to-[#1a4a8a] border-b border-[#d0dff5]">
-                    <h3 className="font-body font-bold text-white text-base">Required Documents</h3>
-                    <p className="text-white/75 text-xs mt-0.5">Passport bio page and applicant photograph</p>
-                  </div>
-                  <div className="p-4 sm:p-5 grid md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-body font-bold text-[#0f2f66] text-sm">Passport Bio Page *</p>
-                        <span className="text-[10px] font-mono font-bold text-[#627d98] bg-[#f0f6ff] px-2 py-0.5 rounded">Max 5MB</span>
-                      </div>
-                      <FileDropZone
-                        label="Upload passport photo page"
-                        accept=".pdf,image/jpeg,image/png"
-                        maxSizeMsg="Clear scan of passport photo page (JPG, PNG, PDF)."
-                        file={passportRef}
-                        onUpload={handlePassportUpload}
-                        error={passportError}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-body font-bold text-[#0f2f66] text-sm">Applicant Photograph *</p>
-                        <span className="text-[10px] font-mono font-bold text-[#627d98] bg-[#f0f6ff] px-2 py-0.5 rounded">Max 2MB</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 mb-1">
-                        {["White background", "No glasses", "Recent photo", "Face visible"].map((tip) => (
-                          <span key={tip} className="inline-flex items-center gap-1 rounded-full bg-[#ecfdf5] border border-[#bbf7d0] px-2 py-0.5 text-[10px] font-semibold text-[#166534]">
-                            <CheckCircle2 className="w-3 h-3" />
-                            {tip}
-                          </span>
-                        ))}
-                      </div>
-                      <FileDropZone
-                        label="Upload applicant photo"
-                        accept="image/jpeg,image/png"
-                        maxSizeMsg="JPG or PNG only. Match government photo specs."
-                        file={photoRef}
-                        onUpload={handlePhotoUpload}
-                        error={photoError}
-                      />
-                    </div>
-                  </div>
+                <div className="grid gap-4">
+                  {requirementsLoading ? (
+                    <p className="text-sm text-slate-500 rounded-2xl border border-[#dce7f8] bg-white p-5">
+                      Loading document checklist…
+                    </p>
+                  ) : requirementsError ? (
+                    <p className="text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-2xl px-4 py-3">
+                      {requirementsError}
+                    </p>
+                  ) : checklistItems.length === 0 ? (
+                    <p className="text-sm text-slate-500 rounded-2xl border border-[#dce7f8] bg-white p-5">
+                      No documents configured yet for this service.
+                    </p>
+                  ) : (
+                    checklistItems.map((item) => {
+                      const isExpanded = Boolean(expandedChecklistDocIds[item.id]);
+                      const isUploaded = Boolean(filesByCode[item.id]) && !fileErrors[item.id];
+                      const mustHaveItems = item.mustHave?.length ? item.mustHave : [];
+                      const mistakeItems = item.mustNot?.length ? item.mustNot : item.commonMistakes || [];
+                      const sizeLabel = formatMaxSizeLabel(item.maxFileSizeMb);
+
+                      return (
+                        <div key={item.id} className="rounded-2xl border border-[#dce7f8] bg-[#fcfdff] p-5">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedChecklistDocIds((current) => ({
+                                  ...current,
+                                  [item.id]: !current[item.id],
+                                }))
+                              }
+                              className="min-w-0 flex-1 text-left"
+                              aria-expanded={isExpanded}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="text-base font-semibold text-[#0F1F3D]">{item.title}</p>
+                                    <span
+                                      className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
+                                        item.required
+                                          ? "border-amber-200 bg-amber-50 text-amber-800"
+                                          : "border-slate-200 bg-slate-50 text-slate-600"
+                                      }`}
+                                    >
+                                      {item.required ? "Required" : "Optional"}
+                                    </span>
+                                  </div>
+                                  {!isExpanded ? (
+                                    <p className="mt-1 text-xs text-slate-500">Tap to view details and upload</p>
+                                  ) : null}
+                                </div>
+                                <ChevronDown
+                                  className={`mt-1 h-4 w-4 shrink-0 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                                />
+                              </div>
+                            </button>
+                            <span
+                              className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                                isUploaded
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-slate-50 text-slate-600"
+                              }`}
+                            >
+                              {isUploaded ? "Ready to submit" : "Not uploaded"}
+                            </span>
+                          </div>
+
+                          {isExpanded ? (
+                            <>
+                              {item.description ? (
+                                <p className="mt-3 text-sm text-slate-600">{item.description}</p>
+                              ) : null}
+                              {(mustHaveItems.length > 0 || mistakeItems.length > 0) ? (
+                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                  {mustHaveItems.length > 0 ? (
+                                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
+                                      <p className="font-semibold">Must include</p>
+                                      <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                                        {mustHaveItems.map((line, idx) => (
+                                          <li key={`${item.id}-must-${idx}`}>{line}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  ) : null}
+                                  {mistakeItems.length > 0 ? (
+                                    <div className="rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-3 text-sm text-rose-900">
+                                      <p className="font-semibold">Must not</p>
+                                      <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                                        {mistakeItems.map((line, idx) => (
+                                          <li key={`${item.id}-not-${idx}`}>{line}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {sizeLabel ? (
+                                <p className="mt-2 text-xs text-slate-500">Max size: {sizeLabel}</p>
+                              ) : null}
+                              <div className="mt-3">
+                                <FileDropZone
+                                  label={`Upload ${item.title}`}
+                                  accept={fileAcceptFromTypes(item.allowedFileTypes)}
+                                  maxSizeMsg={buildUploadSpecHint(item.allowedFileTypes, item.maxFileSizeMb)}
+                                  file={filesByCode[item.id] || null}
+                                  onUpload={(file) => handleRequirementUpload(item, file)}
+                                  error={fileErrors[item.id] || ""}
+                                />
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
 
-                <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_12px_32px_rgba(20,76,160,0.08)] overflow-hidden">
-                  <div className="px-5 py-3.5 bg-gradient-to-r from-[#0f2f66] to-[#1a4a8a] border-b border-[#d0dff5]">
-                    <h3 className="font-body font-bold text-white text-base">Optional travel details</h3>
-                    <p className="text-white/75 text-xs mt-0.5">Helpful if known — you can skip for now</p>
-                  </div>
-                  <div className="p-4 sm:p-5 space-y-3">
-                    <div className="grid sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Email Used for Registration *</label>
-                        <input
-                          type="email"
-                          required
-                          value={applicantEmail}
-                          onChange={(e) => setApplicantEmail(e.target.value)}
-                          className={inputClasses}
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Intended Arrival Date</label>
-                        <input
-                          type="date"
-                          value={arrivalDate}
-                          onChange={(e) => setArrivalDate(e.target.value)}
-                          className={inputClasses}
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Port of Entry</label>
-                        <input
-                          type="text"
-                          placeholder="e.g. New Delhi"
-                          value={portOfEntry}
-                          onChange={(e) => setPortOfEntry(e.target.value)}
-                          className={inputClasses}
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Emergency Contact</label>
-                        <input
-                          type="text"
-                          placeholder="Name and phone (optional)"
-                          value={emergencyContact}
-                          onChange={(e) => setEmergencyContact(e.target.value)}
-                          className={inputClasses}
-                        />
-                      </div>
-                    </div>
+                <div className="rounded-2xl border border-[#dce7f8] bg-white p-5 space-y-3">
+                  <h3 className="text-base font-semibold text-[#0F1F3D]">Optional travel details</h3>
+                  <p className="text-sm text-slate-500">Helpful if known — you can skip for now</p>
+                  <div className="grid sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Address in India</label>
-                      <textarea
-                        placeholder="Hotel name or complete residential address"
-                        rows={2}
-                        value={addressInIndia}
-                        onChange={(e) => setAddressInIndia(e.target.value)}
-                        className={`${inputClasses} resize-none`}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-[14px] border border-[#e8edf3] shadow-sm overflow-hidden">
-                  <div className="px-5 py-3 border-b border-[#e8edf3] bg-[#f8fafc]">
-                    <h3 className="font-body font-bold text-[#334e68] text-sm">Optional — Supporting Files &amp; Notes</h3>
-                  </div>
-                  <div className="p-4 sm:p-5 space-y-3">
-                    <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Supporting Documents</label>
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">
+                        Email used for registration *
+                      </label>
                       <input
-                        type="file"
-                        multiple
-                        accept=".pdf,image/jpeg,image/png"
-                        onChange={(e) => handleSupportingFilesChange(Array.from(e.target.files || []))}
-                        className="block w-full font-body text-sm text-[#627d98] file:mr-3 file:py-1.5 file:px-3 file:rounded-[8px] file:border-0 file:text-xs file:font-semibold file:bg-[#eaf4ff] file:text-[#0f2f66] hover:file:bg-[#d8e9ff]"
+                        type="email"
+                        required
+                        value={applicantEmail}
+                        onChange={(e) => setApplicantEmail(e.target.value)}
+                        className={inputClasses}
                       />
-                      {supportingFiles.length > 0 ? (
-                        <p className="text-[11px] text-[#166534] font-semibold mt-1.5">{supportingFiles.length} file(s) selected</p>
-                      ) : null}
-                      {supportingError ? <p className="text-xs text-red-600 font-semibold mt-1.5">{supportingError}</p> : null}
                     </div>
                     <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Notes to FlyOCI team</label>
-                      <textarea
-                        placeholder="Any specific information our team should know..."
-                        rows={2}
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className={`${inputClasses} resize-none`}
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">
+                        Intended arrival date
+                      </label>
+                      <input
+                        type="date"
+                        value={arrivalDate}
+                        onChange={(e) => setArrivalDate(e.target.value)}
+                        className={inputClasses}
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Port of entry</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Delhi (DEL)"
+                        value={portOfEntry}
+                        onChange={(e) => setPortOfEntry(e.target.value)}
+                        className={inputClasses}
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Emergency contact</label>
+                      <input
+                        type="text"
+                        placeholder="Name and phone (optional)"
+                        value={emergencyContact}
+                        onChange={(e) => setEmergencyContact(e.target.value)}
+                        className={inputClasses}
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Address in India</label>
+                    <textarea
+                      placeholder="Hotel name or complete residential address"
+                      rows={2}
+                      value={addressInIndia}
+                      onChange={(e) => setAddressInIndia(e.target.value)}
+                      className={`${inputClasses} resize-none`}
+                    />
+                  </div>
                 </div>
 
-                <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-sm p-4 sm:p-5 space-y-3">
-                  <h3 className="font-body font-bold text-[#0f2f66] text-sm">Consent Before Submission</h3>
+                <div className="rounded-2xl border border-dashed border-[#dce7f8] bg-white p-5 space-y-3">
+                  <h3 className="text-base font-semibold text-[#0F1F3D]">Supporting files &amp; notes</h3>
+                  <div>
+                    <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Supporting documents</label>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".pdf,image/jpeg,image/png"
+                      onChange={(e) => handleSupportingFilesChange(Array.from(e.target.files || []))}
+                      className="block w-full font-body text-sm text-[#627d98] file:mr-3 file:py-1.5 file:px-3 file:rounded-[8px] file:border-0 file:text-xs file:font-semibold file:bg-[#eaf4ff] file:text-[#0F1F3D] hover:file:bg-[#d8e9ff]"
+                    />
+                    {supportingFiles.length > 0 ? (
+                      <p className="text-[11px] text-[#166534] font-semibold mt-1.5">
+                        {supportingFiles.length} file(s) selected
+                      </p>
+                    ) : null}
+                    {supportingError ? <p className="text-xs text-red-600 font-semibold mt-1.5">{supportingError}</p> : null}
+                  </div>
+                  <div>
+                    <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Notes to FlyOCI team</label>
+                    <textarea
+                      placeholder="Any specific information our team should know..."
+                      rows={2}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      className={`${inputClasses} resize-none`}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[#dce7f8] bg-white p-5 space-y-3">
                   <ConsentCheckboxes mode="upload" showMinorConsent={showMinorConsent} onAcceptanceChange={setConsentsAccepted} />
                 </div>
               </>
             ) : null}
 
             {isCorrectionMode ? (
-              <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-sm p-4 sm:p-5 space-y-3">
-                <h3 className="font-body font-bold text-[#0f2f66] text-sm">Consent Before Submission</h3>
+              <div className="rounded-2xl border border-[#dce7f8] bg-white p-5 space-y-3">
                 <ConsentCheckboxes mode="upload" onAcceptanceChange={setConsentsAccepted} />
               </div>
             ) : null}
@@ -880,55 +1016,10 @@ export default function UploadPage() {
             </motion.button>
 
             {uploadError ? (
-              <p className="text-center text-sm text-red-600 font-semibold bg-red-50 border border-red-100 rounded-lg px-3 py-2">{uploadError}</p>
+              <p className="text-center text-sm text-red-600 font-semibold bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {uploadError}
+              </p>
             ) : null}
-            </div>
-
-            <aside className="lg:sticky lg:top-[72px] space-y-3">
-              <div className="bg-white rounded-[14px] border border-[#d8e7f8] shadow-[0_10px_28px_rgba(20,76,160,0.08)] p-4">
-                <h4 className="font-body font-bold text-[#0f2f66] text-sm mb-3">Upload Checklist</h4>
-                <ul className="space-y-2">
-                  {(isCorrectionMode
-                    ? flaggedDocuments.map((item, index) => ({
-                        label: item.document_name || item.document_type || `Document ${index + 1}`,
-                        done: Boolean(correctionFiles[`flagged-${index}`]),
-                      }))
-                    : uploadChecklist
-                  ).map((item) => (
-                    <li key={item.label} className="flex items-center gap-2 text-xs">
-                      <span
-                        className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
-                          item.done ? "bg-[#dcfce7] text-[#16a34a]" : "bg-[#f1f5f9] text-[#94a3b8]"
-                        }`}
-                      >
-                        {item.done ? <Check className="w-3 h-3" strokeWidth={3} /> : <span className="w-1.5 h-1.5 rounded-full bg-current" />}
-                      </span>
-                      <span className={item.done ? "text-[#166534] font-semibold" : "text-[#627d98]"}>{item.label}</span>
-                    </li>
-                  ))}
-                  {isCorrectionMode ? (
-                    <li className="flex items-center gap-2 text-xs">
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${consentsAccepted ? "bg-[#dcfce7] text-[#16a34a]" : "bg-[#f1f5f9] text-[#94a3b8]"}`}>
-                        {consentsAccepted ? <Check className="w-3 h-3" strokeWidth={3} /> : <span className="w-1.5 h-1.5 rounded-full bg-current" />}
-                      </span>
-                      <span className={consentsAccepted ? "text-[#166534] font-semibold" : "text-[#627d98]"}>Consent accepted</span>
-                    </li>
-                  ) : null}
-                </ul>
-              </div>
-
-              <div className="bg-[#fff8e8] border border-[#f4d89a] rounded-[12px] p-3.5 text-[#3b2a08]">
-                <p className="text-xs font-bold mb-1">Photo tip</p>
-                <p className="text-[11px] leading-relaxed">Use a plain white background and ensure your face fills 70–80% of the frame to avoid government rejection.</p>
-              </div>
-
-              <div className="bg-[#f0f6ff] border border-[#c5dcf7] rounded-[12px] p-3.5 flex gap-2.5">
-                <Lock className="w-4 h-4 text-[#1c69dd] shrink-0 mt-0.5" />
-                <p className="text-[11px] text-[#1f4f8f] leading-relaxed">
-                  Files are encrypted with AES-256 before storage. Only authorised FlyOCI staff can access your documents.
-                </p>
-              </div>
-            </aside>
           </form>
         </Reveal>
       </div>
@@ -939,25 +1030,25 @@ export default function UploadPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-[#0f2f66]/20 backdrop-blur-sm"
+            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-[#0F1F3D]/20 backdrop-blur-sm"
           >
             <motion.div
               initial={{ scale: 0.95, y: 12 }}
               animate={{ scale: 1, y: 0 }}
-              className="max-w-[340px] w-full text-center bg-white rounded-[16px] border border-[#d8e7f8] shadow-[0_20px_50px_rgba(20,76,160,0.18)] p-6"
+              className="max-w-[340px] w-full text-center bg-white rounded-2xl border border-[#dce7f8] shadow-lg p-6"
             >
               <div className="w-14 h-14 rounded-full bg-[#eaf4ff] flex items-center justify-center mx-auto mb-4">
                 <Upload className="w-6 h-6 text-[#1c69dd] animate-pulse" />
               </div>
-              <h3 className="font-heading font-extrabold text-[#0f2f66] text-xl mb-1">Uploading Files</h3>
-              <p className="text-xs text-[#627d98] mb-5">Please keep this tab open</p>
+              <h3 className="font-heading font-extrabold text-[#0F1F3D] text-xl mb-1">Uploading Files</h3>
+              <p className="text-xs text-slate-500 mb-5">Please keep this tab open</p>
               <div className="w-full h-2 bg-[#e8edf3] rounded-full overflow-hidden mb-2">
                 <motion.div
-                  className="h-full bg-gradient-to-r from-[#1c69dd] to-[#0f2f66] rounded-full"
+                  className="h-full bg-[#1A56DB] rounded-full"
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
-              <div className="font-mono text-lg font-bold text-[#0f2f66]">{Math.round(uploadProgress)}%</div>
+              <div className="font-mono text-lg font-bold text-[#0F1F3D]">{Math.round(uploadProgress)}%</div>
             </motion.div>
           </motion.div>
         ) : null}

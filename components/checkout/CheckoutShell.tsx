@@ -12,7 +12,10 @@ type CheckoutShellProps = {
   summary: ReactNode;
 };
 
-/** Form left (narrower, side space) + sticky order summary flush right (untouched). */
+/**
+ * Left: stepper + “Start your order” form (padded both sides).
+ * Right: order summary flush top + right — no gap above the card.
+ */
 export function CheckoutShell({
   title,
   subtitle,
@@ -21,37 +24,58 @@ export function CheckoutShell({
   form,
   summary,
 }: CheckoutShellProps) {
+  // Page uses pt-24 (~6rem) for the navbar; summary sits flush under it.
+  const summaryHeight = "calc(100dvh - 6rem)";
+  const formHeight = showStepper ? "calc(100dvh - 9.5rem)" : summaryHeight;
+
   return (
     <div className="w-full bg-[#F4F6F9] text-[#102A43]">
-      <div className="flex w-full items-start gap-5 pb-8 pt-2 sm:gap-6">
-        {/* Form column: side space + slightly reduced width; summary stays flush right */}
-        <div className="min-w-0 flex-1 px-4 sm:px-6 lg:px-10 xl:px-14">
-          <div className="mx-auto w-full max-w-[820px]">
-            {showStepper ? (
-              <div className="mb-4">
-                <ProgressStepper currentStep={currentStep} />
-              </div>
-            ) : null}
-
-            <section className="rounded-2xl border border-[#E4EAF2] bg-white p-5 sm:p-6">
-              <h1 className="text-[22px] font-semibold leading-tight text-[#0F1F3D]">{title}</h1>
-              {subtitle ? <p className="mt-1 text-[13px] text-[#627D98]">{subtitle}</p> : null}
-              <div className="mt-5">{form}</div>
-            </section>
-
-            <div className="mt-4 lg:hidden">{summary}</div>
-          </div>
+      <div className="flex w-full flex-col gap-5 lg:flex-row lg:items-start lg:gap-10 xl:gap-12">
+        {/* Form column — stepper only here so summary has no top gap */}
+        <div className="min-w-0 flex-1 px-16 pt-3 sm:px-24 lg:px-40 lg:pb-6 xl:px-52">
+          {showStepper ? (
+            <div className="mb-3 shrink-0 flex justify-center">
+              <ProgressStepper currentStep={currentStep} />
+            </div>
+          ) : null}
+          <section
+            className="min-w-0 overflow-y-auto rounded-2xl border border-[#E4EAF2] bg-white p-5 shadow-sm sm:p-6 lg:px-8 lg:py-6"
+            style={{ height: formHeight, maxHeight: formHeight }}
+          >
+            <h1 className="text-[24px] font-semibold leading-tight text-[#0F1F3D]">{title}</h1>
+            {subtitle ? <p className="mt-1 text-[14px] text-[#627D98]">{subtitle}</p> : null}
+            <div className="mt-5">{form}</div>
+          </section>
         </div>
 
+        {/* Order summary — flush under navbar, no grey gap above */}
         <aside
-          className="sticky top-24 z-10 hidden w-[300px] shrink-0 self-start border-l border-[#E4EAF2] bg-white lg:block xl:w-[320px]"
-          style={{ height: "calc(100dvh - 6.5rem)" }}
+          className="sticky top-24 hidden w-[400px] shrink-0 self-start lg:block xl:w-[440px]"
+          style={{ height: summaryHeight, maxHeight: summaryHeight }}
         >
-          <div className="flex h-full w-full flex-col">{summary}</div>
+          <div className="flex h-full flex-col overflow-hidden border border-r-0 border-t-0 border-[#E4EAF2] bg-white px-5 pb-5 pt-4 shadow-sm sm:px-6 sm:pb-6 sm:pt-4 lg:rounded-bl-2xl lg:rounded-tl-none lg:rounded-tr-none">
+            {summary}
+          </div>
         </aside>
+
+        {/* Mobile summary */}
+        <div className="mx-5 mb-6 rounded-2xl border border-[#E4EAF2] bg-white p-5 shadow-sm sm:mx-8 lg:hidden">
+          {summary}
+        </div>
       </div>
     </div>
   );
+}
+
+/** Keep digits only, max 10 characters. */
+export function sanitizeMobileDigits(value: string, maxLength = 10): string {
+  return String(value || "")
+    .replace(/\D/g, "")
+    .slice(0, maxLength);
+}
+
+export function isValidMobile10(value: string): boolean {
+  return /^\d{10}$/.test(String(value || "").trim());
 }
 
 type OrderSummaryLine = {
@@ -70,27 +94,32 @@ type OrderSummaryCardProps = {
 
 export function OrderSummaryCard({ lines, totalLabel, footerNote }: OrderSummaryCardProps) {
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-[#E4EAF2] bg-white p-5">
-      <h2 className="text-[16px] font-semibold text-[#0F1F3D]">Order summary</h2>
-      <ul className="mt-4 flex-1 space-y-2 overflow-y-auto">
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <h2 className="shrink-0 text-[17px] font-semibold text-[#0F1F3D]">Order summary</h2>
+
+      <div className="mt-3 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         {lines.map((line) => (
-          <li key={line.id} className="rounded-xl bg-[#F7F9FC] px-3 py-2.5">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate text-[13px] font-semibold text-[#102A43]">{line.title}</p>
-                {line.subtitle ? <p className="mt-0.5 truncate text-[11px] text-[#627D98]">{line.subtitle}</p> : null}
-              </div>
-              <span className="shrink-0 text-[13px] font-semibold text-[#102A43]">{line.amountLabel}</span>
+          <div key={line.id}>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="truncate text-[15px] font-semibold text-[#0F1F3D]">{line.title}</p>
+              <p className="shrink-0 text-[15px] font-bold text-[#0F1F3D]">{line.amountLabel}</p>
             </div>
-          </li>
+            {line.subtitle ? (
+              <div className="flex items-start justify-between gap-2 rounded-lg bg-[#EEF5FF] px-3 py-2.5 text-[13px]">
+                <span className="min-w-0 leading-snug text-[#486581]">{line.subtitle}</span>
+                <span className="shrink-0 font-semibold text-[#102A43]">{line.amountLabel}</span>
+              </div>
+            ) : null}
+          </div>
         ))}
-      </ul>
-      <div className="mt-auto border-t border-[#E8EEF6] pt-4">
+      </div>
+
+      <div className="mt-auto shrink-0 border-t border-[#E8EEF6] pt-4">
         <div className="flex items-center justify-between">
-          <span className="text-[14px] font-medium text-[#0F1F3D]">Order total:</span>
-          <span className="text-[18px] font-bold text-[#0F1F3D]">{totalLabel}</span>
+          <span className="text-[15px] font-semibold text-[#0F1F3D]">Order total:</span>
+          <span className="text-[19px] font-bold text-[#0F1F3D]">{totalLabel}</span>
         </div>
-        {footerNote ? <p className="mt-2 text-[11px] text-[#829AB1]">{footerNote}</p> : null}
+        {footerNote ? <p className="mt-2 text-[12px] text-[#829AB1]">{footerNote}</p> : null}
       </div>
     </div>
   );
@@ -110,27 +139,30 @@ type VisamentOrderSummaryProps = {
 
 export function VisamentOrderSummary({ applicants, totalLabel }: VisamentOrderSummaryProps) {
   return (
-    <div className="flex h-full w-full flex-col p-5">
-      <h2 className="shrink-0 text-[16px] font-semibold text-[#0F1F3D]">Order summary</h2>
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <h2 className="shrink-0 text-[17px] font-semibold text-[#0F1F3D]">Order summary</h2>
 
-      <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto">
+      <div className="mt-3 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         {applicants.map((applicant) => (
           <div key={applicant.id}>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-[14px] font-semibold text-[#0F1F3D]">{applicant.title}</p>
-              <p className="text-[14px] font-bold text-[#0F1F3D]">{applicant.subtotalLabel}</p>
+              <p className="text-[15px] font-semibold text-[#0F1F3D]">{applicant.title}</p>
+              <p className="text-[15px] font-bold text-[#0F1F3D]">{applicant.subtotalLabel}</p>
             </div>
             {applicant.items.length ? (
-              <div className="space-y-2 rounded-xl bg-[#EEF5FF] px-3 py-2.5">
+              <div className="space-y-2">
                 {applicant.items.map((item) => (
-                  <div key={item.id} className="flex items-start justify-between gap-2 text-[12px]">
+                  <div
+                    key={item.id}
+                    className="flex items-start justify-between gap-2 rounded-lg bg-[#EEF5FF] px-3 py-2.5 text-[13px]"
+                  >
                     <span className="min-w-0 leading-snug text-[#486581]">{item.label}</span>
                     <span className="shrink-0 font-semibold text-[#102A43]">{item.amountLabel}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="rounded-xl border border-dashed border-[#D7E4F4] px-3 py-2 text-[12px] text-[#829AB1]">
+              <p className="rounded-lg border border-dashed border-[#D7E4F4] px-3 py-2 text-[13px] text-[#829AB1]">
                 No services selected
               </p>
             )}
@@ -140,8 +172,8 @@ export function VisamentOrderSummary({ applicants, totalLabel }: VisamentOrderSu
 
       <div className="mt-auto shrink-0 border-t border-[#E8EEF6] pt-4">
         <div className="flex items-center justify-between">
-          <span className="text-[14px] font-semibold text-[#0F1F3D]">Order total:</span>
-          <span className="text-[18px] font-bold text-[#0F1F3D]">{totalLabel}</span>
+          <span className="text-[15px] font-semibold text-[#0F1F3D]">Order total:</span>
+          <span className="text-[19px] font-bold text-[#0F1F3D]">{totalLabel}</span>
         </div>
       </div>
     </div>
@@ -172,7 +204,7 @@ export function ServiceOptionList({
 }: ServiceOptionListProps) {
   return (
     <div>
-      <p className="mb-2 text-[13px] font-semibold text-[#334E68]">{label}</p>
+      <p className="mb-2 text-[14px] font-semibold text-[#334E68]">{label}</p>
       <div className="grid gap-2 sm:grid-cols-2">
         {options.map((option) => {
           const selected = value === option.id;
@@ -189,12 +221,12 @@ export function ServiceOptionList({
               } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
             >
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-[#102A43]">{option.title}</p>
+                <p className="text-[14px] font-semibold text-[#102A43]">{option.title}</p>
                 {option.description ? (
-                  <p className="mt-0.5 text-[11px] text-[#829AB1]">{option.description}</p>
+                  <p className="mt-0.5 text-[12px] text-[#829AB1]">{option.description}</p>
                 ) : null}
               </div>
-              <span className="shrink-0 text-[14px] font-bold text-[#1A56DB]">{option.priceLabel}</span>
+              <span className="shrink-0 text-[15px] font-bold text-[#1A56DB]">{option.priceLabel}</span>
             </button>
           );
         })}
@@ -204,6 +236,9 @@ export function ServiceOptionList({
 }
 
 export const checkoutFieldClass =
-  "w-full rounded-lg border border-[#D0D7E2] bg-white px-3 py-2.5 text-[13px] text-[#102A43] outline-none transition placeholder:text-[#9AA8BC] focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/15 disabled:bg-[#F5F7FA]";
+  "w-full rounded-lg border border-[#D0D7E2] bg-white px-3 py-2.5 text-[14px] text-[#102A43] outline-none transition placeholder:text-[#9AA8BC] focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/15 disabled:bg-[#F5F7FA]";
 
-export const checkoutLabelClass = "mb-1.5 block text-[12px] font-medium text-[#334E68]";
+export const checkoutFieldErrorClass =
+  "border-[#F3A4A4] focus:border-[#E11D48] focus:ring-[#E11D48]/15";
+
+export const checkoutLabelClass = "mb-1.5 block text-[13px] font-medium text-[#334E68]";

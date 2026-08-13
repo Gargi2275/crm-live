@@ -175,7 +175,7 @@ export default function EVisaPaymentPage() {
   return (
     <div className="w-full bg-[#F4F6F9] text-[#102A43]">
       <div className="mx-auto w-full max-w-[720px] px-3 py-4 sm:px-5 sm:py-5">
-        <div className="mb-4 max-w-md">
+        <div className="mb-4 flex justify-center">
           <ProgressStepper currentStep={1} />
         </div>
 

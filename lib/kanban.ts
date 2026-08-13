@@ -87,6 +87,16 @@ export function stageAfterPayment(
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "_");
+  // Backend stage names that staff boards must map correctly when paid.
+  if (raw === "CLOSED" || raw === "DECISION_RECEIVED" || raw === "COMPLETED" || raw === "DISPATCHED") {
+    return "DELIVERED";
+  }
+  if (raw === "SUBMITTED") {
+    return "SUBMITTED";
+  }
+  if (raw === "IN_PREPARATION" || raw === "DOCS_RECEIVED" || raw === "PAID") {
+    return hasDocuments ? "FORM_FILLING" : "DOCUMENT_UPLOAD_PENDING";
+  }
   if (["SUBMITTED", "DELIVERED", "REVIEW_PENDING", "READY_FOR_SUBMISSION", "FORM_FILLING"].includes(raw)) {
     return raw as KanbanStage;
   }
@@ -176,6 +186,7 @@ export function isExpressOrUrgentPlan(
   return (
     code === "express" ||
     code.startsWith("express") ||
+    code.endsWith("__express") ||
     code === "urgent" ||
     code.startsWith("urgent")
   );
@@ -192,6 +203,25 @@ export function comparePipelinePriority(
   const aTime = Date.parse(a.createdAt || "") || 0;
   const bTime = Date.parse(b.createdAt || "") || 0;
   if (aTime !== bTime) return aTime - bTime;
+  return 0;
+}
+
+export function taskIsExpress(task?: {
+  is_express?: boolean | null;
+  fee_plan_code?: string | null;
+} | null): boolean {
+  if (!task) return false;
+  return isExpressOrUrgentPlan(task.fee_plan_code, task.is_express);
+}
+
+/** Keep Express tickets first, then apply the existing list sort. */
+export function compareExpressFirst(
+  a: { is_express?: boolean | null; fee_plan_code?: string | null },
+  b: { is_express?: boolean | null; fee_plan_code?: string | null },
+): number {
+  const aExpress = taskIsExpress(a);
+  const bExpress = taskIsExpress(b);
+  if (aExpress !== bExpress) return aExpress ? -1 : 1;
   return 0;
 }
 

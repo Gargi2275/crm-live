@@ -1,37 +1,59 @@
 "use client";
 
+import { Check } from "lucide-react";
+
 interface ProgressStepperProps {
   currentStep: number;
 }
 
-/** Visament-style pill tabs: Service → Payment → Documents */
+/** Checkout progress: Service → Payment → Documents */
 const STEPS = ["Service", "Payment", "Documents"] as const;
 
 export function ProgressStepper({ currentStep }: ProgressStepperProps) {
   return (
-    <nav aria-label="Checkout progress" className="w-full px-4 py-3">
-      <ol className="mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-2">
+    <nav aria-label="Checkout progress" className="mx-auto w-full max-w-xl px-1 py-1">
+      <ol className="relative flex w-full items-start justify-between">
         {STEPS.map((step, index) => {
           const isActive = index === currentStep;
           const isDone = index < currentStep;
+          const isUpcoming = index > currentStep;
+          const connectorDone = index < currentStep;
+
           return (
-            <li key={step}>
+            <li key={step} className="relative z-10 flex flex-1 flex-col items-center text-center">
+              {index < STEPS.length - 1 ? (
+                <span
+                  aria-hidden
+                  className={`pointer-events-none absolute left-[calc(50%+18px)] top-[15px] h-[2px] w-[calc(100%-36px)] ${
+                    connectorDone ? "bg-[#1A56DB]" : "bg-[#D7E2EF]"
+                  }`}
+                />
+              ) : null}
+
               <span
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[14px] font-semibold ${
+                className={`relative flex h-8 w-8 items-center justify-center rounded-full text-[13px] font-bold transition ${
                   isActive
-                    ? "bg-[#1A56DB] text-white shadow-sm"
+                    ? "bg-[#1A56DB] text-white shadow-[0_0_0_4px_rgba(26,86,219,0.16)]"
                     : isDone
-                      ? "border border-[#1A56DB]/30 bg-[#EFF6FF] text-[#1A56DB]"
-                      : "border border-[#D5DEEA] bg-white text-[#627D98]"
+                      ? "bg-[#1A56DB] text-white"
+                      : "border-2 border-[#D0D7E2] bg-white text-[#829AB1]"
+                }`}
+                aria-current={isActive ? "step" : undefined}
+              >
+                {isDone ? <Check className="h-4 w-4" strokeWidth={2.75} /> : index + 1}
+              </span>
+
+              <span
+                className={`mt-2 text-[12px] font-semibold tracking-[-0.01em] sm:text-[13px] ${
+                  isActive
+                    ? "text-[#1A56DB]"
+                    : isDone
+                      ? "text-[#334E68]"
+                      : isUpcoming
+                        ? "text-[#829AB1]"
+                        : "text-[#627D98]"
                 }`}
               >
-                <span
-                  className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold ${
-                    isActive ? "bg-white/20 text-white" : "bg-[#E8EEF6] text-[#627D98]"
-                  }`}
-                >
-                  {index + 1}
-                </span>
                 {step}
               </span>
             </li>

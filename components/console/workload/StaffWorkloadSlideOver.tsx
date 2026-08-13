@@ -13,6 +13,8 @@ import {
   type AdminTaskItem,
 } from "@/lib/admin-auth";
 import { parseTaskDescription } from "@/lib/task-description";
+import { ExpressBadge } from "@/components/console/ExpressBadge";
+import { compareExpressFirst, taskIsExpress } from "@/lib/kanban";
 
 export type StaffWorkloadSummary = {
   id: number;
@@ -125,10 +127,15 @@ export function StaffWorkloadSlideOver({
   }, [sourceTasks]);
 
   const filteredListTasks = useMemo(() => {
-    if (listFilter === "pending") return tasks.filter(isPending);
-    if (listFilter === "completed") return tasks.filter(isCompleted);
-    if (listFilter === "assigned") return tasks;
-    return tasks;
+    let list = tasks;
+    if (listFilter === "pending") list = tasks.filter(isPending);
+    else if (listFilter === "completed") list = tasks.filter(isCompleted);
+    return [...list].sort((a, b) => {
+      const pendingA = isPending(a) ? 0 : 1;
+      const pendingB = isPending(b) ? 0 : 1;
+      if (pendingA !== pendingB) return pendingA - pendingB;
+      return compareExpressFirst(a, b);
+    });
   }, [listFilter, tasks]);
 
   const scrollToTop = () => {
@@ -405,11 +412,18 @@ function TaskListRow({ task, onClick }: { task: AdminTaskItem; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left rounded-[10px] border border-[#D9E1EA] bg-white px-3 py-2.5 hover:border-[#33A1FD]/50 hover:bg-[#F8FAFC] transition-colors"
+      className={`w-full text-left rounded-[10px] border px-3 py-2.5 transition-colors ${
+        taskIsExpress(task)
+          ? "border-[#C2410C]/40 bg-[#FFF7ED] hover:border-[#C2410C]/70"
+          : "border-[#D9E1EA] bg-white hover:border-[#33A1FD]/50 hover:bg-[#F8FAFC]"
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-[#102A43] truncate">{formatTaskName(task)}</p>
+          <p className="text-sm font-semibold text-[#102A43] truncate inline-flex items-center gap-1.5">
+            {taskIsExpress(task) ? <ExpressBadge compact /> : null}
+            {formatTaskName(task)}
+          </p>
           <p className="text-xs text-[#0B69B7] font-medium truncate mt-0.5">
             {task.application_reference || `Task #${task.id}`}
           </p>

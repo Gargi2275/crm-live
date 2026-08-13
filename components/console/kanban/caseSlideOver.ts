@@ -66,6 +66,15 @@ export const resolveAdminCaseStage = (item: AdminApplication): PipelineCase["sta
 
   // Paid cases must never remain on Payment Pending (all services including apostille).
   if (paymentConfirmed) {
+    if (applicationStatus === "completed" || applicationStatus === "dispatched" || applicationStatus === "approved") {
+      return "DELIVERED";
+    }
+    if (rawStage === "CLOSED" || rawStage === "DECISION_RECEIVED" || rawStage === "DELIVERED") {
+      return "DELIVERED";
+    }
+    if (applicationStatus === "submitted" || rawStage === "SUBMITTED") {
+      return "SUBMITTED";
+    }
     return stageAfterPayment(rawStage, hasDocuments);
   }
 

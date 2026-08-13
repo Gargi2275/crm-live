@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Check, ChevronDown, Plus, Trash2, X } from "lucide-react";
-import toast from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 import {
   CheckoutShell,
   VisamentOrderSummary,
@@ -80,12 +81,14 @@ type StartOrderPanelProps = {
   onUpdateApplicant: (id: string, patch: Partial<StartOrderApplicant>) => void;
   onRemoveApplicant: (id: string) => void;
   onSelectService: (serviceId: string) => void;
-  onContinue: (cart: StartOrderCartEntry[]) => void;
+  onContinue: (cart: StartOrderCartEntry[], opts?: { preferExpress?: boolean }) => void;
 };
 
 export type StartOrderCartEntry = {
   applicant: StartOrderApplicant;
   serviceIds: string[];
+  /** Per-applicant Express preference for payment. */
+  preferExpress?: boolean;
 };
 
 const APPLYING_FROM_FALLBACK = [
@@ -114,6 +117,35 @@ function formatMoney(amount: number): string {
 
 function emailsMatch(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase() && Boolean(a.trim());
+}
+
+function normalizeApplicantName(name: string): string {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeApplyingFrom(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function sameApplyingCountry(a: string, b: string): boolean {
+  const left = normalizeApplyingFrom(a);
+  const right = normalizeApplyingFrom(b);
+  return Boolean(left) && left === right;
+}
+
+function samePersonSameServiceMessage(applicantName: string, serviceName: string, country?: string): string {
+  const name = applicantName.trim() || "This applicant";
+  const from = country?.trim();
+  if (from) {
+    return `${name} is already applying for ${serviceName} from ${from}. The same person cannot apply twice for the same service from the same country.`;
+  }
+  return `${name} is already applying for ${serviceName}. The same person cannot apply twice for the same service.`;
 }
 
 function isValidEmail(value: string): boolean {
@@ -170,6 +202,10 @@ export function StartOrderPanel({
   const [dialOptionsLoading, setDialOptionsLoading] = useState(true);
   /** Country-resolved fees keyed by `${catalogId}:${countrySlug}` — driven by Applying From only. */
   const [countryFeeByKey, setCountryFeeByKey] = useState<Record<string, number>>({});
+  const [toasterReady, setToasterReady] = useState(false);
+  /** Express processing — selected by default once the user clicks Express for an applicant. */
+  const [applicantExpress, setApplicantExpress] = useState<Record<string, boolean>>({});
+  const [expressTouchedByApplicant, setExpressTouchedByApplicant] = useState<Record<string, boolean>>({});
 
   const applyingFromOptions = useMemo(() => {
     const names = dialOptions
@@ -179,6 +215,10 @@ export function StartOrderPanel({
     if (names.length > 0) return names;
     return [...APPLYING_FROM_FALLBACK];
   }, [dialOptions]);
+
+  useEffect(() => {
+    setToasterReady(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -417,8 +457,18 @@ export function StartOrderPanel({
     if (!group) return;
     const expandKey = `${primaryApplicant.id}:${group.key}`;
     setExpandedCategories((current) => {
-      if (current[expandKey]) return current;
-      return { ...current, [expandKey]: true };
+      const next: Record<string, boolean> = { ...current };
+      let changed = !current[expandKey];
+      for (const key of Object.keys(next)) {
+        if (!key.startsWith(`${primaryApplicant.id}:`)) continue;
+        const shouldOpen = key === expandKey;
+        if (next[key] !== shouldOpen) {
+          next[key] = shouldOpen;
+          changed = true;
+        }
+      }
+      next[expandKey] = true;
+      return changed ? next : current;
     });
   }, [selectedServiceId, serviceGroups, primaryApplicant.id, services]);
 
@@ -502,9 +552,24 @@ export function StartOrderPanel({
           const row = serviceById.get(serviceId);
           if (!row) return null;
           const priced = pricedService(row, applicant.applyingFrom);
-          return { id: `${applicant.id}-${serviceId}`, label: priced.name, amountLabel: priced.price };
+          return {
+            id: `${applicant.id}-${serviceId}`,
+            label: priced.name,
+            amountLabel: priced.price,
+            variant: "default" as const,
+          };
         })
-        .filter((row): row is { id: string; label: string; amountLabel: string } => Boolean(row));
+        .filter(
+          (
+            row,
+          ): row is {
+            id: string;
+            label: string;
+            amountLabel: string;
+            variant: "default";
+          } => Boolean(row),
+        );
+      const expressOn = Boolean(applicantExpress[applicant.id]) && items.length > 0;
       const subtotal = selected.reduce((sum, serviceId) => {
         const row = serviceById.get(serviceId);
         if (!row) return sum;
@@ -516,16 +581,91 @@ export function StartOrderPanel({
         title: applicant.fullName.trim() || `Applicant ${index + 1}`,
         subtotalLabel: items.length ? formatMoney(subtotal) : "—",
         items,
+        canSelectExpress: selected.length > 0,
+        expressSelected: expressOn,
       };
     });
-  }, [allApplicants, applicantServices, serviceById, pricedService]);
+  }, [allApplicants, applicantServices, serviceById, pricedService, applicantExpress]);
+
+  const anyExpressSelected = useMemo(
+    () => allApplicants.some((row) => Boolean(applicantExpress[row.id]) && (applicantServices[row.id] || []).length > 0),
+    [allApplicants, applicantExpress, applicantServices],
+  );
+
+  const toggleApplicantExpress = (applicantId: string) => {
+    setExpressTouchedByApplicant((current) => ({ ...current, [applicantId]: true }));
+    setApplicantExpress((current) => {
+      const touched = expressTouchedByApplicant[applicantId];
+      // First click selects Express by default; later clicks toggle.
+      const next = touched ? !current[applicantId] : true;
+      return { ...current, [applicantId]: next };
+    });
+  };
+
+  const otherApplicantHasService = (applicantId: string, serviceId: string, selectedByApplicant: Record<string, string[]>) => {
+    const otherIds = selectedByApplicant[applicantId] || [];
+    if (isServiceSelected(otherIds, serviceId)) return true;
+    return otherIds.some((id) => isServiceSelected([serviceId], id));
+  };
+
+  const findSameNameSameService = (
+    applicantId: string,
+    serviceId: string,
+    selectedByApplicant: Record<string, string[]> = applicantServices,
+    nameOverride?: string,
+    countryOverride?: string,
+  ) => {
+    const current = allApplicants.find((row) => row.id === applicantId);
+    const nameKey = normalizeApplicantName(nameOverride ?? current?.fullName ?? "");
+    if (!nameKey) return null;
+    const applyingFrom = countryOverride ?? current?.applyingFrom ?? "";
+    const other = allApplicants.find(
+      (row) =>
+        row.id !== applicantId &&
+        normalizeApplicantName(row.fullName) === nameKey &&
+        sameApplyingCountry(row.applyingFrom, applyingFrom) &&
+        otherApplicantHasService(row.id, serviceId, selectedByApplicant),
+    );
+    if (!other) return null;
+    const serviceName = serviceById.get(serviceId)?.name || "this service";
+    return {
+      serviceName,
+      name: (nameOverride ?? current?.fullName ?? "").trim(),
+      country: (applyingFrom || other.applyingFrom || "").trim(),
+    };
+  };
+
+  const findAnySameNameSameService = () => {
+    for (const applicant of allApplicants) {
+      for (const serviceId of applicantServices[applicant.id] || []) {
+        const duplicate = findSameNameSameService(applicant.id, serviceId);
+        if (duplicate) {
+          return {
+            name: applicant.fullName.trim() || duplicate.name,
+            serviceName: duplicate.serviceName,
+            country: duplicate.country,
+          };
+        }
+      }
+    }
+    return null;
+  };
 
   const toggleApplicantService = (applicantId: string, serviceId: string) => {
+    const prev = applicantServices[applicantId] || [];
+    const exists = prev.includes(serviceId) || isServiceSelected(prev, serviceId);
+    if (!exists) {
+      const duplicate = findSameNameSameService(applicantId, serviceId);
+      if (duplicate) {
+        toast.error(samePersonSameServiceMessage(duplicate.name, duplicate.serviceName, duplicate.country));
+        return;
+      }
+    }
     setActiveApplicantId(applicantId);
     setApplicantServices((current) => {
-      const prev = current[applicantId] || [];
-      const exists = prev.includes(serviceId);
-      const nextList = exists ? prev.filter((id) => id !== serviceId) : [...prev, serviceId];
+      const currentList = current[applicantId] || [];
+      const alreadyOn = currentList.includes(serviceId) || isServiceSelected(currentList, serviceId);
+      const nextList = alreadyOn ? currentList.filter((id) => id !== serviceId) : [...currentList, serviceId];
       return { ...current, [applicantId]: nextList };
     });
   };
@@ -675,6 +815,14 @@ export function StartOrderPanel({
           className={`${checkoutFieldClass} ${opts.isPrimary && nameError ? "border-[#E11D48]" : ""}`}
           onBlur={() => {
             if (opts.isPrimary) setTouched((t) => ({ ...t, name: true }));
+            const selected = applicantServices[applicant.id] || [];
+            for (const serviceId of selected) {
+              const duplicate = findSameNameSameService(applicant.id, serviceId);
+              if (duplicate) {
+                toast.error(samePersonSameServiceMessage(duplicate.name, duplicate.serviceName, duplicate.country));
+                break;
+              }
+            }
           }}
           onChange={(e) =>
             opts.isPrimary
@@ -779,6 +927,22 @@ export function StartOrderPanel({
             if (slug) setStoredPricingCountrySlug(slug);
             if (opts.isPrimary) onPrimaryChange({ applyingFrom, countryCode });
             else onUpdateApplicant(applicant.id, { applyingFrom, countryCode });
+            const selected = applicantServices[applicant.id] || [];
+            for (const serviceId of selected) {
+              const duplicate = findSameNameSameService(
+                applicant.id,
+                serviceId,
+                applicantServices,
+                undefined,
+                applyingFrom,
+              );
+              if (duplicate) {
+                toast.error(
+                  samePersonSameServiceMessage(duplicate.name, duplicate.serviceName, duplicate.country),
+                );
+                break;
+              }
+            }
           }}
         >
           {!applicant.applyingFrom ? (
@@ -796,6 +960,46 @@ export function StartOrderPanel({
     </div>
   );
 
+  const renderServiceTile = (
+    applicantId: string,
+    service: StartOrderServiceOption,
+    selected: string[],
+  ) => {
+    const checked = isServiceSelected(selected, service.id);
+    return (
+      <button
+        key={`${applicantId}-${service.id}`}
+        type="button"
+        disabled={apiLoading}
+        onClick={() => toggleApplicantService(applicantId, service.id)}
+        className={`flex h-full min-w-0 items-start justify-between gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
+          checked
+            ? "border-[#1A56DB] bg-[#EFF6FF] shadow-[0_0_0_1px_#1A56DB]"
+            : "border-[#D7E4F4] bg-white hover:border-[#B8C9DE]"
+        }`}
+      >
+        <span className="flex min-w-0 items-start gap-2">
+          <span
+            className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+              checked ? "border-[#1A56DB] bg-[#1A56DB] text-white" : "border-[#C7D4E8] bg-white"
+            }`}
+          >
+            {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-semibold leading-snug text-[#0F1F3D]">{service.name}</span>
+            {service.description ? (
+              <span className="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-[#829AB1]">
+                {service.description}
+              </span>
+            ) : null}
+          </span>
+        </span>
+        <span className="shrink-0 text-[13px] font-bold text-[#102A43]">{service.price}</span>
+      </button>
+    );
+  };
+
   const renderServiceChooser = (applicant: StartOrderApplicant) => {
     const selected = applicantServices[applicant.id] || [];
     return (
@@ -805,7 +1009,7 @@ export function StartOrderPanel({
           All categories are listed below. Pick one or more services for this applicant.
         </p>
 
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {serviceGroups.map((group) => {
             const expandKey = `${applicant.id}:${group.key}`;
             const open = Boolean(expandedCategories[expandKey]);
@@ -815,33 +1019,7 @@ export function StartOrderPanel({
             );
 
             if (isSingle) {
-              const service = pricedGroupServices[0];
-              const checked = isServiceSelected(selected, service.id);
-              return (
-                <button
-                  key={`${applicant.id}-${service.id}`}
-                  type="button"
-                  disabled={apiLoading}
-                  onClick={() => toggleApplicantService(applicant.id, service.id)}
-                  className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-3 text-left transition ${
-                    checked
-                      ? "border-[#1A56DB] bg-[#EFF6FF]"
-                      : "border-[#D7E4F4] bg-white hover:border-[#B8C9DE]"
-                  }`}
-                >
-                  <span className="flex min-w-0 items-center gap-2.5">
-                    <span
-                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                        checked ? "border-[#1A56DB] bg-[#1A56DB] text-white" : "border-[#C7D4E8] bg-white"
-                      }`}
-                    >
-                      {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
-                    </span>
-                    <span className="truncate text-[14px] font-semibold text-[#0F1F3D]">{service.name}</span>
-                  </span>
-                  <span className="shrink-0 text-[14px] font-bold text-[#102A43]">{service.price}</span>
-                </button>
-              );
+              return renderServiceTile(applicant.id, pricedGroupServices[0], selected);
             }
 
             const groupSelectedCount = pricedGroupServices.filter((s) =>
@@ -850,16 +1028,23 @@ export function StartOrderPanel({
             return (
               <div
                 key={`${applicant.id}-${group.key}`}
-                className="overflow-hidden rounded-xl border border-[#D7E4F4] bg-white"
+                className={`overflow-hidden rounded-xl border border-[#D7E4F4] bg-white ${
+                  open ? "sm:col-span-2 xl:col-span-3" : ""
+                }`}
               >
                 <button
                   type="button"
                   disabled={apiLoading}
                   onClick={() =>
-                    setExpandedCategories((current) => ({
-                      ...current,
-                      [expandKey]: !current[expandKey],
-                    }))
+                    setExpandedCategories((current) => {
+                      const isOpen = Boolean(current[expandKey]);
+                      const next: Record<string, boolean> = { ...current };
+                      for (const key of Object.keys(next)) {
+                        if (key.startsWith(`${applicant.id}:`)) next[key] = false;
+                      }
+                      next[expandKey] = !isOpen;
+                      return next;
+                    })
                   }
                   className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left hover:bg-[#F8FAFC]"
                 >
@@ -875,46 +1060,10 @@ export function StartOrderPanel({
                   />
                 </button>
                 {open ? (
-                  <div className="space-y-1 border-t border-[#E8EEF5] px-2 py-2">
-                    {pricedGroupServices.map((service) => {
-                      const checked = isServiceSelected(selected, service.id);
-                      return (
-                        <button
-                          key={`${applicant.id}-${service.id}`}
-                          type="button"
-                          disabled={apiLoading}
-                          onClick={() => toggleApplicantService(applicant.id, service.id)}
-                          className={`flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-left transition ${
-                            checked ? "bg-[#EFF6FF]" : "hover:bg-[#F8FAFC]"
-                          }`}
-                        >
-                          <span className="flex min-w-0 items-center gap-2.5">
-                            <span
-                              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                                checked
-                                  ? "border-[#1A56DB] bg-[#1A56DB] text-white"
-                                  : "border-[#C7D4E8] bg-white"
-                              }`}
-                            >
-                              {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block truncate text-[13px] font-semibold text-[#0F1F3D]">
-                                {service.name}
-                              </span>
-                              {service.description ? (
-                                <span className="mt-0.5 block truncate text-[11px] text-[#829AB1]">
-                                  {service.description}
-                                </span>
-                              ) : null}
-                            </span>
-                          </span>
-                          <span className="shrink-0 text-[13px] font-bold text-[#102A43]">
-                            {service.price}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="grid grid-cols-1 gap-1.5 border-t border-[#E8EEF5] p-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {pricedGroupServices.map((service) =>
+                      renderServiceTile(applicant.id, service, selected),
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -927,12 +1076,48 @@ export function StartOrderPanel({
 
   return (
     <>
+      {toasterReady
+        ? createPortal(
+            <Toaster
+              position="top-right"
+              containerStyle={{
+                top: 96,
+                right: 16,
+                zIndex: 100000,
+              }}
+              toastOptions={{
+                duration: 5000,
+                style: {
+                  border: "1px solid #d9e1ea",
+                  borderRadius: "12px",
+                  color: "#102a43",
+                  padding: "14px 16px",
+                  lineHeight: "1.45",
+                  maxWidth: "380px",
+                  overflow: "visible",
+                  whiteSpace: "normal",
+                },
+              }}
+            />,
+            document.body,
+          )
+        : null}
       <CheckoutShell
         title="Start your order"
         subtitle="Select a service, then pay before uploading documents."
         currentStep={0}
         summary={
-          <VisamentOrderSummary applicants={summaryApplicants} totalLabel={formatMoney(orderTotal)} />
+          <VisamentOrderSummary
+            applicants={summaryApplicants}
+            totalLabel={formatMoney(orderTotal)}
+            disabled={apiLoading}
+            onToggleExpress={toggleApplicantExpress}
+            footerNote={
+              anyExpressSelected
+                ? "Express fee is confirmed at payment for each selected applicant."
+                : undefined
+            }
+          />
         }
         form={
           <div className="space-y-5">
@@ -1036,12 +1221,23 @@ export function StartOrderPanel({
                     toast.error(`Verify ${unverified.email || "applicant email"} before continuing.`);
                     return;
                   }
-                  onContinue(
-                    allApplicants.map((applicant) => ({
-                      applicant,
-                      serviceIds: applicantServices[applicant.id] || [],
-                    })),
-                  );
+                  const duplicateService = findAnySameNameSameService();
+                  if (duplicateService) {
+                    toast.error(
+                      samePersonSameServiceMessage(
+                        duplicateService.name,
+                        duplicateService.serviceName,
+                        duplicateService.country,
+                      ),
+                    );
+                    return;
+                  }
+                  const cart = allApplicants.map((applicant) => ({
+                    applicant,
+                    serviceIds: applicantServices[applicant.id] || [],
+                    preferExpress: Boolean(applicantExpress[applicant.id]),
+                  }));
+                  onContinue(cart, { preferExpress: cart.some((entry) => entry.preferExpress) });
                 }}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-[#1A56DB] px-10 py-3 text-[15px] font-semibold text-white transition hover:bg-[#1648B5] disabled:cursor-not-allowed disabled:bg-[#C5D0DE] sm:w-auto sm:min-w-[200px]"
               >

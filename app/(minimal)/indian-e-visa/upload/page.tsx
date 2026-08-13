@@ -69,11 +69,6 @@ export default function UploadPage() {
   const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
   const [supportingFiles, setSupportingFiles] = useState<File[]>([]);
   const [applicantEmail, setApplicantEmail] = useState(emailFromQuery || data.email || "");
-  
-  const [arrivalDate, setArrivalDate] = useState("");
-  const [portOfEntry, setPortOfEntry] = useState("");
-  const [addressInIndia, setAddressInIndia] = useState("");
-  const [emergencyContact, setEmergencyContact] = useState("");
   const [notes, setNotes] = useState("");
 
   const [isUploading, setIsUploading] = useState(false);
@@ -303,33 +298,13 @@ export default function UploadPage() {
     if (data.email && !applicantEmail) {
       setApplicantEmail(data.email);
     }
-    if (data.travelDetails.arrivalDate && !arrivalDate) {
-      setArrivalDate(data.travelDetails.arrivalDate);
-    }
-    if (data.travelDetails.portOfEntry && !portOfEntry) {
-      setPortOfEntry(data.travelDetails.portOfEntry);
-    }
-    if (data.travelDetails.addressInIndia && !addressInIndia) {
-      setAddressInIndia(data.travelDetails.addressInIndia);
-    }
-    if (data.travelDetails.emergencyContact && !emergencyContact) {
-      setEmergencyContact(data.travelDetails.emergencyContact);
-    }
     if (data.travelDetails.additionalNotes && !notes) {
       setNotes(data.travelDetails.additionalNotes);
     }
   }, [
     data.email,
-    data.travelDetails.arrivalDate,
-    data.travelDetails.portOfEntry,
-    data.travelDetails.addressInIndia,
-    data.travelDetails.emergencyContact,
     data.travelDetails.additionalNotes,
     applicantEmail,
-    arrivalDate,
-    portOfEntry,
-    addressInIndia,
-    emergencyContact,
     notes,
   ]);
 
@@ -338,24 +313,24 @@ export default function UploadPage() {
       fileNumber: caseNumber || data.fileNumber,
       email: applicantEmail || data.email,
       travelDetails: {
-        arrivalDate,
-        portOfEntry,
-        addressInIndia,
-        emergencyContact,
+        arrivalDate: data.travelDetails.arrivalDate,
+        portOfEntry: data.travelDetails.portOfEntry,
+        addressInIndia: data.travelDetails.addressInIndia,
+        emergencyContact: data.travelDetails.emergencyContact,
         additionalNotes: notes,
       },
     });
   }, [
     caseNumber,
     applicantEmail,
-    arrivalDate,
-    portOfEntry,
-    addressInIndia,
-    emergencyContact,
     notes,
     updateData,
     data.fileNumber,
     data.email,
+    data.travelDetails.arrivalDate,
+    data.travelDetails.portOfEntry,
+    data.travelDetails.addressInIndia,
+    data.travelDetails.emergencyContact,
   ]);
 
   // Validate Required Fields — catalog requirements from backend
@@ -583,11 +558,6 @@ export default function UploadPage() {
         const file = filesByCode[item.id];
         if (file) formData.append(item.id, file);
       }
-      formData.append("intended_arrival_date", arrivalDate);
-      formData.append("port_of_entry", portOfEntry);
-      formData.append("address_in_india", addressInIndia);
-      formData.append("emergency_contact", emergencyContact);
-
       supportingFiles.forEach((file) => formData.append("supporting_documents", file));
 
       setUploadProgress(55);
@@ -599,10 +569,7 @@ export default function UploadPage() {
         fileNumber: caseNumber,
         email: applicantEmail,
         travelDetails: {
-          arrivalDate,
-          portOfEntry,
-          addressInIndia,
-          emergencyContact,
+          ...data.travelDetails,
           additionalNotes: notes,
         },
       });
@@ -634,7 +601,9 @@ export default function UploadPage() {
             </span>
           </div>
         </div>
-        <ProgressStepper currentStep={2} />
+        <div className="flex justify-center">
+          <ProgressStepper currentStep={2} />
+        </div>
 
         <div className="max-w-[480px] mx-auto px-4 mt-10">
           <Reveal direction="up">
@@ -690,7 +659,9 @@ export default function UploadPage() {
         </div>
       </div>
 
-      <ProgressStepper currentStep={2} />
+      <div className="flex justify-center">
+        <ProgressStepper currentStep={2} />
+      </div>
 
       <div className="mx-auto mt-6 w-full max-w-[720px] px-4 lg:mt-8">
         <Reveal direction="up" delay={0.05}>
@@ -899,63 +870,16 @@ export default function UploadPage() {
                 </div>
 
                 <div className="rounded-2xl border border-[#dce7f8] bg-white p-5 space-y-3">
-                  <h3 className="text-base font-semibold text-[#0F1F3D]">Optional travel details</h3>
-                  <p className="text-sm text-slate-500">Helpful if known — you can skip for now</p>
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">
-                        Email used for registration *
-                      </label>
-                      <input
-                        type="email"
-                        required
-                        value={applicantEmail}
-                        onChange={(e) => setApplicantEmail(e.target.value)}
-                        className={inputClasses}
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">
-                        Intended arrival date
-                      </label>
-                      <input
-                        type="date"
-                        value={arrivalDate}
-                        onChange={(e) => setArrivalDate(e.target.value)}
-                        className={inputClasses}
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Port of entry</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Delhi (DEL)"
-                        value={portOfEntry}
-                        onChange={(e) => setPortOfEntry(e.target.value)}
-                        className={inputClasses}
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Emergency contact</label>
-                      <input
-                        type="text"
-                        placeholder="Name and phone (optional)"
-                        value={emergencyContact}
-                        onChange={(e) => setEmergencyContact(e.target.value)}
-                        className={inputClasses}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">Address in India</label>
-                    <textarea
-                      placeholder="Hotel name or complete residential address"
-                      rows={2}
-                      value={addressInIndia}
-                      onChange={(e) => setAddressInIndia(e.target.value)}
-                      className={`${inputClasses} resize-none`}
-                    />
-                  </div>
+                  <label className="block font-body font-semibold text-[#334e68] text-xs mb-1.5">
+                    Email used for registration *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={applicantEmail}
+                    onChange={(e) => setApplicantEmail(e.target.value)}
+                    className={inputClasses}
+                  />
                 </div>
 
                 <div className="rounded-2xl border border-dashed border-[#dce7f8] bg-white p-5 space-y-3">

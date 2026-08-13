@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, Shuffle, UserCog } from "lucide-react";
 import toast from "react-hot-toast";
@@ -37,6 +37,8 @@ import {
   type AdminTaskItem,
   type TaskReassignRequestItem,
 } from "@/lib/admin-auth";
+import { compareExpressFirst, taskIsExpress } from "@/lib/kanban";
+import { ExpressBadge } from "@/components/console/ExpressBadge";
 
 const filterFieldClass =
   "mt-1 w-full rounded-[10px] border border-[#D9E1EA] px-3 py-2 text-sm bg-white";
@@ -58,8 +60,22 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-function formatTaskTypeLabel(taskType: string) {
-  const key = String(taskType || "").toLowerCase();
+function formatTaskTypeLabel(task: AdminTaskItem | string) {
+  if (typeof task === "string") {
+    const key = String(task || "").toLowerCase();
+    return TASK_TYPE_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  const kanban = String(task.application_kanban_stage || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+  const description = String(task.description || "").toLowerCase();
+  const key = String(task.task_type || "").toLowerCase();
+  if (kanban === "DOCUMENT_UPLOAD_PENDING" || description.includes("[auto_task:payment-await-docs:")) {
+    return "Document Upload Pending";
+  }
+  if (kanban === "FORM_FILLING" && key === "form_filling") return "Form Filling";
+  if (kanban === "REVIEW_PENDING" || key === "document_review") return "Document Review";
   return TASK_TYPE_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -131,10 +147,13 @@ function resolveWorkloadTab(
 export function WorkloadView({
   embedded = false,
   focusTab = null,
+  externalSearch,
 }: {
   embedded?: boolean;
   /** When opened from dashboard (no URL ?tab=), force Overview/Reassigns/etc. */
   focusTab?: string | null;
+  /** When embedded (e.g. My Cases → Workload), use the host page search. */
+  externalSearch?: string;
 }) {
   const { adminUser } = useAdminAuth();
   const router = useRouter();
@@ -161,6 +180,7 @@ export function WorkloadView({
   const [taskItems, setTaskItems] = useState<AdminTaskItem[]>([]);
   const [taskSelections, setTaskSelections] = useState<Record<number, string>>({});
   const [taskActionLoading, setTaskActionLoading] = useState<number | "auto" | null>(null);
+  const silentAutoAssignKeyRef = useRef("");
   const [loading, setLoading] = useState(true);
   const [selectedStaff, setSelectedStaff] = useState<StaffWorkloadSummary | null>(null);
   const [internalMessages, setInternalMessages] = useState<AdminStaffInternalMessage[]>([]);
@@ -201,6 +221,7 @@ export function WorkloadView({
   };
   const [kpiFilter, setKpiFilter] = useState<KpiFilterKey | null>(null);
   const [staffSearch, setStaffSearch] = useState("");
+  const activeStaffSearch = externalSearch ?? staffSearch;
   const [roleFilter, setRoleFilter] = useState("all");
   const [loadFilter, setLoadFilter] = useState("all");
   const [staffIdFilter, setStaffIdFilter] = useState("all");
@@ -225,6 +246,8 @@ export function WorkloadView({
   };
 
   const compareTasks = (a: AdminTaskItem, b: AdminTaskItem, key: TaskSortKey, dir: SortDir) => {
+    const expressCmp = compareExpressFirst(a, b);
+    if (expressCmp !== 0) return expressCmp;
     const dirMul = dir === "asc" ? 1 : -1;
     let cmp = 0;
     switch (key) {
@@ -464,7 +487,7 @@ export function WorkloadView({
 
   const hasFilters =
     effectiveKpi !== null ||
-    staffSearch.trim() !== "" ||
+    activeStaffSearch.trim() !== "" ||
     roleFilter !== "all" ||
     loadFilter !== "all" ||
     staffIdFilter !== "all" ||
@@ -488,14 +511,38 @@ export function WorkloadView({
 
   const filteredStaffRows = useMemo(() => {
     let rows = [...staffKpiRows];
+    const query = activeStaffSearch.trim().toLowerCase();
 
-    if (effectiveKpi === "pending") rows = rows.filter((row) => row.pending > 0);
-    else if (effectiveKpi === "assigned") rows = rows.filter((row) => row.assigned > 0);
-    else if (effectiveKpi === "completed") rows = rows.filter((row) => row.completed > 0);
-    else if (effectiveKpi === "unassigned") rows = [];
+    if (!query) {
+      if (effectiveKpi === "pending") rows = rows.filter((row) => row.pending > 0);
+      else if (effectiveKpi === "assigned") rows = rows.filter((row) => row.assigned > 0);
+      else if (effectiveKpi === "completed") rows = rows.filter((row) => row.completed > 0);
+      else if (effectiveKpi === "unassigned") rows = [];
 
-    if (staffSearch.trim()) {
-      const query = staffSearch.trim().toLowerCase();
+      if (roleFilter !== "all") {
+        rows = rows.filter((row) => String(row.role || "").toLowerCase().includes(roleFilter));
+      }
+
+      if (loadFilter === "overloaded" || loadFilter === "busy" || loadFilter === "active") {
+        rows = rows.filter((row) => String(row.loadStatus || "").toLowerCase() === loadFilter);
+      } else if (loadFilter === "overdue") {
+        rows = rows.filter((row) => row.slaBreach > 0);
+      }
+
+      if (staffIdFilter !== "all" && staffIdFilter !== "unassigned") {
+        rows = rows.filter((row) => String(row.id) === staffIdFilter);
+      }
+
+      if (taskTypeFilter !== "all") {
+        rows = rows.filter((row) =>
+          taskItems.some(
+            (task) =>
+              staffIdsMatch(task.assigned_staff, row.id) &&
+              String(task.task_type || "").toLowerCase() === taskTypeFilter,
+          ),
+        );
+      }
+    } else {
       rows = rows.filter(
         (row) =>
           row.name.toLowerCase().includes(query) ||
@@ -503,35 +550,23 @@ export function WorkloadView({
       );
     }
 
-    if (roleFilter !== "all") {
-      rows = rows.filter((row) => String(row.role || "").toLowerCase().includes(roleFilter));
-    }
-
-    if (loadFilter === "overloaded" || loadFilter === "busy" || loadFilter === "active") {
-      rows = rows.filter((row) => String(row.loadStatus || "").toLowerCase() === loadFilter);
-    } else if (loadFilter === "overdue") {
-      rows = rows.filter((row) => row.slaBreach > 0);
-    }
-
-    if (staffIdFilter !== "all" && staffIdFilter !== "unassigned") {
-      rows = rows.filter((row) => String(row.id) === staffIdFilter);
-    }
-
-    if (taskTypeFilter !== "all") {
-      rows = rows.filter((row) =>
-        taskItems.some(
-          (task) =>
-            staffIdsMatch(task.assigned_staff, row.id) &&
-            String(task.task_type || "").toLowerCase() === taskTypeFilter,
-        ),
-      );
-    }
-
     return rows;
-  }, [effectiveKpi, loadFilter, roleFilter, staffIdFilter, staffKpiRows, staffSearch, taskTypeFilter, taskItems]);
+  }, [effectiveKpi, loadFilter, roleFilter, staffIdFilter, staffKpiRows, activeStaffSearch, taskTypeFilter, taskItems]);
 
   const filteredTasks = useMemo(() => {
     let tasks = [...taskItems];
+    const query = activeStaffSearch.trim().toLowerCase();
+
+    if (query) {
+      tasks = tasks.filter(
+        (task) =>
+          String(task.assigned_staff_name || "").toLowerCase().includes(query) ||
+          String(task.application_reference || "").toLowerCase().includes(query) ||
+          String(task.customer_name || "").toLowerCase().includes(query),
+      );
+      tasks.sort((a, b) => compareTasks(a, b, taskSortKey, taskSortDir));
+      return tasks;
+    }
 
     if (effectiveKpi === "assigned") tasks = tasks.filter((task) => Boolean(task.assigned_staff));
     else if (effectiveKpi === "pending") {
@@ -554,21 +589,11 @@ export function WorkloadView({
       hasFilters &&
       effectiveKpi !== "unassigned" &&
       staffIdFilter === "all" &&
-      (roleFilter !== "all" || loadFilter !== "all" || staffSearch.trim() || taskTypeFilter !== "all")
+      (roleFilter !== "all" || loadFilter !== "all" || taskTypeFilter !== "all")
     ) {
       const staffIds = new Set(filteredStaffRows.map((row) => row.id));
       tasks = tasks.filter(
         (task) => isTaskUnassigned(task) || staffIds.has(Number(task.assigned_staff)),
-      );
-    }
-
-    if (staffSearch.trim()) {
-      const query = staffSearch.trim().toLowerCase();
-      tasks = tasks.filter(
-        (task) =>
-          String(task.assigned_staff_name || "").toLowerCase().includes(query) ||
-          String(task.application_reference || "").toLowerCase().includes(query) ||
-          String(task.customer_name || "").toLowerCase().includes(query),
       );
     }
 
@@ -582,7 +607,7 @@ export function WorkloadView({
     loadFilter,
     roleFilter,
     staffIdFilter,
-    staffSearch,
+    activeStaffSearch,
     taskItems,
     taskTypeFilter,
     taskSortDir,
@@ -600,8 +625,17 @@ export function WorkloadView({
     const selfId = adminUser?.id;
     // Strict isolation: only tasks currently assigned to this staffer.
     let tasks = taskItems.filter((task) => staffIdsMatch(task.assigned_staff, selfId));
+    const query = activeStaffSearch.trim().toLowerCase();
 
-    if (myTasksStatusFilter === "open") {
+    if (query) {
+      tasks = tasks.filter(
+        (task) =>
+          String(task.application_reference || "").toLowerCase().includes(query) ||
+          String(task.customer_name || "").toLowerCase().includes(query) ||
+          String(task.assigned_staff_name || "").toLowerCase().includes(query) ||
+          String(task.task_type || "").toLowerCase().includes(query),
+      );
+    } else if (myTasksStatusFilter === "open") {
       tasks = tasks.filter((task) => isTaskPending(task));
     } else if (myTasksStatusFilter === "completed") {
       tasks = tasks.filter((task) => isTaskCompleted(task));
@@ -611,7 +645,7 @@ export function WorkloadView({
 
     tasks.sort((a, b) => compareTasks(a, b, taskSortKey, taskSortDir));
     return tasks;
-  }, [taskItems, adminUser?.id, myTasksStatusFilter, taskSortKey, taskSortDir]);
+  }, [taskItems, adminUser?.id, myTasksStatusFilter, taskSortKey, taskSortDir, activeStaffSearch]);
 
   const showStaffTable = effectiveKpi !== "unassigned" && staffIdFilter !== "unassigned";
 
@@ -643,6 +677,8 @@ export function WorkloadView({
         const pendingA = isTaskPending(a) ? 0 : 1;
         const pendingB = isTaskPending(b) ? 0 : 1;
         if (pendingA !== pendingB) return pendingA - pendingB;
+        const expressCmp = compareExpressFirst(a, b);
+        if (expressCmp !== 0) return expressCmp;
         const ad = a.deadline ? new Date(a.deadline).getTime() : Number.POSITIVE_INFINITY;
         const bd = b.deadline ? new Date(b.deadline).getTime() : Number.POSITIVE_INFINITY;
         return ad - bd;
@@ -656,6 +692,8 @@ export function WorkloadView({
             const pendingA = isTaskPending(a) ? 0 : 1;
             const pendingB = isTaskPending(b) ? 0 : 1;
             if (pendingA !== pendingB) return pendingA - pendingB;
+            const expressCmp = compareExpressFirst(a, b);
+            if (expressCmp !== 0) return expressCmp;
             const ad = a.deadline ? new Date(a.deadline).getTime() : Number.POSITIVE_INFINITY;
             const bd = b.deadline ? new Date(b.deadline).getTime() : Number.POSITIVE_INFINITY;
             return ad - bd;
@@ -860,17 +898,20 @@ export function WorkloadView({
     }
   };
 
-  const handleAutoAssignTasks = async () => {
+  const handleAutoAssignTasks = async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
     if (autoAssignStaffCount === 0) {
-      toast.error(
-        isOpsView
-          ? "No eligible staff for auto-assign. You need active case processors, reviewers, support agents, or other ops managers (not you or admins)."
-          : "No active staff available for auto-assign.",
-      );
+      if (!silent) {
+        toast.error(
+          isOpsView
+            ? "No eligible staff for auto-assign. You need active case processors, reviewers, support agents, or other ops managers (not you or admins)."
+            : "No active staff available for auto-assign.",
+        );
+      }
       return;
     }
     if (autoAssignEligibleCount === 0) {
-      toast.error("No unassigned pending tasks in the queue.");
+      if (!silent) toast.error("No unassigned pending tasks in the queue.");
       return;
     }
     setTaskActionLoading("auto");
@@ -878,14 +919,27 @@ export function WorkloadView({
       const result = await autoAssignAdminTasks();
       await loadDashboard();
       const count = result.assigned_count ?? 0;
-      if (count > 0) toast.success(result.message || `Auto-assigned ${count} task(s).`);
-      else toast.error(result.message || "No tasks were assigned.");
+      if (!silent) {
+        if (count > 0) toast.success(result.message || `Auto-assigned ${count} task(s).`);
+        else toast.error(result.message || "No tasks were assigned.");
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to auto-assign.");
+      if (!silent) toast.error(error instanceof Error ? error.message : "Failed to auto-assign.");
     } finally {
       setTaskActionLoading(null);
     }
   };
+
+  useEffect(() => {
+    if (!adminUser || !canManageTasks) return;
+    if (autoAssignEligibleCount <= 0 || autoAssignStaffCount <= 0) return;
+    const key = `${autoAssignEligibleCount}:${autoAssignStaffCount}`;
+    if (silentAutoAssignKeyRef.current === key) return;
+    silentAutoAssignKeyRef.current = key;
+    // Continuous auto-assign: no button click required.
+    void handleAutoAssignTasks({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminUser, canManageTasks, autoAssignEligibleCount, autoAssignStaffCount]);
 
   const kpiButtons = [
     { key: "all" as const, label: "All", value: teamKpis.totalTasks },
@@ -920,22 +974,18 @@ export function WorkloadView({
                 <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
                 Refresh
               </button>
-              <button
-                type="button"
-                onClick={() => void handleAutoAssignTasks()}
-                disabled={taskActionLoading === "auto"}
-                title={
-                  autoAssignEligibleCount === 0
-                    ? "No unassigned pending tasks"
-                    : autoAssignStaffCount === 0
-                      ? "No eligible staff to receive tasks"
-                      : `Distribute ${autoAssignEligibleCount} task(s) across ${autoAssignStaffCount} staff`
-                }
-                className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#33A1FD] px-2.5 py-1.5 text-sm font-semibold text-white hover:bg-[#0B69B7] disabled:opacity-60"
+              <span
+                className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#BBF7D0] bg-[#F0FDF4] px-2.5 py-1.5 text-sm font-semibold text-[#166534]"
+                title="New and unassigned tasks are assigned automatically via routing rules or least-loaded staff."
               >
-                {taskActionLoading === "auto" ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Shuffle className="w-4 h-4" />}
-                Auto assign{autoAssignEligibleCount > 0 ? ` (${autoAssignEligibleCount})` : ""}
-              </button>
+                {taskActionLoading === "auto" ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Shuffle className="w-4 h-4" />
+                )}
+                Auto-assign on
+                {autoAssignEligibleCount > 0 ? ` · ${autoAssignEligibleCount} pending` : ""}
+              </span>
             </>
           ),
           filtersContent: (
@@ -1155,13 +1205,16 @@ export function WorkloadView({
                               openCaseFromTask(task);
                             }
                           }}
-                          className="hover:bg-[#EFF7FF] cursor-pointer"
+                          className={`hover:bg-[#EFF7FF] cursor-pointer ${taskIsExpress(task) ? "bg-[#FFF7ED]" : ""}`}
                         >
                           <td className="px-3 py-2 font-medium text-[#0B69B7]">
-                            {task.application_reference || `#${task.id}`}
+                            <span className="inline-flex items-center gap-1.5">
+                              {taskIsExpress(task) ? <ExpressBadge compact /> : null}
+                              {task.application_reference || `#${task.id}`}
+                            </span>
                           </td>
                           <td className="px-3 py-2 capitalize text-[#486581]">
-                            {formatTaskTypeLabel(task.task_type)}
+                            {formatTaskTypeLabel(task)}
                           </td>
                           <td className="px-3 py-2">
                             <span
@@ -1460,12 +1513,13 @@ export function WorkloadView({
               <h2 className="text-sm font-heading font-semibold text-[#102A43]">Tasks</h2>
               <p className="text-[11px] text-[#627D98]">
                 Newest first by default. Click a column header to sort, or use Sort in filters.
-                New tasks appear here unassigned unless a Case routing rule matches (Auto-assign on).
-                Otherwise use the dropdown + Assign, or Auto assign — routing rules are applied there too.
+                Tasks are auto-assigned as they appear (routing rules first, then least-loaded staff).
+                Case processors, reviewers, and support agents only see cases assigned to them —
+                never another staff member&apos;s cases in Pipeline, Workload, or My Cases.
                 {isOpsView ? (
                   <span className="block mt-0.5">
-                    Auto assign is available for ops managers — it distributes to case staff and other ops managers (not you or admins).
-                    {autoAssignStaffCount === 0 ? " Add eligible team staff to use auto-assign." : null}
+                    Ops/admin can still see the full board for oversight and manual reassignment.
+                    {autoAssignStaffCount === 0 ? " Add eligible team staff so auto-assign can place work." : null}
                   </span>
                 ) : null}
               </p>
@@ -1563,7 +1617,9 @@ export function WorkloadView({
                               openCaseFromTask(task);
                             }
                           }}
-                          className="align-top hover:bg-[#EFF7FF] cursor-pointer"
+                          className={`align-top hover:bg-[#EFF7FF] cursor-pointer ${
+                            taskIsExpress(task) ? "bg-[#FFF7ED]" : ""
+                          }`}
                         >
                           <td className="px-3 py-2 text-[#486581] whitespace-nowrap">
                             {formatDateOnly(createdAt)}
@@ -1571,7 +1627,10 @@ export function WorkloadView({
                             <span className="text-[11px]">{formatTimeOnly(createdAt)}</span>
                           </td>
                           <td className="px-3 py-2 font-medium text-[#0B69B7]">
-                            {task.application_reference || `#${task.id}`}
+                            <span className="inline-flex items-center gap-1.5">
+                              {taskIsExpress(task) ? <ExpressBadge compact /> : null}
+                              {task.application_reference || `#${task.id}`}
+                            </span>
                           </td>
                           <td className="px-3 py-2 text-[#486581]">{task.customer_name || "—"}</td>
                           <td className="hidden md:table-cell px-3 py-2 capitalize text-[#486581]">{task.task_type.replace(/_/g, " ")}</td>

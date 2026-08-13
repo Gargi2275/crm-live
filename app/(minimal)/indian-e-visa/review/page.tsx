@@ -83,7 +83,7 @@ export default function ReviewPage() {
         </div>
       </div>
 
-      <div className="pt-2">
+      <div className="flex justify-center pt-2">
         <ProgressStepper currentStep={2} />
       </div>
 

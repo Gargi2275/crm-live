@@ -140,10 +140,14 @@ function QuestionCard({
   const value = answers[q.id] || "";
   const options = resolveQuestionOptions(q, answers);
   const isCountry = isCountryQuestionType(q.question_type);
+  const isDate = String(q.question_type || "").toLowerCase() === "date";
   const isText =
     !isCountry &&
+    !isDate &&
     (q.question_type === "text" ||
       (!options.length && q.question_type !== "yes_no" && !q.options_by_answer));
+  const isLongText =
+    isText && /address|notes/.test(`${q.id} ${q.label}`.toLowerCase());
   const hasError = Boolean(errors?.[q.id] || (isCountry && errors?.[countryStateAnswerKey(q.id)]));
   const lowerLabel = (q.label || "").toLowerCase();
   const lowerId = (q.id || "").toLowerCase();
@@ -274,15 +278,34 @@ function QuestionCard({
             </div>
           ) : null}
         </div>
-      ) : isText ? (
+      ) : isDate ? (
         <input
-          type="text"
+          type="date"
           value={value}
           disabled={disabled}
-          placeholder="Type your answer"
-          className="w-full rounded-xl border border-[#D0D7E2] bg-[#F8FAFC] px-3.5 py-3 text-sm text-[#102A43] outline-none transition placeholder:text-[#A0AEC0] focus:border-[#1A56DB] focus:bg-white focus:ring-4 focus:ring-[#1A56DB]/15 disabled:opacity-60"
+          className="w-full rounded-xl border border-[#D0D7E2] bg-[#F8FAFC] px-3.5 py-3 text-sm text-[#102A43] outline-none transition disabled:opacity-60 focus:border-[#1A56DB] focus:bg-white focus:ring-4 focus:ring-[#1A56DB]/15"
           onChange={(e) => onChange(q.id, e.target.value)}
         />
+      ) : isText ? (
+        isLongText ? (
+          <textarea
+            value={value}
+            disabled={disabled}
+            rows={3}
+            placeholder={q.help_text || "Type your answer"}
+            className="w-full resize-none rounded-xl border border-[#D0D7E2] bg-[#F8FAFC] px-3.5 py-3 text-sm text-[#102A43] outline-none transition placeholder:text-[#A0AEC0] focus:border-[#1A56DB] focus:bg-white focus:ring-4 focus:ring-[#1A56DB]/15 disabled:opacity-60"
+            onChange={(e) => onChange(q.id, e.target.value)}
+          />
+        ) : (
+          <input
+            type="text"
+            value={value}
+            disabled={disabled}
+            placeholder={q.help_text || "Type your answer"}
+            className="w-full rounded-xl border border-[#D0D7E2] bg-[#F8FAFC] px-3.5 py-3 text-sm text-[#102A43] outline-none transition placeholder:text-[#A0AEC0] focus:border-[#1A56DB] focus:bg-white focus:ring-4 focus:ring-[#1A56DB]/15 disabled:opacity-60"
+            onChange={(e) => onChange(q.id, e.target.value)}
+          />
+        )
       ) : useDropdown ? (
         <select
           value={value}

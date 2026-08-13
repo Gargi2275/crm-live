@@ -240,7 +240,7 @@ export default function AdminBlogPage() {
       setPosts(
         await listAdminBlogPosts({
           search: search.trim() || undefined,
-          published: publishedFilter,
+          published: search.trim() ? "all" : publishedFilter,
         }),
       );
     } catch (error) {
@@ -258,7 +258,6 @@ export default function AdminBlogPage() {
   }, [loadPosts]);
 
   const clearFilters = useCallback(() => {
-    setSearch("");
     setPublishedFilter("all");
   }, []);
 

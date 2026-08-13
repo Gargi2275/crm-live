@@ -5,6 +5,7 @@ import { DndContext, DragOverlay, closestCorners, useSensor, useSensors, Pointer
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanCard } from "./KanbanCard";
 import { SlideOverPanel } from "./SlideOverPanel";
+import { ExpressBadge } from "@/components/console/ExpressBadge";
 import {
   KANBAN_COLUMNS,
   comparePipelinePriority,
@@ -53,7 +54,8 @@ export type KanbanQuickFilter =
   | "escalations"
   | "open_cases"
   | "documents_requested"
-  | "live_stages";
+  | "live_stages"
+  | "express";
 
 export type KanbanViewMode = "pipeline" | "list";
 
@@ -164,6 +166,17 @@ const resolveStage = (item: AdminApplication): PipelineCase["stage"] => {
 
   // Paid cases must never fall back to Payment Pending / New Lead (all services).
   if (paymentConfirmed) {
+    if (applicationStatus === "completed" || applicationStatus === "dispatched" || applicationStatus === "approved") {
+      return "DELIVERED";
+    }
+    if (applicationStatus === "submitted" || rawStage === "SUBMITTED" || rawStage === "CLOSED") {
+      if (rawStage === "CLOSED" || rawStage === "DELIVERED" || applicationStatus === "completed") {
+        return "DELIVERED";
+      }
+      if (applicationStatus === "submitted" || rawStage === "SUBMITTED") {
+        return "SUBMITTED";
+      }
+    }
     return stageAfterPayment(rawStage, hasDocuments);
   }
 
@@ -783,11 +796,14 @@ export function KanbanBoard({
           return stage === "DOCUMENTS_REQUIRED" || stage === "DOCUMENT_UPLOAD_PENDING";
         case "live_stages":
           return stage === "DOCUMENTS_REQUIRED" || stage === "PAYMENT_PENDING" || stage === "REVIEW_PENDING";
+        case "express":
+          return Boolean(item.isExpress);
         default:
           return true;
       }
     })();
 
+    if (q) return bySearch;
     return bySearch && byService && byStaff && byAgeing && byDateRange && byQuickFilter;
   });
 
@@ -810,6 +826,7 @@ export function KanbanBoard({
             title={column.title}
             color={column.color}
             count={columnCases.length}
+            expressCount={columnCases.filter((c) => c.isExpress).length}
             droppable={!staffView}
           >
             {columnLoading[column.id] && (
@@ -865,8 +882,16 @@ export function KanbanBoard({
               prioritizedCases.map((item) => {
                 const stageLabel = KANBAN_COLUMNS.find((column) => column.id === item.stage)?.title || item.stage;
                 return (
-                  <tr key={item.id} className="border-b border-[#EEF2F6] hover:bg-[#FAFCFF]">
-                    <td className="px-3 py-2 text-xs font-semibold text-[#102A43]">{item.id}</td>
+                  <tr
+                    key={item.id}
+                    className={`border-b border-[#EEF2F6] hover:bg-[#FAFCFF] ${item.isExpress ? "bg-[#FFF7ED]" : ""}`}
+                  >
+                    <td className="px-3 py-2 text-xs font-semibold text-[#102A43]">
+                      <span className="inline-flex items-center gap-1.5">
+                        {item.id}
+                        {item.isExpress ? <ExpressBadge compact /> : null}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 text-sm text-[#334E68]">{item.customer}</td>
                     <td className="px-3 py-2 text-xs text-[#486581]">{item.serviceType}</td>
                     <td className="px-3 py-2 text-xs">

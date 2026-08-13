@@ -14,9 +14,11 @@ import {
   XCircle,
   Clock3,
   FileWarning,
+  Zap,
 } from "lucide-react";
 import { listAdminApplications, type AdminApplication } from "@/lib/admin-auth";
-import { KANBAN_COLUMNS, normalizeServiceCategory, type KanbanStage } from "@/lib/kanban";
+import { KANBAN_COLUMNS, isExpressOrUrgentPlan, normalizeServiceCategory, type KanbanStage } from "@/lib/kanban";
+import { staffActionNeeded } from "@/lib/case-action";
 import toast from "react-hot-toast";
 
 const STAGE_LABELS: Record<KanbanStage, string> = Object.fromEntries(KANBAN_COLUMNS.map((column) => [column.id, column.title])) as Record<KanbanStage, string>;
@@ -83,7 +85,14 @@ const toServiceBucket = (application: AdminApplication): string => {
   return normalizeServiceCategory(application.service_type, application.case_type, application.service_name);
 };
 
-export function KanbanView({ embedded = false }: { embedded?: boolean }) {
+export function KanbanView({
+  embedded = false,
+  externalSearch,
+}: {
+  embedded?: boolean;
+  /** When embedded (e.g. My Cases → Pipeline), use the host page search. */
+  externalSearch?: string;
+}) {
   const [applications, setApplications] = useState<AdminApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeQuickFilter, setActiveQuickFilter] = useState<KanbanQuickFilter | null>(null);
@@ -96,6 +105,7 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
   const [dateTo, setDateTo] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<KanbanViewMode>("pipeline");
+  const activeSearch = externalSearch ?? searchQuery;
 
   const toggleQuickFilter = (key: KanbanQuickFilter) => {
     setActiveQuickFilter((prev) => (prev === key ? null : key));
@@ -139,6 +149,10 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
       return stage === "REVIEW_PENDING" || stage === "DOCUMENTS_REQUIRED" || getAgeDays(application.created_at) >= 7;
     }).length;
 
+    const expressCases = applications.filter((application) =>
+      isExpressOrUrgentPlan(application.fee_plan_code, application.is_express),
+    ).length;
+
     const stageRows = KANBAN_COLUMNS.map((column) => {
       const stageCases = applications.filter((application) => normalizeStage(application.stage || application.current_stage) === column.id);
       const averageAge = stageCases.length ? stageCases.reduce((sum, application) => sum + getAgeDays(application.created_at), 0) / stageCases.length : 0;
@@ -165,6 +179,7 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
       atRiskCases,
       breachedCases,
       escalations,
+      expressCases,
       stageRows,
       liveNotes,
     };
@@ -181,11 +196,19 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
       return appStatus === "reuploaded_pending_review";
     }).length;
 
-    const actionRequired = evisaApps.filter((application) => {
+    const actionApps = evisaApps.filter((application) => {
       const appStatus = String(application.application_status || "").toLowerCase();
       const stage = String(application.current_stage || "").toLowerCase();
       return appStatus === "correction_requested" || (stage === "correction_requested" && appStatus !== "reuploaded_pending_review");
-    }).length;
+    });
+    const actionRequired = actionApps.length;
+    const actionLabels = Array.from(
+      new Set(
+        actionApps
+          .map((application) => staffActionNeeded(application))
+          .filter((label): label is string => Boolean(label)),
+      ),
+    );
 
     const approved = evisaApps.filter((application) => {
       const appStatus = String(application.application_status || "").toLowerCase();
@@ -207,6 +230,7 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
       approved,
       rejected,
       actionRequired,
+      actionLabels,
       reuploadPendingReview,
     };
   }, [applications]);
@@ -230,27 +254,40 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
   const isDefaultDateRange = dateFrom === todayIso && dateTo === "";
 
   const activeFilterCount =
-    (searchQuery.trim() ? 1 : 0) +
+    (activeSearch.trim() ? 1 : 0) +
     (serviceFilter !== "All" ? 1 : 0) +
     (staffFilter !== "All" ? 1 : 0) +
     (ageingFilter !== "Any" ? 1 : 0) +
     (isDefaultDateRange ? 0 : 1);
 
   const clearFilters = () => {
-    setSearchQuery("");
     setServiceFilter("All");
     setStaffFilter("All");
     setAgeingFilter("Any");
     setDateFrom(todayLocalIso());
     setDateTo("");
+    setActiveQuickFilter(null);
+  };
+
+  const applySearch = (value: string) => {
+    if (value.trim()) {
+      setServiceFilter("All");
+      setStaffFilter("All");
+      setAgeingFilter("Any");
+      setDateFrom("");
+      setDateTo("");
+      setActiveQuickFilter(null);
+    }
+    setSearchQuery(value);
   };
 
   const searchedApplications = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = activeSearch.trim().toLowerCase();
     return applications.filter((application) => {
-      const dateIso = application.application_date || application.created_at;
-      if (!matchesDateRange(dateIso, dateFrom, dateTo)) return false;
-      if (!q) return true;
+      if (!q) {
+        const dateIso = application.application_date || application.created_at;
+        return matchesDateRange(dateIso, dateFrom, dateTo);
+      }
       const haystack = [
         application.reference_number,
         application.customer_name,
@@ -267,7 +304,7 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [applications, searchQuery, dateFrom, dateTo]);
+  }, [applications, activeSearch, dateFrom, dateTo]);
 
   const dateRangeLabel = (() => {
     if (isDefaultDateRange) return "From today";
@@ -283,11 +320,13 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
     title: "Pipeline",
     subtitle: isLoading
       ? "Loading…"
-      : `${searchedApplications.length} of ${applications.length} cases · ${dateRangeLabel}`,
+      : activeSearch.trim()
+        ? `${searchedApplications.length} of ${applications.length} cases matching search`
+        : `${searchedApplications.length} of ${applications.length} cases · ${dateRangeLabel}`,
     icon: KanbanSquare,
     search: {
       value: searchQuery,
-      onChange: setSearchQuery,
+      onChange: applySearch,
       placeholder: "Search reference, customer, staff…",
     },
     activeFilterCount,
@@ -482,6 +521,11 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
             <button onClick={() => toggleQuickFilter("evisa_action_required")} className={`rounded-[8px] border p-2 text-left ${activeQuickFilter === "evisa_action_required" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
               <p className="text-[10px] text-[#627D98]">Action required</p>
               <p className="mt-0.5 text-sm font-heading font-semibold text-[#102A43] inline-flex items-center gap-1.5"><FileWarning className="w-3.5 h-3.5 text-[#B45309]" />{evisaStats.actionRequired}</p>
+              {evisaStats.actionRequired > 0 ? (
+                <p className="mt-0.5 text-[10px] font-medium leading-snug text-[#B45309]">
+                  {evisaStats.actionLabels[0] || "Waiting on customer document re-upload"}
+                </p>
+              ) : null}
             </button>
             <button onClick={() => toggleQuickFilter("evisa_reupload_pending_review")} className={`rounded-[8px] border p-2 text-left ${activeQuickFilter === "evisa_reupload_pending_review" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
               <p className="text-[10px] text-[#627D98]">Reupload review</p>
@@ -512,10 +556,14 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
         )}
 
         {activeStatsTab === "volume" && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <button onClick={() => toggleQuickFilter("open_cases")} className={`rounded-[8px] border p-2 text-left ${activeQuickFilter === "open_cases" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
               <p className="text-[10px] text-[#627D98]">Open cases</p>
               <p className="mt-0.5 text-sm font-heading font-semibold text-[#102A43]">{liveStats.openCases}</p>
+            </button>
+            <button onClick={() => toggleQuickFilter("express")} className={`rounded-[8px] border p-2 text-left ${activeQuickFilter === "express" ? "border-[#C2410C] bg-[#FFF7ED]" : "border-[#D9E1EA]"}`}>
+              <p className="text-[10px] text-[#627D98]">Express</p>
+              <p className="mt-0.5 text-sm font-heading font-semibold text-[#C2410C] inline-flex items-center gap-1.5"><Zap className="w-3.5 h-3.5" fill="currentColor" />{liveStats.expressCases}</p>
             </button>
             <button onClick={() => toggleQuickFilter("documents_requested")} className={`rounded-[8px] border p-2 text-left ${activeQuickFilter === "documents_requested" ? "border-[#0B69B7] bg-[#EFF7FF]" : "border-[#D9E1EA]"}`}>
               <p className="text-[10px] text-[#627D98]">Docs requested</p>
@@ -546,7 +594,7 @@ export function KanbanView({ embedded = false }: { embedded?: boolean }) {
           ageingFilter={ageingFilter}
           dateFrom={dateFrom}
           dateTo={dateTo}
-          searchQuery={searchQuery}
+          searchQuery={activeSearch}
           viewMode={viewMode}
         />
       </div>

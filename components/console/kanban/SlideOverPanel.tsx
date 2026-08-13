@@ -1971,8 +1971,8 @@ export function SlideOverPanel({
             {(caseData?.isExpress || details?.is_express || isExpressOrUrgentPlan(details?.fee_plan_code)) ? (
               <>
                 <span className="text-[#D9E1EA]">·</span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#FFF7ED] text-[#C2410C] border border-[#C2410C]/30 shrink-0">
-                  Express / Urgent
+                <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-[#FFF7ED] text-[#C2410C] border border-[#C2410C]/40 shrink-0 uppercase tracking-wide">
+                  Express
                 </span>
               </>
             ) : null}
@@ -2031,15 +2031,34 @@ export function SlideOverPanel({
                           ["Reference", details?.reference_number || caseData.id],
                           ["Customer", details?.customer_name || caseData.customer],
                           ["Service", details?.service_name || details?.service_type || caseData.serviceType],
+                          [
+                            "Fee plan",
+                            caseData?.isExpress || details?.is_express || isExpressOrUrgentPlan(details?.fee_plan_code)
+                              ? "Express"
+                              : "Standard",
+                          ],
                           ["Stage", processStatusLabel],
                           ["Payment status", paymentStatusLabel],
                           ["SLA timer", caseData.slaTimer],
                           ["Assigned staff", caseData.assignedTo || "Unassigned"],
                           ["Created date", details?.created_at ? new Date(details.created_at).toLocaleString() : "-"],
                         ].map(([label, value]) => (
-                          <div key={label} className="rounded-lg border border-[#E5EAF0] bg-[#F8FAFC] p-2.5">
+                          <div
+                            key={label}
+                            className={`rounded-lg border p-2.5 ${
+                              label === "Fee plan" && value === "Express"
+                                ? "border-[#C2410C]/40 bg-[#FFF7ED]"
+                                : "border-[#E5EAF0] bg-[#F8FAFC]"
+                            }`}
+                          >
                             <p className="text-[10px] font-semibold text-[#9AA5B4] uppercase tracking-wide">{label}</p>
-                            <p className="text-sm text-[#102A43] font-medium mt-0.5">{value}</p>
+                            <p
+                              className={`text-sm font-medium mt-0.5 ${
+                                label === "Fee plan" && value === "Express" ? "text-[#C2410C] font-bold" : "text-[#102A43]"
+                              }`}
+                            >
+                              {value}
+                            </p>
                           </div>
                         ))}
                       </div>

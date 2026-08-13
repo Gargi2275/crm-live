@@ -80,9 +80,6 @@ export function buildHubApplyHref(opts: {
 }): string {
   const serviceType = (opts.serviceType || "").trim().toLowerCase();
 
-  if (serviceType.startsWith("evisa")) {
-    return "/indian-e-visa";
-  }
   if (serviceType === "express") {
     return "/services";
   }

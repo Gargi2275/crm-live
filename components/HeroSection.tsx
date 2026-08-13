@@ -33,7 +33,6 @@ const BLURB_BY_CATEGORY: Record<string, string> = {
 };
 
 function startHrefForService(service: CatalogService): string {
-  if (service.serviceType.startsWith("evisa")) return "/indian-e-visa";
   if (service.serviceType === "document_audit") return "/services";
   return `/dashboard/document-audit?start=1&service=${encodeURIComponent(service.serviceType)}`;
 }

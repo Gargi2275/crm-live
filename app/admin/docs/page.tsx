@@ -74,11 +74,11 @@ export default function AdminDocsPage() {
     setLoadingRequests(true);
     try {
       const payload = await listAdminDocumentDeletionRequests({
-        status: statusFilter,
-        service: serviceFilter.trim() || undefined,
+        status: search.trim() ? "all" : statusFilter,
+        service: search.trim() ? undefined : serviceFilter.trim() || undefined,
         q: search.trim() || undefined,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
+        date_from: search.trim() ? undefined : dateFrom || undefined,
+        date_to: search.trim() ? undefined : dateTo || undefined,
         limit: 300,
       });
       setRequests(payload.requests);
@@ -123,7 +123,6 @@ export default function AdminDocsPage() {
   const clearFilters = useCallback(() => {
     setStatusFilter("all");
     setServiceFilter("");
-    setSearch("");
     setDateFrom("");
     setDateTo("");
   }, []);

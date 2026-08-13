@@ -291,6 +291,7 @@ export default function EasyFlyBookingsPage() {
         !q ||
         [booking.paxName, booking.pnr, booking.invoiceNumber, booking.srNo, booking.supplier, booking.airlineCode]
           .some((value) => String(value || "").toLowerCase().includes(q));
+      if (q) return matchesSearch;
 
       const matchesSupplier = supplierFilter === "all" || booking.supplier === supplierFilter;
       const matchesAirline = airlineFilter === "all" || booking.airlineCode === airlineFilter;
@@ -328,9 +329,13 @@ export default function EasyFlyBookingsPage() {
   ]);
 
   const filteredRows = useMemo(() => {
-    const rows = chromeFilteredRows.filter((booking) => matchesKpiFilter(booking, kpiFilter));
+    const rows = search.trim()
+      ? chromeFilteredRows
+      : chromeFilteredRows.filter((booking) => matchesKpiFilter(booking, kpiFilter));
 
-    const preferPending = searchParams.get("defaultTab") === "pending" || kpiFilter === "client_pending";
+    const preferPending =
+      !search.trim() &&
+      (searchParams.get("defaultTab") === "pending" || kpiFilter === "client_pending");
     if (!preferPending) return rows;
 
     return [...rows].sort((a, b) => {
@@ -343,7 +348,7 @@ export default function EasyFlyBookingsPage() {
       if (aHasPending && bHasPending) return pendingB - pendingA;
       return 0;
     });
-  }, [chromeFilteredRows, kpiFilter, searchParams]);
+  }, [chromeFilteredRows, kpiFilter, search, searchParams]);
 
   const stats = useMemo(() => {
     const totalBookings = chromeFilteredRows.length;
@@ -402,6 +407,7 @@ export default function EasyFlyBookingsPage() {
     setBookedFrom("");
     setBookedTo("");
     setPaymentChannelFilter("all");
+    setKpiFilter("all");
   }, []);
 
   const handleExportCsv = useCallback(() => {

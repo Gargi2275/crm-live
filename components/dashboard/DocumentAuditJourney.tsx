@@ -10,6 +10,7 @@ import { InlineSmartQuestions } from "@/components/checkout/InlineSmartQuestions
 import { StartOrderPanel, type StartOrderApplicant, type StartOrderCartEntry } from "@/components/dashboard/StartOrderPanel";
 import { sanitizeMobileDigits } from "@/components/checkout/CheckoutShell";
 import toast from "react-hot-toast";
+import { customerActionNeeded } from "@/lib/case-action";
 import { useAuth } from "@/context/AuthContext";
 import {
   authenticatedFetch,
@@ -69,7 +70,7 @@ import {
   type JourneyQuestion,
 } from "@/lib/questionnaire";
 import { countryStateAnswerKey, fetchStatesForCountry } from "@/lib/country-states";
-import { clearStripeReturnParams, getStripeCheckoutUrl, readStripeReturnParams, redirectToStripeCheckout } from "@/lib/stripe-checkout";
+import { clearStripeReturnParams, getStripeCheckoutUrl, readStripeReturnParams, readStripeCanceledParam, redirectToStripeCheckout } from "@/lib/stripe-checkout";
 import { useRouter } from "next/navigation";
 /** Known journey keys plus live catalog types (e.g. e-oci, oci-link-passport). */
 type ServiceId =
@@ -321,6 +322,17 @@ const isApostilleService = (service: ServiceId | null | undefined): boolean => {
   return key === "apostille" || key.startsWith("apostille_");
 };
 
+const feePlanIsExpress = (planCode: string | null | undefined): boolean => {
+  const code = String(planCode || "").trim().toLowerCase();
+  return (
+    code === "express" ||
+    code.startsWith("express") ||
+    code.endsWith("__express") ||
+    code === "urgent" ||
+    code.startsWith("urgent")
+  );
+};
+
 const resolveDocuments = async (service: ServiceId | null, answers: Answers): Promise<DocumentItem[]> => {
   if (!service) return [];
   const backendType = toBackendServiceType(service);
@@ -383,8 +395,14 @@ const labelForService = (service?: ServiceId | null, fallback?: string): string 
 const mapCatalogServiceType = (value?: string | null): ServiceId | null => {
   if (!value) return null;
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (normalized.startsWith("evisa") || normalized === "document_audit" || normalized === "morocco_turkey_evisa") {
+  if (normalized === "document_audit") {
     return null;
+  }
+  // Allow e-Visa catalog types so Start Order can preselect them (same as OCI/passport).
+  if (normalized.startsWith("evisa") || normalized === "morocco_turkey_evisa") {
+    // Category-only "evisa" opens the full picker (no single product to preselect).
+    if (normalized === "evisa") return null;
+    return normalized.replace(/_/g, "-");
   }
   if (normalized.includes("passport") && normalized.includes("renewal")) return "passport-renewal";
   // Exact apostille only — do not collapse apostille_birth etc. (navbar must select that row).
@@ -1291,6 +1309,28 @@ export function DocumentAuditJourney({ userEmail, applicationId: applicationIdPr
   const serviceFeeForMath = typeof serviceFee === "number" ? serviceFee : 0;
   const addOnTotal = addOns.reduce((sum, id) => sum + (ADD_ONS.find((item) => item.id === id)?.fee || 0), 0);
   const finalAmount = Math.max(serviceFeeForMath - auditFee + addOnTotal, 0);
+  const summaryCatalogMatch = (() => {
+    if (!selectedService) return null;
+    const backendType = toBackendServiceType(selectedService) || selectedService.replace(/-/g, "_");
+    return (
+      catalogServices.find(
+        (row) => String(row.serviceType || "").toLowerCase().replace(/[\s-]+/g, "_") === backendType,
+      ) || null
+    );
+  })();
+  const summaryExpressPlan =
+    (summaryCatalogMatch?.plans || []).find((plan) => plan.planCode === "express" && plan.fee > 0) || null;
+  const summaryHasExpress = Boolean(summaryExpressPlan);
+  const activeSummaryPlanCode = String(
+    selectedFeePlanCode ||
+      cartFeePlanByRef[String(referenceNumber || applicationRecord?.reference_number || "").trim()] ||
+      preferredFeePlanRef.current ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  const expressSelectedOnSummary = feePlanIsExpress(activeSummaryPlanCode);
+  const expressFeeForSummary = summaryExpressPlan?.fee ?? serviceFeeForMath;
 
   const normalizePayload = <T,>(response: unknown): T => {
     if (response && typeof response === "object" && "data" in (response as Record<string, unknown>)) {
@@ -1792,6 +1832,25 @@ useEffect(() => {
 
 useEffect(() => {
   if (typeof window === "undefined") return;
+
+  // User abandoned Stripe Checkout (back / cancel) — keep the case open, don't show "not found".
+  if (readStripeCanceledParam()) {
+    const ref =
+      String(
+        readStripeReturnParams().reference ||
+          resumeReference ||
+          referenceNumber ||
+          applicationRecord?.reference_number ||
+          "",
+      ).trim();
+    clearStripeReturnParams();
+    toast("Payment not completed. Your application is still here — you can pay when ready.");
+    if (ref) {
+      setReferenceNumber(ref);
+      router.replace(`/dashboard/document-audit?reference=${encodeURIComponent(ref)}&resume=1`);
+    }
+    return;
+  }
 
   // Legacy return from /dashboard/payment after verify — continue to document upload.
   try {
@@ -3020,6 +3079,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
     service: ServiceId;
     serviceOptionId: string;
     catalogId?: number | string | null;
+    preferExpress?: boolean;
   };
 
   const optionById = new Map<
@@ -3063,7 +3123,13 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         );
         catalogId = match?.id ?? null;
       }
-      lines.push({ applicant: entry.applicant, service, serviceOptionId, catalogId });
+      lines.push({
+        applicant: entry.applicant,
+        service,
+        serviceOptionId,
+        catalogId,
+        preferExpress: Boolean(entry.preferExpress),
+      });
     }
   }
 
@@ -3085,6 +3151,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
     setApiLoading(true);
 
     const createdApps: OrderCartApp[] = [];
+    const feePlanByRef: Record<string, string> = {};
 
     for (const line of lines) {
       const payload = await createApplication(mapApplicationServiceType(line.service), {
@@ -3111,6 +3178,9 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         referenceNumber: referenceNumberCreated,
         docsComplete: false,
       });
+      if (line.preferExpress) {
+        feePlanByRef[referenceNumberCreated] = "express";
+      }
     }
 
     if (typeof window !== "undefined") {
@@ -3126,6 +3196,21 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
     setOrderCartApps(createdApps);
     setOrderCartIndex(0);
     setCartSkipAssessmentAccepted(false);
+    if (Object.keys(feePlanByRef).length) {
+      setCartFeePlanByRef(feePlanByRef);
+      // Prefer Express when the first active app asked for it.
+      const firstExpress = createdApps.find((app) => feePlanByRef[app.referenceNumber] === "express");
+      if (firstExpress) {
+        preferredFeePlanRef.current = "express";
+        setSelectedFeePlanCode("express");
+      }
+    } else if (String(preferredFeePlanRef.current || "").toLowerCase() === "express") {
+      const expressByRef: Record<string, string> = {};
+      for (const app of createdApps) {
+        expressByRef[app.referenceNumber] = "express";
+      }
+      setCartFeePlanByRef(expressByRef);
+    }
 
     if (createdApps.length > 1) {
       const canCombine = createdApps.every((app) => !serviceNeedsAssessment(app.service));
@@ -3275,13 +3360,15 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         anyNeedsAssessmentSkip = true;
       }
       const planCode = String(record.fee_plan_code || preferredPlan || "standard").trim() || "standard";
+      const resolvedPlan =
+        feePlanIsExpress(preferredPlan) && !feePlanIsExpress(planCode) ? preferredPlan : planCode;
       const due = Number(record.amount_due_pence || record.service_total_pence || 0) / 100;
-      const expressTag = planCode.toLowerCase() === "express" ? " · Express" : "";
+      const expressTag = feePlanIsExpress(resolvedPlan) ? " · Express" : "";
       lines.push({
         label: `${app.applicantName || "Applicant"} — ${labelForService(app.service)}${expressTag}`,
         amount: due,
         reference: app.referenceNumber,
-        planCode,
+        planCode: resolvedPlan,
       });
       total += due;
     }
@@ -3332,8 +3419,6 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       const nextPlans: Record<string, string> = { ...cartFeePlanByRef };
       for (const app of orderCartApps) {
         const plans = getCatalogPlansForService(app.service);
-        const hasPlan = plans.some((plan) => plan.planCode === planCode);
-        if (!hasPlan && planCode === "express") continue;
         const resolved =
           planCode === "express"
             ? "express"
@@ -3600,7 +3685,10 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         setApiLoading(true);
         await completeQuestionnaire(nextAnswers);
       } catch (error) {
-        setChecklistGenerationError(error instanceof Error ? error.message : "Failed to generate checklist.");
+        const message =
+          error instanceof Error ? error.message : "Failed to generate checklist.";
+        setChecklistGenerationError(message);
+        toast.error(message);
       } finally {
         setApiLoading(false);
       }
@@ -3688,6 +3776,68 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       redirectToStripeCheckout(checkoutUrl);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Audit payment failed.");
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  const setSummaryFeePlan = async (planCode: string) => {
+    const code = String(planCode || "").trim().toLowerCase();
+    if (!code) return;
+    const refNum = String(referenceNumber || applicationRecord?.reference_number || "").trim();
+    preferredFeePlanRef.current = code;
+    setSelectedFeePlanCode(code);
+    if (refNum) {
+      setCartFeePlanByRef((current) => ({ ...current, [refNum]: code }));
+      try {
+        await selectFullPaymentPlan(refNum, code);
+        await syncApplicationFromBackend(refNum, { skipStageSync: true }).catch(() => null);
+      } catch {
+        // Plan apply can wait until checkout; keep UI selection.
+      }
+    }
+  };
+
+  /** Express + assessment: charge full Express fee now (unlock via skip), not assessment-only. */
+  const payExpressFullUpfront = async () => {
+    if (!paymentConsentsAccepted) {
+      toast.error("Please accept the payment consents before continuing.");
+      return;
+    }
+    const app = await syncApplicationFromBackend(referenceNumber).catch(() => null);
+    const refNum = app?.reference_number || referenceNumber;
+    if (!refNum) {
+      toast.error("Application reference not found.");
+      return;
+    }
+    try {
+      setApiLoading(true);
+      preferredFeePlanRef.current = "express";
+      setSelectedFeePlanCode("express");
+      setCartFeePlanByRef((current) => ({ ...current, [refNum]: "express" }));
+      await selectFullPaymentPlan(refNum, "express");
+      await skipAuditWithDisclaimer(
+        refNum,
+        supportNotes || "Express service — full payment upfront. Document upload continues after payment.",
+      );
+      await syncApplicationFromBackend(refNum);
+      const raw = await createFullPaymentOrder(refNum, "express");
+      const order = normalizePayload<{
+        checkout_url?: string;
+        order_id?: string;
+        stripe_session_id?: string;
+        currency?: string;
+        key_id?: string;
+      }>(raw);
+      const checkoutUrl = getStripeCheckoutUrl(order);
+      if (!checkoutUrl) {
+        throw new Error("Stripe checkout URL is missing. Please try again or contact support.");
+      }
+      redirectToStripeCheckout(checkoutUrl);
+      setProcessingStep(1);
+      setBannerMessage("Express payment — redirecting to secure checkout…");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Express payment failed.");
     } finally {
       setApiLoading(false);
     }
@@ -4723,7 +4873,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
         setSelectedService(normalized);
       }
     }}
-    onContinue={(cart) => {
+    onContinue={(cart, opts) => {
       if (!primaryApplicant.fullName.trim() || !primaryApplicant.email.trim()) {
         toast.error("Please enter applicant name and email.");
         return;
@@ -4739,6 +4889,12 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
       if (emptyServices) {
         toast.error("Each applicant needs at least one service selected.");
         return;
+      }
+      if (opts?.preferExpress) {
+        preferredFeePlanRef.current = "express";
+        setSelectedFeePlanCode("express");
+      } else {
+        preferredFeePlanRef.current = "";
       }
       // One application per applicant × service; walk Q&A + docs per app, pay once at end.
       void handleOrderCartContinue(cart);
@@ -4801,7 +4957,7 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
               isLoading={apiLoading}
               className="w-full sm:w-auto"
               onClick={() => {
-                void (async () => {
+                  void (async () => {
                   const visible = activeQuestions.filter((q) => isQuestionVisible(q, answers));
                   for (const q of visible) {
                     if (q.is_required === false) continue;
@@ -4816,7 +4972,19 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                       return;
                     }
                   }
-                  void completeQuestionnaire(answers);
+                  try {
+                    setApiLoading(true);
+                    setChecklistGenerationError(null);
+                    setLastChecklistAnswers(answers);
+                    await completeQuestionnaire(answers);
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : "Failed to generate checklist.";
+                    setChecklistGenerationError(message);
+                    toast.error(message);
+                  } finally {
+                    setApiLoading(false);
+                  }
                 })();
               }}
             >
@@ -5170,15 +5338,60 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
 
       {stage === "summary" && (
         <div className="rounded-3xl border border-border bg-white p-6 sm:p-7 shadow-sm">
-          <h3 className="text-2xl font-heading font-bold text-primary">{assessmentOffered ? "Assessment Fee Payment" : "Payment"}</h3>
+          <h3 className="text-2xl font-heading font-bold text-primary">
+            {expressSelectedOnSummary
+              ? "Express Payment"
+              : assessmentOffered
+                ? "Assessment Fee Payment"
+                : "Payment"}
+          </h3>
           <p className="mt-2 text-textMuted">
-            {assessmentOffered
+            {expressSelectedOnSummary
+              ? "Express selected — pay the full service fee now, then upload your documents."
+              : assessmentOffered
                 ? `Pay the assessment fee first (or skip), then upload your documents. The assessment fee is fully adjusted against your final service fee when you proceed within ${AUDIT_CREDIT_VALIDITY_DAYS} days.`
                 : "Pay first, then upload your documents to continue."}
           </p>
 
-          <div className={`mt-6 grid items-stretch gap-4 ${assessmentOffered ? "lg:grid-cols-3" : "lg:grid-cols-1"}`}>
-            {/* 1 — Uploaded documents */}
+          {assessmentOffered && summaryHasExpress ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={apiLoading || feePlanUpdating}
+                onClick={() => void setSummaryFeePlan(
+                  summaryCatalogMatch?.plans?.find((p) => p.planCode !== "express" && p.isDefault)?.planCode ||
+                    summaryCatalogMatch?.plans?.find((p) => p.planCode !== "express")?.planCode ||
+                    "standard",
+                )}
+                className={`rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-60 ${
+                  !expressSelectedOnSummary
+                    ? "border-[#1A56DB] bg-[#EFF6FF] text-[#1A56DB]"
+                    : "border-[#E1E7EF] bg-white text-[#627D98]"
+                }`}
+              >
+                Standard · assessment £{auditFee}
+              </button>
+              <button
+                type="button"
+                disabled={apiLoading || feePlanUpdating}
+                onClick={() => void setSummaryFeePlan("express")}
+                className={`rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-60 ${
+                  expressSelectedOnSummary
+                    ? "border-[#c2410c] bg-[#fff7ed] text-[#c2410c]"
+                    : "border-[#E1E7EF] bg-white text-[#627D98]"
+                }`}
+              >
+                Express · pay £{expressFeeForSummary.toFixed(0)} in full
+              </button>
+            </div>
+          ) : null}
+
+          <div
+            className={`mt-6 grid items-stretch gap-4 ${
+              assessmentOffered && !expressSelectedOnSummary ? "lg:grid-cols-3" : "lg:grid-cols-2"
+            }`}
+          >
+            {/* 1 — Required documents */}
             {(() => {
               const cardId = "docs" as const;
               const open = assessmentCardExpanded === cardId || assessmentCardHovered === cardId;
@@ -5202,9 +5415,10 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                   }`}
                 >
                   <div className="shrink-0">
-                    <h4 className="font-semibold text-primary">Uploaded documents</h4>
+                    <h4 className="font-semibold text-primary">Required documents</h4>
                     <p className="mt-0.5 text-xs text-slate-500">
                       {uploadedDocs.length} of {uploadChecklist.length} uploaded
+                      {uploadChecklist.length === 0 ? " · checklist loads after questionnaire" : ""}
                     </p>
                   </div>
                   <div
@@ -5213,15 +5427,31 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                     }`}
                   >
                     <ul className="list-disc space-y-2 pl-5 text-sm text-slate-700">
-                      {uploadedDocs.length > 0 ? (
-                        uploadedDocs.map((doc) => (
-                          <li key={doc.id}>
-                            <span className="font-medium text-slate-800">{doc.title}</span>
-                            <span className="ml-2 text-[11px] font-semibold text-emerald-700">Uploaded</span>
-                          </li>
-                        ))
+                      {uploadChecklist.length > 0 ? (
+                        uploadChecklist.map((doc) => {
+                          const uploaded = isDocUploaded(doc.id);
+                          return (
+                            <li key={doc.id}>
+                              <span className="font-medium text-slate-800">{doc.title}</span>
+                              {doc.required ? (
+                                <span className="ml-1 text-[10px] font-semibold uppercase text-slate-400">Required</span>
+                              ) : (
+                                <span className="ml-1 text-[10px] font-semibold uppercase text-slate-400">Optional</span>
+                              )}
+                              <span
+                                className={`ml-2 text-[11px] font-semibold ${
+                                  uploaded ? "text-emerald-700" : "text-amber-700"
+                                }`}
+                              >
+                                {uploaded ? "Uploaded" : "Pending"}
+                              </span>
+                            </li>
+                          );
+                        })
                       ) : (
-                        <li className="text-slate-500">No documents uploaded yet.</li>
+                        <li className="text-slate-500">
+                          Document list will appear once your checklist is ready. You upload after payment.
+                        </li>
                       )}
                     </ul>
                   </div>
@@ -5232,7 +5462,75 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
               );
             })()}
 
-            {assessmentOffered ? (
+            {assessmentOffered && expressSelectedOnSummary ? (
+              (() => {
+                const cardId = "take" as const;
+                const open = assessmentCardExpanded === cardId || assessmentCardHovered === cardId;
+                return (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setAssessmentCardExpanded(cardId)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setAssessmentCardExpanded(cardId);
+                      }
+                    }}
+                    onMouseEnter={() => setAssessmentCardHovered(cardId)}
+                    onMouseLeave={() => setAssessmentCardHovered(null)}
+                    className={`flex h-full min-h-[320px] cursor-pointer flex-col rounded-2xl border bg-[#fff7ed] p-5 transition-all duration-300 ${
+                      open
+                        ? "border-[#c2410c] ring-2 ring-[#fdba74]/70 shadow-[0_12px_28px_rgba(194,65,12,0.12)]"
+                        : "border-[#fdba74] ring-1 ring-[#fed7aa]"
+                    }`}
+                  >
+                    <div className="shrink-0">
+                      <h4 className="font-semibold text-[#9a3412]">Express — pay in full</h4>
+                      <p className="mt-0.5 text-xs text-[#c2410c]/90">Priority processing · one payment now</p>
+                    </div>
+                    <div
+                      className={`mt-3 min-h-0 flex-1 space-y-3 transition-all duration-300 ${
+                        open ? "max-h-[520px] overflow-y-auto" : "max-h-[150px] overflow-hidden"
+                      }`}
+                    >
+                      <ul className="list-disc space-y-1.5 pl-5 text-sm text-[#7c2d12]">
+                        <li>Express skips the separate assessment fee step — you pay the full Express fee now.</li>
+                        <li>Upload documents after payment; we still review them as part of processing.</li>
+                        <li>Switch back to Standard if you prefer to pay the £{auditFee} assessment first.</li>
+                      </ul>
+                      <div className="rounded-xl border border-[#fdba74] bg-white p-3 text-[#9a3412]">
+                        <p className="text-xs font-semibold">Fee breakdown</p>
+                        <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
+                          <li>
+                            Express service fee: <strong>£{expressFeeForSummary.toFixed(2)}</strong>
+                          </li>
+                          <li>
+                            Assessment fee now: <strong>£0</strong> (included in Express path)
+                          </li>
+                          <li>
+                            Total due now: <strong>£{expressFeeForSummary.toFixed(2)}</strong>
+                          </li>
+                        </ul>
+                      </div>
+                      <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        <ConsentCheckboxes mode="payment" onAcceptanceChange={setPaymentConsentsAccepted} />
+                      </div>
+                    </div>
+                    <div className="mt-4 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        className="w-full bg-[#c2410c] hover:bg-[#9a3412]"
+                        isLoading={apiLoading}
+                        onClick={() => void payExpressFullUpfront()}
+                        disabled={!paymentConsentsAccepted}
+                      >
+                        Pay Express £{expressFeeForSummary.toFixed(0)} in full
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : assessmentOffered ? (
               <>
                 {/* 2 — Take Assessment */}
                 {(() => {
@@ -5835,8 +6133,8 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                         const standardPlan =
                           plans.find((plan) => plan.planCode !== "express" && plan.isDefault) ||
                           plans.find((plan) => plan.planCode !== "express");
-                        const activePlan = String(cartFeePlanByRef[app.referenceNumber] || "standard").toLowerCase();
-                        const isExpress = activePlan === "express";
+                        const activePlan = String(cartFeePlanByRef[app.referenceNumber] || "standard");
+                        const isExpress = feePlanIsExpress(activePlan);
                         const amount =
                           paymentSummary.addons.find((addon) => addon.label.includes(app.referenceNumber))?.amount ??
                           null;
@@ -5851,7 +6149,9 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                                   {app.applicantName || "Applicant"} — {labelForService(app.service)}
                                   {isExpress ? (
                                     <span className="ml-1.5 text-[11px] font-semibold text-[#c2410c]">· Express</span>
-                                  ) : null}
+                                  ) : (
+                                    <span className="ml-1.5 text-[11px] font-semibold text-[#627D98]">· Standard</span>
+                                  )}
                                 </p>
                                 <p className="text-[11px] text-[#829AB1]">{app.referenceNumber}</p>
                               </div>
@@ -5859,41 +6159,42 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                                 {amount == null ? "—" : `£${amount.toFixed(2)}`}
                               </strong>
                             </div>
-                            {expressPlan ? (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  disabled={apiLoading || feePlanUpdating}
-                                  onClick={() =>
-                                    void applyCartAppFeePlan(
-                                      app.referenceNumber,
-                                      standardPlan?.planCode || "standard",
-                                    )
-                                  }
-                                  className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60 ${
-                                    !isExpress
-                                      ? "border-[#1A56DB] bg-[#EFF6FF] text-[#1A56DB]"
-                                      : "border-[#E1E7EF] bg-white text-[#627D98]"
-                                  }`}
-                                >
-                                  Standard{standardPlan ? ` £${standardPlan.fee.toFixed(0)}` : ""}
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={apiLoading || feePlanUpdating}
-                                  onClick={() => void applyCartAppFeePlan(app.referenceNumber, "express")}
-                                  className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60 ${
-                                    isExpress
-                                      ? "border-[#c2410c] bg-[#fff7ed] text-[#c2410c]"
-                                      : "border-[#E1E7EF] bg-white text-[#627D98]"
-                                  }`}
-                                >
-                                  Express £{expressPlan.fee.toFixed(0)}
-                                </button>
-                              </div>
-                            ) : (
-                              <p className="mt-1 text-[11px] text-[#829AB1]">Express not available for this service.</p>
-                            )}
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={apiLoading || feePlanUpdating}
+                                onClick={() =>
+                                  void applyCartAppFeePlan(
+                                    app.referenceNumber,
+                                    standardPlan?.planCode || "standard",
+                                  )
+                                }
+                                className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60 ${
+                                  !isExpress
+                                    ? "border-[#1A56DB] bg-[#EFF6FF] text-[#1A56DB]"
+                                    : "border-[#E1E7EF] bg-white text-[#627D98]"
+                                }`}
+                              >
+                                Standard{standardPlan ? ` £${standardPlan.fee.toFixed(0)}` : ""}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={apiLoading || feePlanUpdating}
+                                onClick={() => void applyCartAppFeePlan(app.referenceNumber, "express")}
+                                className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60 ${
+                                  isExpress
+                                    ? "border-[#c2410c] bg-[#fff7ed] text-[#c2410c]"
+                                    : "border-[#E1E7EF] bg-white text-[#627D98]"
+                                }`}
+                              >
+                                Express{expressPlan ? ` £${expressPlan.fee.toFixed(0)}` : ""}
+                              </button>
+                            </div>
+                            {!expressPlan ? (
+                              <p className="mt-1 text-[11px] text-[#829AB1]">
+                                Express marks this application as urgent priority. Fee stays the same for this service.
+                              </p>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -6115,7 +6416,14 @@ if (backendStage && backendStage !== "service" && backendStage !== "questions") 
                 return "Submitted to embassy / VFS";
               }
               if (actionNeeded) {
-                return "Action needed";
+                return (
+                  customerActionNeeded({
+                    application_status: applicationRecord?.application_status,
+                    current_stage: applicationRecord?.current_stage,
+                    quote_status: applicationRecord?.quote_status,
+                    pending_misc_charge_count: pendingMiscCharges.length,
+                  }) || "Action needed"
+                );
               }
               if (
                 ["in_preparation", "docs_received", "paid", "audit_pending"].includes(currentStageKey) ||

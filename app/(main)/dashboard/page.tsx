@@ -9,6 +9,7 @@ import { authenticatedFetch } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
 import { PageLoader } from "@/components/ui/PageLoader";
 import { ConfirmDialog } from "@/components/console/ConfirmDialog";
+import { customerActionNeeded } from "@/lib/case-action";
 
 type DashboardApplication = {
   id: number;
@@ -219,7 +220,9 @@ function progressStatusLabel(app: DashboardApplication): string {
   const status = String(app.application_status || "").toLowerCase();
   const stage = String(app.current_stage || "").toLowerCase();
 
-  if (["correction_requested", "reuploaded_pending_review"].includes(status)) return "Action needed";
+  if (["correction_requested", "reuploaded_pending_review"].includes(status)) {
+    return customerActionNeeded(app) || "Action needed";
+  }
   if (status.includes("reject")) return "Rejected";
   if (status.includes("closed") || status.includes("cancel")) return "Closed";
 
@@ -267,7 +270,10 @@ function statusTone(status: string) {
     key.includes("pending") ||
     key.includes("review") ||
     key.includes("upload") ||
-    key.includes("correction")
+    key.includes("correction") ||
+    key.includes("pay") ||
+    key.includes("charge") ||
+    key.includes("document")
   ) {
     return "bg-amber-50 text-amber-800 border-amber-100";
   }
@@ -622,8 +628,9 @@ export default function DashboardPage() {
               const applicantName = resolveApplicantName(app);
               const initials = applicantInitials(applicantName);
               const progressLabel = progressStatusLabel(app);
+              const actionLabel = customerActionNeeded(app);
               const showPaidBadge = isApplicationPaid(app);
-              const showActionTag = needsAction && progressLabel !== "Action needed";
+              const showActionTag = Boolean(actionLabel) && progressLabel !== actionLabel;
 
               return (
                 <article
@@ -657,7 +664,7 @@ export default function DashboardPage() {
                       ) : null}
                       {showActionTag ? (
                         <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                          Action needed
+                          {actionLabel}
                         </span>
                       ) : null}
                       <span

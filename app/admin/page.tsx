@@ -72,6 +72,8 @@ import { useRouter } from "next/navigation";
 import { SlideOverPanel } from "@/components/console/kanban/SlideOverPanel";
 import { useAdminCaseSlideOver } from "@/components/console/kanban/useAdminCaseSlideOver";
 import { subscribeOpenAdminCase } from "@/lib/admin-open-case";
+import { compareExpressFirst, isExpressOrUrgentPlan, taskIsExpress } from "@/lib/kanban";
+import { ExpressBadge } from "@/components/console/ExpressBadge";
 
 type DashboardKpiKey =
   | "all"
@@ -658,12 +660,18 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
   const filteredApplications = useMemo(() => {
     if (activeKpi === "all") return [];
     const rows = applications.filter((app) => matchesDashboardKpi(app, activeKpi));
-    if (activeKpi === "pending") {
-      return [...rows].sort(
-        (a, b) => getPendingPaymentDetail(b).amountPence - getPendingPaymentDetail(a).amountPence,
+    return [...rows].sort((a, b) => {
+      const aExpress = isExpressOrUrgentPlan(a.fee_plan_code, a.is_express) ? 1 : 0;
+      const bExpress = isExpressOrUrgentPlan(b.fee_plan_code, b.is_express) ? 1 : 0;
+      if (aExpress !== bExpress) return bExpress - aExpress;
+      if (activeKpi === "pending") {
+        return getPendingPaymentDetail(b).amountPence - getPendingPaymentDetail(a).amountPence;
+      }
+      return (
+        new Date(b.created_at || b.application_date || 0).getTime() -
+        new Date(a.created_at || a.application_date || 0).getTime()
       );
-    }
-    return rows;
+    });
   }, [activeKpi, applications]);
 
   const pendingByService = useMemo(() => {
@@ -747,11 +755,15 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
         )
       : applications;
     return [...rows]
-      .sort(
-        (a, b) =>
+      .sort((a, b) => {
+        const aExpress = isExpressOrUrgentPlan(a.fee_plan_code, a.is_express) ? 1 : 0;
+        const bExpress = isExpressOrUrgentPlan(b.fee_plan_code, b.is_express) ? 1 : 0;
+        if (aExpress !== bExpress) return bExpress - aExpress;
+        return (
           new Date(b.created_at || b.application_date || 0).getTime() -
-          new Date(a.created_at || a.application_date || 0).getTime(),
-      )
+          new Date(a.created_at || a.application_date || 0).getTime()
+        );
+      })
       .slice(0, 20);
   }, [applications, caseStatusFilter]);
 
@@ -879,7 +891,7 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task) => {
+            {tasks.slice().sort(compareExpressFirst).map((task) => {
               const status = String(task.status || "").toLowerCase();
               const isCompleted = status === "completed";
               const isCancelled = status === "cancelled";
@@ -891,7 +903,9 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
               return (
                 <tr
                   key={task.id}
-                  className={`border-b border-[#EEF2F6] hover:bg-[#F8FAFC] ${isClosedOut ? "opacity-70" : ""}`}
+                  className={`border-b border-[#EEF2F6] hover:bg-[#F8FAFC] ${isClosedOut ? "opacity-70" : ""} ${
+                    taskIsExpress(task) && !isClosedOut ? "bg-[#FFF7ED]" : ""
+                  }`}
                 >
                   <td className="whitespace-nowrap px-3 py-1.5">
                     <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${formatTaskDueTone(task.deadline)}`}>
@@ -899,8 +913,9 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     </span>
                   </td>
                   <td className="max-w-[130px] truncate px-3 py-1.5 font-medium text-[#0B69B7]">
-                    <button type="button" onClick={() => handleOpenCase(task.id)} className="truncate hover:underline">
-                      {task.application_reference || `Task #${task.id}`}
+                    <button type="button" onClick={() => handleOpenCase(task.id)} className="inline-flex max-w-full items-center gap-1.5 truncate hover:underline">
+                      {taskIsExpress(task) ? <ExpressBadge compact /> : null}
+                      <span className="truncate">{task.application_reference || `Task #${task.id}`}</span>
                     </button>
                   </td>
                   <td className="max-w-[130px] truncate px-3 py-1.5 text-[#102A43]" title={task.customer_name || ""}>
@@ -1520,10 +1535,11 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                 <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
                   {displayedApplications.slice(0, 40).map((app) => {
                     const pending = activeKpi === "pending" ? getPendingPaymentDetail(app) : null;
+                    const express = isExpressOrUrgentPlan(app.fee_plan_code, app.is_express);
                     return (
                       <tr
                         key={app.id}
-                        className="cursor-pointer hover:bg-[#F8FCFF]"
+                        className={`cursor-pointer hover:bg-[#F8FCFF] ${express ? "bg-[#FFF7ED]" : ""}`}
                         onClick={() =>
                           openAdminInDash(
                             `/admin/my-cases?applicationId=${encodeURIComponent(String(app.id))}`,
@@ -1531,7 +1547,12 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                           )
                         }
                       >
-                        <td className="px-3 py-2.5 font-medium text-[#102A43]">{app.reference_number}</td>
+                        <td className="px-3 py-2.5 font-medium text-[#102A43]">
+                          <span className="inline-flex items-center gap-1.5">
+                            {app.reference_number}
+                            {express ? <ExpressBadge compact /> : null}
+                          </span>
+                        </td>
                         <td className="px-3 py-2.5">{app.customer_name || "—"}</td>
                         <td className="px-3 py-2.5">{app.service_name || "—"}</td>
                         {pending ? (
@@ -1807,10 +1828,12 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <tbody className="divide-y divide-[#E5EAF0]">
-                          {recentApplications.map((app) => (
+                          {recentApplications.map((app) => {
+                            const express = isExpressOrUrgentPlan(app.fee_plan_code, app.is_express);
+                            return (
                             <tr
                               key={app.id}
-                              className="cursor-pointer hover:bg-[#F8FCFF]"
+                              className={`cursor-pointer hover:bg-[#F8FCFF] ${express ? "bg-[#FFF7ED]" : ""}`}
                               onClick={() =>
                                 openAdminInDash(
                                   `/admin/my-cases?applicationId=${encodeURIComponent(String(app.id))}`,
@@ -1819,7 +1842,10 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                               }
                             >
                               <td className="px-3.5 py-2.5">
-                                <p className="font-medium text-[#102A43]">{app.reference_number}</p>
+                                <p className="inline-flex items-center gap-1.5 font-medium text-[#102A43]">
+                                  {app.reference_number}
+                                  {express ? <ExpressBadge compact /> : null}
+                                </p>
                                 <p className="text-[11px] text-[#627D98]">
                                   {(app.service_name || "—") + " · " + (app.customer_name || "—")}
                                 </p>
@@ -1830,7 +1856,8 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                                 </span>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1996,10 +2023,12 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#E5EAF0] text-[#334E68]">
-                        {casesTabRows.map((app) => (
+                        {casesTabRows.map((app) => {
+                          const express = isExpressOrUrgentPlan(app.fee_plan_code, app.is_express);
+                          return (
                           <tr
                             key={app.id}
-                            className="cursor-pointer hover:bg-[#F8FCFF]"
+                            className={`cursor-pointer hover:bg-[#F8FCFF] ${express ? "bg-[#FFF7ED]" : ""}`}
                             onClick={() =>
                               openAdminInDash(
                                 `/admin/my-cases?applicationId=${encodeURIComponent(String(app.id))}`,
@@ -2007,7 +2036,12 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                               )
                             }
                           >
-                            <td className="px-3 py-2.5 font-medium text-[#102A43]">{app.reference_number}</td>
+                            <td className="px-3 py-2.5 font-medium text-[#102A43]">
+                              <span className="inline-flex items-center gap-1.5">
+                                {app.reference_number}
+                                {express ? <ExpressBadge compact /> : null}
+                              </span>
+                            </td>
                             <td className="px-3 py-2.5">{app.customer_name || "—"}</td>
                             <td className="px-3 py-2.5">{app.service_name || "—"}</td>
                             <td className="px-3 py-2.5 capitalize">
@@ -2023,7 +2057,8 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                                 : "—"}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -2240,13 +2275,22 @@ const handleMarkComplete = async (task: { id: number; applicationId: number; ref
                     staffIdsMatch(t.assigned_staff, adminUser?.id) &&
                     pendingTaskStatuses.has(String(t.status || "").toLowerCase()),
                 )
+                .slice()
+                .sort(compareExpressFirst)
                 .map((task) => (
                   <div
                     key={task.id}
-                    className="bg-[#F8FAFC] border-[0.5px] border-[#D9E1EA] rounded-[10px] px-3 py-2.5 flex items-center justify-between gap-3"
+                    className={`border-[0.5px] rounded-[10px] px-3 py-2.5 flex items-center justify-between gap-3 ${
+                      taskIsExpress(task)
+                        ? "bg-[#FFF7ED] border-[#C2410C]/40"
+                        : "bg-[#F8FAFC] border-[#D9E1EA]"
+                    }`}
                   >
                     <div>
-                      <p className="text-[#102A43] text-sm font-medium">{task.application_reference}</p>
+                      <p className="text-[#102A43] text-sm font-medium inline-flex items-center gap-1.5">
+                        {taskIsExpress(task) ? <ExpressBadge compact /> : null}
+                        {task.application_reference}
+                      </p>
                       <p className="text-xs text-[#627D98] capitalize">
                         {task.task_type.replace(/_/g, " ")} • {task.customer_name || "—"}
                       </p>

@@ -21,9 +21,11 @@ import {
 import {
   clearStripeReturnParams,
   getStripeCheckoutUrl,
+  readStripeCanceledParam,
   readStripeReturnParams,
   redirectToStripeCheckout,
 } from "@/lib/stripe-checkout";
+import toast from "react-hot-toast";
 
 const penceToPounds = (value?: number) => ((value ?? 0) / 100);
 
@@ -39,6 +41,14 @@ export default function DashboardPaymentPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    // Abandoned Stripe checkout: send user back to their application journey.
+    if (readStripeCanceledParam() && referenceNumber) {
+      clearStripeReturnParams();
+      toast("Payment not completed. Returning to your application.");
+      router.replace(`/dashboard/document-audit?reference=${encodeURIComponent(referenceNumber)}&resume=1`);
+      return;
+    }
+
     const loadApplication = async () => {
       if (!referenceNumber) {
         setError("Missing reference number. Please return to your application and try again.");
@@ -52,14 +62,21 @@ export default function DashboardPaymentPage() {
         const details = await getApplicationByReference(referenceNumber);
         setApplication(details);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Unable to load payment details.");
+        const message = e instanceof Error ? e.message : "Unable to load payment details.";
+        // Soft-recover common cancel/back cases: reopen the journey instead of a dead end.
+        if (/not found/i.test(message) && referenceNumber) {
+          toast.error("Could not open payment page. Reopening your application…");
+          router.replace(`/dashboard/document-audit?reference=${encodeURIComponent(referenceNumber)}&resume=1`);
+          return;
+        }
+        setError(message);
       } finally {
         setLoading(false);
       }
     };
 
     void loadApplication();
-  }, [referenceNumber]);
+  }, [referenceNumber, router]);
 
   const [confirmingReturn, setConfirmingReturn] = useState(() => {
     if (typeof window === "undefined") return false;

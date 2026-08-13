@@ -146,6 +146,7 @@ export default function EasyFlySchedulePage() {
     return scheduleRows.filter((booking) => {
       const matchesSearch =
         !q || booking.paxName.toLowerCase().includes(q) || booking.pnr.toLowerCase().includes(q);
+      if (q) return matchesSearch;
       const matchesType =
         changeFilter === "all" || booking.scheduleChange === changeFilter;
       const matchesSupplier = supplierFilter === "all" || booking.supplier === supplierFilter;
@@ -165,6 +166,7 @@ export default function EasyFlySchedulePage() {
   const clearFilters = useCallback(() => {
     setChangeFilter("all");
     setSupplierFilter("all");
+    setKpiFilter("all");
   }, []);
 
   const activeFilterCount =

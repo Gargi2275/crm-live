@@ -119,8 +119,8 @@ export default function AdminMiscChargesPage() {
     setLoading(true);
     try {
       const rows = await listAdminMiscCharges({
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
+        date_from: search.trim() ? undefined : dateFrom || undefined,
+        date_to: search.trim() ? undefined : dateTo || undefined,
         search: search.trim() || undefined,
         limit: 500,
       });
@@ -155,6 +155,7 @@ export default function AdminMiscChargesPage() {
   }, [charges]);
 
   const filteredCharges = useMemo(() => {
+    if (search.trim()) return charges;
     return charges.filter((row) => {
       if (statusFilter !== "all" && row.status !== statusFilter) return false;
       const serviceLabel = row.service_name || row.service_type || "";
@@ -162,7 +163,7 @@ export default function AdminMiscChargesPage() {
       if (countryFilter !== "all" && row.pricing_country_slug !== countryFilter) return false;
       return true;
     });
-  }, [charges, countryFilter, serviceFilter, statusFilter]);
+  }, [charges, countryFilter, search, serviceFilter, statusFilter]);
 
   const stats = useMemo(() => {
     const base = { all: charges.length, draft: 0, sent: 0, paid: 0, cancelled: 0 };
@@ -179,7 +180,6 @@ export default function AdminMiscChargesPage() {
     setDateTo("");
     setServiceFilter("all");
     setCountryFilter("all");
-    setSearch("");
   };
 
   const activeFilterCount =

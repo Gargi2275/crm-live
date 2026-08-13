@@ -354,7 +354,6 @@ export function hrefForServiceType(serviceType: ServiceTypeCode): string {
 export function startHrefForServiceType(serviceType: ServiceTypeCode): string {
   const key = String(serviceType || "").toLowerCase().trim();
   if (!key || key === "document_audit") return "/services";
-  if (key.startsWith("evisa") || key === "morocco_turkey_evisa") return "/indian-e-visa";
   return `/dashboard/document-audit?start=1&service=${encodeURIComponent(key)}`;
 }
 

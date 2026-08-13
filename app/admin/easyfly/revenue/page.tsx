@@ -510,8 +510,10 @@ function EasyFlyAdminRevenueView() {
   }, [rangeStaffEntries, recordFilter]);
 
   const bookingRows = useMemo((): UnifiedRevenueRow[] => {
-    const source =
-      recordFilter === "pending"
+    const searching = Boolean(search.trim());
+    const source = searching
+      ? bookings
+      : recordFilter === "pending"
         ? rangeBookings.filter((b) => b.amountDue > 0)
         : rangeBookings;
 
@@ -554,10 +556,11 @@ function EasyFlyAdminRevenueView() {
         docs: booking.docs,
       };
     });
-  }, [rangeBookings, recordFilter]);
+  }, [bookings, rangeBookings, recordFilter, search]);
 
   const staffRows = useMemo((): UnifiedRevenueRow[] => {
-    return rangeStaffEntries.map((entry) => {
+    const source = search.trim() ? staffEntries : rangeStaffEntries;
+    return source.map((entry) => {
         const earnings = Number(entry.amountReceived) - Number(entry.amountPaid);
         const payAgreed = Number(entry.payAgreed || 0);
         const customerPaid = Number(entry.amountReceived || 0);
@@ -591,15 +594,18 @@ function EasyFlyAdminRevenueView() {
           sortDate: entry.entryDate,
         };
       });
-  }, [rangeStaffEntries]);
+  }, [rangeStaffEntries, search, staffEntries]);
 
   const displayRows = useMemo(() => {
-    let rows: UnifiedRevenueRow[] = [];
-    if (recordFilter === "all") rows = [...bookingRows, ...staffRows];
-    else if (recordFilter === "staff") rows = staffRows;
-    else rows = bookingRows;
-
     const q = search.trim().toLowerCase();
+    let rows: UnifiedRevenueRow[] = q
+      ? [...bookingRows, ...staffRows]
+      : recordFilter === "staff"
+        ? staffRows
+        : recordFilter === "all"
+          ? [...bookingRows, ...staffRows]
+          : bookingRows;
+
     if (q) {
       rows = rows.filter((row) =>
         [row.name, row.supplier, row.ref, row.pnr, row.notes, row.submittedBy, row.statusLabel]

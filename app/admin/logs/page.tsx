@@ -57,9 +57,9 @@ export default function AdminLogsPage() {
     try {
       const payload = await getAdminLogs({
         search: debouncedSearch.trim(),
-        eventType,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        eventType: debouncedSearch.trim() ? "all" : eventType,
+        dateFrom: debouncedSearch.trim() ? undefined : dateFrom || undefined,
+        dateTo: debouncedSearch.trim() ? undefined : dateTo || undefined,
         limit: pageSize,
         offset,
       });
@@ -173,8 +173,6 @@ export default function AdminLogsPage() {
   };
 
   const clearFilters = () => {
-    setSearch("");
-    setDebouncedSearch("");
     setEventType("all");
     setDateFrom("");
     setDateTo("");

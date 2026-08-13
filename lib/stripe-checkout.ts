@@ -43,5 +43,15 @@ export function clearStripeReturnParams(): void {
   url.searchParams.delete("stripe_session_id");
   url.searchParams.delete("session_id");
   url.searchParams.delete("payment_kind");
+  url.searchParams.delete("canceled");
+  url.searchParams.delete("cancelled");
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+/** True when Stripe Checkout was abandoned (back/cancel) without paying. */
+export function readStripeCanceledParam(): boolean {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  const raw = (params.get("canceled") || params.get("cancelled") || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
 }

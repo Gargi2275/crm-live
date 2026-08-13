@@ -218,23 +218,32 @@ import { useSetAdminPageChrome } from "@/components/console/AdminPageChromeConte
 
 function isCriticalSignal(severity?: string | null) {
   const value = String(severity || "").toLowerCase();
-  return value === "critical" || value === "high";
+  return value === "super_critical" || value === "critical" || value === "high";
 }
 
 function severityRank(severity?: string | null) {
   const value = String(severity || "").toLowerCase();
-  if (value === "critical") return 0;
-  if (value === "high") return 1;
-  if (value === "medium") return 2;
-  return 3;
+  if (value === "super_critical") return 0;
+  if (value === "critical") return 1;
+  if (value === "high") return 2;
+  if (value === "medium") return 3;
+  return 4;
 }
 
 function severityPillClass(severity?: string | null) {
   const value = String(severity || "").toLowerCase();
+  if (value === "super_critical") return "bg-[#7F1D1D] text-white border-[#7F1D1D]";
   if (value === "critical") return "bg-[#FEF3F2] text-[#B42318] border-[#FECDCA]";
   if (value === "high") return "bg-[#FFFAEB] text-[#B54708] border-[#FEDF89]";
   if (value === "low") return "bg-[#F5F7FA] text-[#486581] border-[#D9E1EA]";
   return "bg-[#F0F9FF] text-[#026AA2] border-[#B9E6FE]";
+}
+
+function severityLabel(severity?: string | null) {
+  const value = String(severity || "").toLowerCase();
+  if (value === "super_critical") return "Super Critical";
+  if (value === "critical") return "Critical";
+  return value || "medium";
 }
 
 function matchesKpi(alert: AdminAlert, kpiFilter: "all" | "open" | "critical") {
@@ -395,7 +404,7 @@ export default function AlertsPage() {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 mb-1">
             <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${severityPillClass(severity)}`}>
-              {severity}
+              {severityLabel(severity)}
             </span>
             <span className="inline-flex items-center rounded-full border border-[#D9E1EA] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#486581]">
               {alert.status}

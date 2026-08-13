@@ -3,8 +3,9 @@
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
-import { Clock3, AlertCircle } from "lucide-react";
+import { Clock3, AlertCircle, Zap } from "lucide-react";
 import { type PipelineCase } from "@/lib/kanban";
+import { ExpressBadge } from "@/components/console/ExpressBadge";
 
 interface KanbanCardProps extends PipelineCase {
   onClick: () => void;
@@ -49,19 +50,18 @@ function KanbanCardContent({
         "bg-white p-3 rounded-[12px] border-[0.5px] border-[#D9E1EA] hover:border-[#009877]/45 transition-all mb-2 z-10",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         isDragging && "opacity-90 shadow-lg scale-105 border-[#009877] rotate-1",
-        slaBreached && !isDragging && "border-[#B42318]/45 shadow-[0_0_0_1px_rgba(180,35,24,0.08)]",
-        isExpress && !isDragging && "border-[#C2410C]/50 shadow-[0_0_0_1px_rgba(194,65,12,0.1)]"
+        slaBreached && !isDragging && !isExpress && "border-[#B42318]/45 shadow-[0_0_0_1px_rgba(180,35,24,0.08)]",
+        isExpress && !isDragging && "border-[#C2410C] bg-[#FFF7ED] shadow-[inset_4px_0_0_0_#C2410C,0_0_0_1px_rgba(194,65,12,0.12)]"
       )}
       onClick={onClick}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[11px] font-semibold text-[#627D98]">{id}</span>
+        <span className="text-[11px] font-semibold text-[#627D98] inline-flex items-center gap-1">
+          {isExpress ? <Zap className="h-3 w-3 text-[#C2410C]" fill="currentColor" /> : null}
+          {id}
+        </span>
         <span className="flex shrink-0 items-center gap-1">
-          {isExpress ? (
-            <span className="rounded-full border-[0.5px] border-[#C2410C]/40 bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-semibold text-[#C2410C]">
-              Express
-            </span>
-          ) : null}
+          {isExpress ? <ExpressBadge /> : null}
           <span className="rounded-full border-[0.5px] border-[#33A1FD]/35 bg-[#33A1FD]/12 px-2 py-0.5 text-[10px] font-medium text-[#0B69B7]">
             {serviceType}
           </span>

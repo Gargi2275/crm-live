@@ -18,7 +18,7 @@ const links = {
     { name: "New OCI Card", href: "/services/new-oci" },
     { name: "OCI Renewal", href: "/services/oci-renewal" },
     { name: "OCI Update", href: "/services/oci-update" },
-    { name: "Indian e-Visa", href: "/indian-e-visa" },
+    { name: "Indian e-Visa", href: "/dashboard/document-audit?start=1&service=evisa_1year" },
     { name: "Passport Renewal", href: "/services/passport-renewal" },
     { name: "Apostille", href: "/apostille-services" },
   ],

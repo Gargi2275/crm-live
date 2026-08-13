@@ -25,6 +25,7 @@ import { EVISA_DEFAULTS } from "@/lib/evisa-config";
 import { authService } from "@/lib/auth";
 import { authenticatedFetch, getPublicTestimonials, setTokens, submitTestimonial } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/config";
+import { dialCodeForCountryName, pricingSlugFromCountryName } from "@/lib/country-dial-codes";
 import { fetchServicePrice, setStoredPricingCountrySlug } from "@/lib/service-country-pricing";
 
 type ExtraApplicant = {
@@ -33,10 +34,128 @@ type ExtraApplicant = {
   countryCode: string;
   phone: string;
   email: string;
-  relationship: string;
+  applyingFrom: string;
 };
 
-const RELATIONSHIP_OPTIONS = ["Father", "Mother", "Spouse", "Son", "Daughter"] as const;
+type CountryVisaOption = {
+  id: string;
+  title: string;
+  description: string;
+  priceLabel: string;
+  feeNumber: number;
+  duration: "1-Year" | "5-Year";
+  serviceId: number;
+  originOptionId: number | null;
+};
+
+type PublicOriginCountryRow = {
+  id: number;
+  name: string;
+  slug: string;
+};
+
+type PublicVisaOptionRow = {
+  id: number;
+  service_id?: number;
+  service_type?: string;
+  service_name?: string;
+  label?: string;
+  fee?: string | number;
+  duration?: string;
+  entries?: string;
+  validity?: string;
+  travel_purpose?: string;
+  is_active?: boolean;
+};
+
+function normalizeCountryKey(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function stripCitizenSuffix(value: string): string {
+  return normalizeCountryKey(value)
+    .replace(/\b(citizens?|nationals?|residents?)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchOriginCountrySlug(
+  applyingFrom: string,
+  countries: PublicOriginCountryRow[],
+): string | null {
+  const key = normalizeCountryKey(applyingFrom);
+  if (!key || !countries.length) return null;
+  const keyCore = stripCitizenSuffix(key);
+
+  const aliases: Record<string, string[]> = {
+    "united kingdom": ["united kingdom", "uk", "great britain", "british"],
+    "united states": ["united states", "usa", "us", "american"],
+    "united arab emirates": ["united arab emirates", "uae", "emirates"],
+    canada: ["canada", "canadian"],
+    australia: ["australia", "australian"],
+    malaysia: ["malaysia", "malaysian"],
+    india: ["india", "indian"],
+  };
+
+  const exact = countries.find((row) => {
+    const name = normalizeCountryKey(row.name);
+    return name === key || stripCitizenSuffix(row.name) === keyCore;
+  });
+  if (exact) return exact.slug;
+
+  for (const [canonical, keys] of Object.entries(aliases)) {
+    if (!keys.includes(key) && !keys.includes(keyCore) && key !== canonical && keyCore !== canonical) {
+      continue;
+    }
+    const hit = countries.find((row) => {
+      const name = normalizeCountryKey(row.name);
+      const nameCore = stripCitizenSuffix(row.name);
+      const slug = normalizeCountryKey(row.slug);
+      return (
+        name === canonical ||
+        nameCore === canonical ||
+        keys.some(
+          (alias) =>
+            name === alias ||
+            nameCore === alias ||
+            name.includes(alias) ||
+            nameCore.includes(alias) ||
+            slug.includes(alias.replace(/\s+/g, "-")),
+        )
+      );
+    });
+    if (hit) return hit.slug;
+  }
+
+  const fuzzy = countries.find((row) => {
+    const name = normalizeCountryKey(row.name);
+    const nameCore = stripCitizenSuffix(row.name);
+    return (
+      name.includes(key) ||
+      key.includes(name) ||
+      nameCore.includes(keyCore) ||
+      keyCore.includes(nameCore)
+    );
+  });
+  return fuzzy?.slug || null;
+}
+
+function durationFromServiceType(serviceType: string, fallback?: string): "1-Year" | "5-Year" {
+  const raw = String(fallback || serviceType || "").toLowerCase();
+  if (raw.includes("5")) return "5-Year";
+  return "1-Year";
+}
+
+function formatOptionDescription(row: PublicVisaOptionRow): string {
+  const parts = [row.entries, row.validity, row.travel_purpose]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Indian e-Visa";
+}
 
 const registrationSchema = z.object({
   visaDuration: z.enum(["1-Year", "5-Year"], { message: "Select visa duration" }),
@@ -70,13 +189,43 @@ type ExtraApplicantErrors = {
   fullName?: string;
   phone?: string;
   email?: string;
+  applyingFrom?: string;
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function normalizeApplicantName(name: string): string {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeApplyingFrom(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function sameApplyingCountry(a: string, b: string): boolean {
+  const left = normalizeApplyingFrom(a);
+  const right = normalizeApplyingFrom(b);
+  return Boolean(left) && left === right;
+}
+
+function samePersonSameVisaMessage(applicantName: string, country?: string): string {
+  const name = applicantName.trim() || "This applicant";
+  const from = country?.trim();
+  if (from) {
+    return `${name} is already added for this e-Visa from ${from}. The same person cannot apply twice for the same service from the same country.`;
+  }
+  return `${name} is already added for this e-Visa. The same person cannot apply twice for the same service.`;
+}
+
 function validateExtraApplicant(row: ExtraApplicant): ExtraApplicantErrors {
   const errors: ExtraApplicantErrors = {};
-  const hasAny = Boolean(row.fullName.trim() || row.email.trim() || row.phone.trim());
+  const hasAny = Boolean(row.fullName.trim() || row.email.trim() || row.phone.trim() || row.applyingFrom.trim());
   if (!hasAny) return errors;
 
   if (!row.fullName.trim() || row.fullName.trim().length < 2) {
@@ -90,6 +239,9 @@ function validateExtraApplicant(row: ExtraApplicant): ExtraApplicantErrors {
     errors.email = "Email is required";
   } else if (!EMAIL_PATTERN.test(row.email.trim())) {
     errors.email = "Enter a valid email address";
+  }
+  if (!row.applyingFrom.trim()) {
+    errors.applyingFrom = "Select applying from country";
   }
   return errors;
 }
@@ -613,6 +765,33 @@ export default function RegistrationPage() {
   const optionFromQuery = Number(searchParams.get("option") || "");
   const durationFromQuery = (searchParams.get("duration") || "").trim();
   const countryFromQuery = (searchParams.get("country") || "").trim().toLowerCase();
+
+  // Fresh "start e-Visa" visits use the same Start Order UI as OCI / other services.
+  useEffect(() => {
+    const keepLegacyFlow = Boolean(
+      magicToken ||
+        caseFromQuery ||
+        resumeMode ||
+        detailsMode ||
+        originSlugFromQuery ||
+        countryFromQuery ||
+        (Number.isFinite(optionFromQuery) && optionFromQuery > 0) ||
+        durationFromQuery,
+    );
+    if (keepLegacyFlow) return;
+    router.replace("/dashboard/document-audit?start=1&service=evisa_1year");
+  }, [
+    magicToken,
+    caseFromQuery,
+    resumeMode,
+    detailsMode,
+    originSlugFromQuery,
+    countryFromQuery,
+    optionFromQuery,
+    durationFromQuery,
+    router,
+  ]);
+
   const shouldHydrateFromPersistedState = Boolean(magicToken || caseFromQuery || resumeMode || detailsMode || hasActiveDraftSession);
   const nationalityOptions = useMemo(
     () => appendOtherOption(dedupeAndSortOptions(countryOptions.map((option) => option.nationality || option.country))),
@@ -702,55 +881,211 @@ export default function RegistrationPage() {
   }, [optionFromQuery, originSlugFromQuery, durationFromQuery, countryFromQuery, updateData, setValue]);
 
   const selectedVisaDuration = watch("visaDuration") || "1-Year";
-  const [countryFeePounds, setCountryFeePounds] = useState<number | null>(null);
+  const watchedApplyingFrom = watch("countryOfResidence") || "";
+  const [countryVisaOptions, setCountryVisaOptions] = useState<CountryVisaOption[]>([]);
+  const [countryVisaOptionsLoading, setCountryVisaOptionsLoading] = useState(false);
+  const [selectedVisaOptionId, setSelectedVisaOptionId] = useState<string>("");
+  const originCountriesCacheRef = useRef<PublicOriginCountryRow[] | null>(null);
+
   useEffect(() => {
-    const slug = countryFromQuery || "";
-    if (!slug) {
-      setCountryFeePounds(null);
+    const applyingFrom = String(watchedApplyingFrom || "").trim();
+    const pricingSlug =
+      countryFromQuery ||
+      pricingSlugFromCountryName(applyingFrom) ||
+      "";
+
+    if (pricingSlug) {
+      setStoredPricingCountrySlug(pricingSlug);
+    }
+
+    if (!applyingFrom && !originSlugFromQuery) {
+      setCountryVisaOptions([]);
+      setCountryVisaOptionsLoading(false);
       return;
     }
+
     let cancelled = false;
-    const serviceType = selectedVisaDuration === "5-Year" ? "evisa_5year" : "evisa_1year";
+    setCountryVisaOptionsLoading(true);
+
     (async () => {
       try {
-        const listRes = await fetch(`${API_BASE_URL}/services/`, { method: "GET" });
-        if (!listRes.ok) return;
-        const raw = await listRes.json();
-        const list = raw?.data || raw;
-        const rows = Array.isArray(list) ? list : list?.services || [];
-        const match = rows.find(
-          (row: { service_type?: string; id?: number }) =>
-            String(row.service_type || "").toLowerCase() === serviceType,
-        );
-        const id = Number(match?.id || 0);
-        if (!id) return;
-        const price = await fetchServicePrice(id, slug);
-        const fee = Number(price?.total_fee ?? price?.service_fee);
-        if (!cancelled && Number.isFinite(fee)) setCountryFeePounds(fee);
+        if (!originCountriesCacheRef.current) {
+          const listRes = await fetch(`${API_BASE_URL}/public/origin-countries/`, { method: "GET" });
+          if (!listRes.ok) throw new Error("Failed to load origin countries");
+          const listRaw = await listRes.json();
+          const rows = listRaw?.data?.countries || listRaw?.countries || [];
+          originCountriesCacheRef.current = Array.isArray(rows)
+            ? rows.map((row: { id?: number; name?: string; slug?: string }) => ({
+                id: Number(row.id) || 0,
+                name: String(row.name || ""),
+                slug: String(row.slug || ""),
+              }))
+            : [];
+        }
+
+        const matchedSlug =
+          originSlugFromQuery ||
+          matchOriginCountrySlug(applyingFrom, originCountriesCacheRef.current || []);
+
+        let mapped: CountryVisaOption[] = [];
+
+        if (matchedSlug) {
+          const detailRes = await fetch(
+            `${API_BASE_URL}/public/origin-countries/${encodeURIComponent(matchedSlug)}/`,
+            { method: "GET" },
+          );
+          if (detailRes.ok) {
+            const detailRaw = await detailRes.json();
+            const country = detailRaw?.data?.country || detailRaw?.country || detailRaw?.data || {};
+            const options = Array.isArray(country?.visa_options) ? country.visa_options : [];
+            mapped = options
+              .filter((row: PublicVisaOptionRow) => row.is_active !== false)
+              .map((row: PublicVisaOptionRow) => {
+                const fee = Number(row.fee);
+                const duration = durationFromServiceType(String(row.service_type || ""), String(row.duration || ""));
+                return {
+                  id: `origin-${row.id}`,
+                  title: String(row.label || row.service_name || `${duration} Indian e-Visa`),
+                  description: formatOptionDescription(row),
+                  priceLabel: Number.isFinite(fee) ? `£${fee % 1 === 0 ? fee.toFixed(0) : fee.toFixed(2)}` : "—",
+                  feeNumber: Number.isFinite(fee) ? fee : 0,
+                  duration,
+                  serviceId: Number(row.service_id) || 0,
+                  originOptionId: Number(row.id) || null,
+                } satisfies CountryVisaOption;
+              })
+              .filter((row: CountryVisaOption) => Boolean(row.title));
+
+            // Prefill Applying From when arriving from a country landing page.
+            if (!applyingFrom && matchedSlug && residenceOptions.length) {
+              const originName = String(country?.name || "").trim();
+              const matchName =
+                residenceOptions.find((option) => normalizeCountryKey(option) === normalizeCountryKey(originName)) ||
+                residenceOptions.find((option) => {
+                  const left = stripCitizenSuffix(option);
+                  const right = stripCitizenSuffix(originName);
+                  return left === right || left.includes(right) || right.includes(left);
+                });
+              if (matchName) {
+                setValue("countryOfResidence", matchName, { shouldDirty: true, shouldValidate: true });
+                updateData({ countryOfResidence: matchName });
+              }
+            }
+          }
+        }
+
+        // Fallback only when this Applying From has no origin-country options configured.
+        if (!mapped.length && applyingFrom) {
+          const listRes = await fetch(`${API_BASE_URL}/services/`, { method: "GET" });
+          if (listRes.ok) {
+            const raw = await listRes.json();
+            const list = raw?.data || raw;
+            const rows = Array.isArray(list) ? list : list?.services || [];
+            const evisaRows = rows.filter((row: { service_type?: string; is_active?: boolean }) => {
+              const type = String(row.service_type || "").toLowerCase();
+              return type.startsWith("evisa") && row.is_active !== false;
+            });
+            mapped = await Promise.all(
+              evisaRows.map(async (row: { id?: number; service_type?: string; service_name?: string; base_fee?: string | number }) => {
+                const serviceId = Number(row.id) || 0;
+                const duration = durationFromServiceType(String(row.service_type || ""));
+                let fee = Number(row.base_fee);
+                if (serviceId && pricingSlug) {
+                  const price = await fetchServicePrice(serviceId, pricingSlug);
+                  const resolved = Number(price?.total_fee ?? price?.service_fee);
+                  if (Number.isFinite(resolved)) fee = resolved;
+                }
+                return {
+                  id: `service-${serviceId || duration}`,
+                  title: String(row.service_name || `${duration} Indian Tourist e-Visa`),
+                  description: duration === "5-Year" ? "Longer validity · Tourism" : "Multiple entry · Tourism",
+                  priceLabel: Number.isFinite(fee) ? `£${fee % 1 === 0 ? fee.toFixed(0) : fee.toFixed(2)}` : "—",
+                  feeNumber: Number.isFinite(fee) ? fee : 0,
+                  duration,
+                  serviceId,
+                  originOptionId: null,
+                } satisfies CountryVisaOption;
+              }),
+            );
+          }
+        }
+
+        if (cancelled) return;
+        setCountryVisaOptions(mapped);
+
+        const preferred =
+          mapped.find((row) => row.originOptionId && row.originOptionId === optionFromQuery) ||
+          mapped.find((row) => row.duration === selectedVisaDuration) ||
+          mapped[0] ||
+          null;
+
+        if (preferred) {
+          setSelectedVisaOptionId(preferred.id);
+          setValue("visaDuration", preferred.duration, { shouldValidate: true, shouldDirty: true });
+          if (preferred.originOptionId) {
+            originOptionIdRef.current = preferred.originOptionId;
+          }
+          updateData({
+            visaDuration: preferred.duration,
+            ...(preferred.originOptionId ? { originOptionId: preferred.originOptionId } : {}),
+            ...(matchedSlug ? { originSlug: matchedSlug } : {}),
+          });
+        } else {
+          setSelectedVisaOptionId("");
+        }
       } catch {
-        if (!cancelled) setCountryFeePounds(null);
+        if (!cancelled) {
+          setCountryVisaOptions([]);
+          setSelectedVisaOptionId("");
+        }
+      } finally {
+        if (!cancelled) setCountryVisaOptionsLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [countryFromQuery, selectedVisaDuration]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reload when country / query origin changes
+  }, [
+    watchedApplyingFrom,
+    originSlugFromQuery,
+    countryFromQuery,
+    optionFromQuery,
+    residenceOptions,
+    setValue,
+    updateData,
+  ]);
+
+  const selectedVisaOption =
+    countryVisaOptions.find((row) => row.id === selectedVisaOptionId) ||
+    countryVisaOptions.find((row) => row.duration === selectedVisaDuration) ||
+    null;
 
   const selectedFeePounds =
-    countryFeePounds != null && Number.isFinite(countryFeePounds)
-      ? countryFeePounds
-      : selectedVisaDuration === "5-Year"
-        ? 150
-        : 88;
-  const selectedFeeLabel = `£${selectedFeePounds}`;
-  const selectedServiceLabel =
-    selectedVisaDuration === "5-Year" ? "5-Year Indian Tourist e-Visa" : "1-Year Indian Tourist e-Visa";
+    selectedVisaOption && Number.isFinite(selectedVisaOption.feeNumber)
+      ? selectedVisaOption.feeNumber
+      : 0;
+  const selectedFeeLabel =
+    selectedFeePounds > 0
+      ? `£${selectedFeePounds % 1 === 0 ? selectedFeePounds.toFixed(0) : selectedFeePounds.toFixed(2)}`
+      : "—";
+  const selectedServiceLabel = selectedVisaOption?.title || "Select a visa option";
   const watchedFullName = watch("fullName") || "";
   const watchedEmail = watch("email") || "";
   const applicantCount = 1 + extraApplicants.length;
-  const orderTotalLabel = `£${selectedFeePounds * applicantCount}`;
+  const orderTotalValue = selectedFeePounds * applicantCount;
+  const orderTotalLabel =
+    orderTotalValue > 0
+      ? `£${orderTotalValue % 1 === 0 ? orderTotalValue.toFixed(0) : orderTotalValue.toFixed(2)}`
+      : "—";
   const phoneValue = watch("phone");
   const didAutoStripRef = useRef(false);
+  const canContinueWithVisa =
+    Boolean(watchedApplyingFrom) &&
+    !countryVisaOptionsLoading &&
+    countryVisaOptions.length > 0 &&
+    Boolean(selectedVisaOption);
 
   // Autofill registered account email (and name when blank)
   useEffect(() => {
@@ -797,7 +1132,7 @@ export default function RegistrationPage() {
         countryCode: watch("countryCode") || defaultDialCode,
         phone: "",
         email: "",
-        relationship: "",
+        applyingFrom: watch("countryOfResidence") || "",
       },
     ]);
   };
@@ -1202,16 +1537,44 @@ export default function RegistrationPage() {
     }
     if (Object.keys(nextExtraErrors).length > 0) {
       setExtraApplicantErrors(nextExtraErrors);
-      toast.error("Please complete name, email, and mobile for each added applicant — or remove them.");
+      toast.error("Please complete name, email, mobile, and Applying From for each added applicant — or remove them.");
       setIsSubmitting(false);
       setHasSubmitError(true);
       setTimeout(() => setHasSubmitError(false), 500);
       return;
     }
+
+    const namedApplicants = [
+      { id: "primary", name: data.fullName, applyingFrom: data.countryOfResidence },
+      ...extraApplicants.map((row) => ({ id: row.id, name: row.fullName, applyingFrom: row.applyingFrom })),
+    ];
+    const seenKeys = new Map<string, string>();
+    for (const row of namedApplicants) {
+      const nameKey = normalizeApplicantName(row.name);
+      const countryKey = normalizeApplyingFrom(row.applyingFrom);
+      if (!nameKey || !countryKey) continue;
+      const duplicateKey = `${nameKey}::${countryKey}`;
+      if (seenKeys.has(duplicateKey)) {
+        const duplicateId = row.id;
+        if (duplicateId !== "primary") {
+          nextExtraErrors[duplicateId] = {
+            ...(nextExtraErrors[duplicateId] || {}),
+            fullName: "This applicant is already added for this service from the same country.",
+          };
+          setExtraApplicantErrors(nextExtraErrors);
+        }
+        toast.error(samePersonSameVisaMessage(row.name, row.applyingFrom));
+        setIsSubmitting(false);
+        setHasSubmitError(true);
+        setTimeout(() => setHasSubmitError(false), 500);
+        return;
+      }
+      seenKeys.set(duplicateKey, row.id);
+    }
     setExtraApplicantErrors({});
 
     const readyExtras = extraApplicants.filter(
-      (row) => row.fullName.trim() && row.email.trim() && row.phone.trim()
+      (row) => row.fullName.trim() && row.email.trim() && row.phone.trim() && row.applyingFrom.trim(),
     );
     
     try {
@@ -2671,7 +3034,7 @@ if (profileRes.ok) {
       id: applicant.id,
       title: applicant.fullName.trim() || `Applicant ${index + 2}`,
       subtitle: selectedServiceLabel,
-      meta: applicant.relationship || undefined,
+      meta: applicant.applyingFrom || undefined,
       amountLabel: selectedFeeLabel,
     })),
   ];
@@ -2853,6 +3216,26 @@ if (profileRes.ok) {
                     value={applicant.fullName}
                     disabled={isSubmitting || isReadOnlyApplication}
                     onChange={(e) => updateExtraApplicant(applicant.id, { fullName: e.target.value })}
+                    onBlur={(e) => {
+                      const nextName = e.target.value;
+                      const nameKey = normalizeApplicantName(nextName);
+                      if (!nameKey) return;
+                      const country = applicant.applyingFrom;
+                      const primaryName = normalizeApplicantName(watchedFullName);
+                      const matchesPrimary =
+                        Boolean(primaryName) &&
+                        primaryName === nameKey &&
+                        sameApplyingCountry(watchedApplyingFrom, country);
+                      const matchesOther = extraApplicants.some(
+                        (row) =>
+                          row.id !== applicant.id &&
+                          normalizeApplicantName(row.fullName) === nameKey &&
+                          sameApplyingCountry(row.applyingFrom, country),
+                      );
+                      if (matchesPrimary || matchesOther) {
+                        toast.error(samePersonSameVisaMessage(nextName, country));
+                      }
+                    }}
                     placeholder="As on passport"
                     className={fieldError(Boolean(rowErrors.fullName))}
                   />
@@ -2912,20 +3295,47 @@ if (profileRes.ok) {
                   ) : null}
                 </div>
                 <div>
-                  <label className={checkoutLabelClass}>Relationship (optional)</label>
-                  <select
-                    value={applicant.relationship}
+                  <label className={checkoutLabelClass}>
+                    Applying From <span className="text-[#E11D48]">*</span>
+                  </label>
+                  <SearchableSelectField
+                    value={applicant.applyingFrom}
+                    options={residenceOptions}
+                    placeholder="Select country"
+                    loading={isCountryOptionsLoading}
                     disabled={isSubmitting || isReadOnlyApplication}
-                    onChange={(e) => updateExtraApplicant(applicant.id, { relationship: e.target.value })}
-                    className={fieldClass}
-                  >
-                    <option value="">Select</option>
-                    {RELATIONSHIP_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                    className={fieldError(Boolean(rowErrors.applyingFrom))}
+                    onChange={(value) => {
+                      const dialOptions = countryOptions.map((option) => ({
+                        country: option.country,
+                        dialCode: option.dialCode,
+                        flag: option.flag || "",
+                        cca2: option.cca2 || "",
+                      }));
+                      updateExtraApplicant(applicant.id, {
+                        applyingFrom: value,
+                        countryCode: dialCodeForCountryName(value, dialOptions, applicant.countryCode || defaultDialCode),
+                      });
+                      const nameKey = normalizeApplicantName(applicant.fullName);
+                      if (nameKey) {
+                        const matchesPrimary =
+                          normalizeApplicantName(watchedFullName) === nameKey &&
+                          sameApplyingCountry(watchedApplyingFrom, value);
+                        const matchesOther = extraApplicants.some(
+                          (row) =>
+                            row.id !== applicant.id &&
+                            normalizeApplicantName(row.fullName) === nameKey &&
+                            sameApplyingCountry(row.applyingFrom, value),
+                        );
+                        if (matchesPrimary || matchesOther) {
+                          toast.error(samePersonSameVisaMessage(applicant.fullName, value));
+                        }
+                      }
+                    }}
+                  />
+                  {rowErrors.applyingFrom ? (
+                    <p className="mt-1 text-[11px] text-[#E11D48]">{rowErrors.applyingFrom}</p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -2943,31 +3353,46 @@ if (profileRes.ok) {
             </button>
           ) : null}
 
-          <Controller
-            name="visaDuration"
-            control={control}
-            render={({ field }) => (
+          <div>
+            {!watchedApplyingFrom ? (
+              <div className="rounded-lg border border-dashed border-[#D0D7E2] bg-[#F8FBFF] px-3 py-3">
+                <p className="text-[14px] font-semibold text-[#334E68]">What do you need?</p>
+                <p className="mt-1 text-[13px] text-[#627D98]">
+                  Select <span className="font-semibold">Applying From</span> first — visa options and country prices will appear here.
+                </p>
+              </div>
+            ) : countryVisaOptionsLoading ? (
+              <div className="rounded-lg border border-[#E1E7EF] bg-white px-3 py-3 text-[13px] text-[#627D98]">
+                Loading visa options for {watchedApplyingFrom}…
+              </div>
+            ) : countryVisaOptions.length === 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-[13px] text-amber-800">
+                No e-Visa options are configured for {watchedApplyingFrom} yet. Pick another country or contact support.
+              </div>
+            ) : (
               <ServiceOptionList
-                options={[
-                  {
-                    id: "1-Year",
-                    title: "1-Year Indian Tourist e-Visa",
-                    description: "Multiple entry · Tourism",
-                    priceLabel: "£88",
-                  },
-                  {
-                    id: "5-Year",
-                    title: "5-Year Indian Tourist e-Visa",
-                    description: "Longer validity · Tourism",
-                    priceLabel: "£150",
-                  },
-                ]}
-                value={field.value || "1-Year"}
+                options={countryVisaOptions.map((option) => ({
+                  id: option.id,
+                  title: option.title,
+                  description: option.description,
+                  priceLabel: option.priceLabel,
+                }))}
+                value={selectedVisaOptionId || countryVisaOptions[0]?.id || ""}
                 disabled={isReadOnlyApplication}
-                onChange={field.onChange}
+                onChange={(id) => {
+                  const option = countryVisaOptions.find((row) => row.id === id);
+                  if (!option) return;
+                  setSelectedVisaOptionId(option.id);
+                  setValue("visaDuration", option.duration, { shouldValidate: true, shouldDirty: true });
+                  originOptionIdRef.current = option.originOptionId;
+                  updateData({
+                    visaDuration: option.duration,
+                    originOptionId: option.originOptionId,
+                  });
+                }}
               />
             )}
-          />
+          </div>
           {errors.visaDuration ? (
             <p className="-mt-1 text-[11px] text-[#E11D48]">{errors.visaDuration.message}</p>
           ) : null}
@@ -2992,11 +3417,11 @@ if (profileRes.ok) {
             </p>
             <motion.button
               type="submit"
-              disabled={isSubmitting || isReadOnlyApplication}
+              disabled={isSubmitting || isReadOnlyApplication || (!isExistingCase && !canContinueWithVisa)}
               animate={hasSubmitError ? { x: [-5, 5, -5, 5, 0] } : {}}
               transition={{ duration: 0.4 }}
               className={`inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#1A56DB] px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-[#1648B5] sm:ml-auto sm:w-auto sm:min-w-[160px] ${
-                isSubmitting || isReadOnlyApplication
+                isSubmitting || isReadOnlyApplication || (!isExistingCase && !canContinueWithVisa)
                   ? "cursor-not-allowed bg-slate-300 text-slate-500 hover:bg-slate-300"
                   : ""
               }`}

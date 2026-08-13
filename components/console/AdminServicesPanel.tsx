@@ -54,8 +54,8 @@ export default function AdminServicesPanel() {
     try {
       const payload = await listAdminServices({
         search: search.trim() || undefined,
-        category: categoryFilter || undefined,
-        active: activeFilter,
+        category: search.trim() ? undefined : categoryFilter || undefined,
+        active: search.trim() ? "all" : activeFilter,
         page,
         page_size: pageSize,
       });
@@ -121,7 +121,6 @@ export default function AdminServicesPanel() {
 
   const clearFilters = useCallback(() => {
     setPage(1);
-    setSearch("");
     setCategoryFilter("");
     setActiveFilter("all");
   }, []);

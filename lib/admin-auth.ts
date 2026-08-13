@@ -255,7 +255,7 @@ export interface AdminAlert {
     | "task_assigned"
     | "task_activity"
     | "system";
-  severity: "critical" | "high" | "medium" | "low";
+  severity: "super_critical" | "critical" | "high" | "medium" | "low";
   status: "open" | "acknowledged" | "resolved" | "dismissed";
   title: string;
   message: string;
@@ -278,7 +278,7 @@ export interface AdminNotification {
   message: string;
   timestamp: string;
   is_read?: boolean;
-  severity?: "low" | "medium" | "high" | "critical";
+  severity?: "low" | "medium" | "high" | "critical" | "super_critical";
   actor?: string;
   task_ids?: Array<{
     id: number;
@@ -560,6 +560,9 @@ export interface AdminTaskItem {
   effective_status?: string;
   application_stage?: string | null;
   application_status?: string | null;
+  application_kanban_stage?: string | null;
+  fee_plan_code?: string | null;
+  is_express?: boolean;
   priority: string;
   deadline?: string | null;
   created_at?: string;

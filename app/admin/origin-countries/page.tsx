@@ -184,9 +184,11 @@ export default function AdminOriginCountriesPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
-      if (activeFilter === "true" && !row.is_active) return false;
-      if (activeFilter === "false" && row.is_active) return false;
-      if (!q) return true;
+      if (!q) {
+        if (activeFilter === "true" && !row.is_active) return false;
+        if (activeFilter === "false" && row.is_active) return false;
+        return true;
+      }
       return (
         row.name.toLowerCase().includes(q) ||
         row.country_code.toLowerCase().includes(q) ||
@@ -268,7 +270,11 @@ export default function AdminOriginCountriesPage() {
           <input
             className={filterFieldClass}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next.trim()) setActiveFilter("all");
+              setSearch(next);
+            }}
             placeholder="Name, code, slug…"
           />
         </label>

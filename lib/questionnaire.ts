@@ -15,7 +15,7 @@ export type ServiceQuestionRow = {
   service_id: number;
   code: string;
   label: string;
-  question_type: "single" | "yes_no" | "text" | string;
+  question_type: "single" | "yes_no" | "text" | "date" | string;
   options: string[];
   depends_on_code?: string;
   options_by_answer?: Record<string, string[]>;

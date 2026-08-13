@@ -40,7 +40,7 @@ const labelClass = "text-[12px] font-semibold uppercase tracking-[0.03em] text-[
 
 const defaultOptionsForType = (type: string): string[] => {
   if (type === "yes_no") return ["Yes", "No"];
-  if (type === "text") return [];
+  if (type === "text" || type === "date") return [];
   return ["Option 1", "Option 2"];
 };
 
@@ -193,7 +193,7 @@ export default function AdminNewServicePage() {
       return;
     }
     const options =
-      newQuestionType === "text"
+      newQuestionType === "text" || newQuestionType === "date"
         ? []
         : newQuestionType === "yes_no"
           ? ["Yes", "No"]
@@ -602,6 +602,7 @@ export default function AdminNewServicePage() {
                                   <option value="single">Multiple choice</option>
                                   <option value="yes_no">Yes / No</option>
                                   <option value="text">Free text</option>
+                                  <option value="date">Date picker</option>
                                 </select>
                               </div>
                               <div className="flex items-end">
@@ -626,7 +627,7 @@ export default function AdminNewServicePage() {
                                 </button>
                               </div>
                             </div>
-                            {row.question_type !== "text" ? (
+                            {row.question_type !== "text" && row.question_type !== "date" ? (
                               <div>
                                 <label className={labelClass}>Answer choices</label>
                                 <div className="mt-1 flex flex-wrap gap-1.5">
@@ -761,23 +762,22 @@ export default function AdminNewServicePage() {
                         <option value="single">Multiple choice</option>
                         <option value="yes_no">Yes / No</option>
                         <option value="text">Free text</option>
+                        <option value="date">Date picker</option>
                       </select>
                     </div>
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        onClick={() => setNewQuestionRequired((v) => !v)}
-                        className={`w-full rounded-[8px] border px-3 py-2 text-sm font-semibold ${
-                          newQuestionRequired
-                            ? "border-[#009877]/30 bg-[#E8F7F2] text-[#006F57]"
-                            : "border-[#E5EAF0] bg-white text-[#627D98]"
-                        }`}
-                      >
-                        {newQuestionRequired ? "Required" : "Optional"}
-                      </button>
+                    <div className="flex items-end pb-2">
+                      <label className="inline-flex items-center gap-2 text-sm font-medium text-[#334E68]">
+                        <input
+                          type="checkbox"
+                          checked={newQuestionRequired}
+                          onChange={(e) => setNewQuestionRequired(e.target.checked)}
+                          className="h-4 w-4 rounded border-[#D9E1EA] text-[#009877] focus:ring-[#009877]"
+                        />
+                        Required
+                      </label>
                     </div>
                   </div>
-                  {newQuestionType !== "text" ? (
+                  {newQuestionType !== "text" && newQuestionType !== "date" ? (
                     <div>
                       <label className={labelClass}>Choices</label>
                       <div className="mt-1 mb-2 flex flex-wrap gap-1.5">

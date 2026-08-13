@@ -7,6 +7,7 @@ interface KanbanColumnProps {
   id: string;
   title: string;
   count: number;
+  expressCount?: number;
   color: string;
   children: React.ReactNode;
   droppable?: boolean;
@@ -17,15 +18,22 @@ type KanbanColumnContentProps = KanbanColumnProps & {
   setNodeRef?: (element: HTMLDivElement | null) => void;
 };
 
-function KanbanColumnContent({ title, children, count, color, droppable = true, isOver = false, setNodeRef }: KanbanColumnContentProps) {
+function KanbanColumnContent({ title, children, count, expressCount = 0, color, droppable = true, isOver = false, setNodeRef }: KanbanColumnContentProps) {
   const showDropHighlight = droppable && isOver;
 
   return (
     <div className="flex flex-col flex-shrink-0 w-80 bg-[#F8FAFC] rounded-[12px] border-[0.5px] border-[#D9E1EA] overflow-hidden h-full">
       <div className="p-3 bg-white border-b border-[0.5px] border-[#D9E1EA] flex justify-between items-center sticky top-0 z-10">
         <h3 className={cn("font-heading font-semibold text-[11px] tracking-wide px-2.5 py-1 rounded-full border", color)}>{title}</h3>
-        <span className="bg-[#F5F7FA] border-[0.5px] border-[#D9E1EA] text-[#334E68] text-xs font-heading font-semibold px-2 py-0.5 rounded-full">
-          {count}
+        <span className="inline-flex items-center gap-1">
+          {expressCount > 0 ? (
+            <span className="rounded-full border border-[#C2410C]/35 bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-bold text-[#C2410C]">
+              {expressCount} Express
+            </span>
+          ) : null}
+          <span className="bg-[#F5F7FA] border-[0.5px] border-[#D9E1EA] text-[#334E68] text-xs font-heading font-semibold px-2 py-0.5 rounded-full">
+            {count}
+          </span>
         </span>
       </div>
 

@@ -164,9 +164,11 @@ export default function AdminCategoriesPanel() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
-      if (activeFilter === "true" && !row.is_active) return false;
-      if (activeFilter === "false" && row.is_active) return false;
-      if (!q) return true;
+      if (!q) {
+        if (activeFilter === "true" && !row.is_active) return false;
+        if (activeFilter === "false" && row.is_active) return false;
+        return true;
+      }
       return row.name.toLowerCase().includes(q) || row.slug.toLowerCase().includes(q);
     });
   }, [rows, search, activeFilter]);
@@ -179,7 +181,6 @@ export default function AdminCategoriesPanel() {
   );
 
   const clearFilters = useCallback(() => {
-    setSearch("");
     setActiveFilter("all");
   }, []);
 

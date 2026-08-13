@@ -69,13 +69,14 @@ const labelClass = "text-[12px] font-semibold uppercase tracking-[0.03em] text-[
 const questionTypeLabel = (type: string) => {
   if (type === "yes_no") return "Yes / No";
   if (type === "text") return "Free text";
+  if (type === "date") return "Date picker";
   if (type === "country") return "Country → State";
   return "Multiple choice";
 };
 
 const defaultOptionsForType = (type: string): string[] => {
   if (type === "yes_no") return ["Yes", "No"];
-  if (type === "text") return [];
+  if (type === "text" || type === "date") return [];
   if (type === "country") return [];
   return ["Option 1", "Option 2"];
 };
@@ -166,8 +167,6 @@ export default function AdminEditServicePage() {
   const [newQuestionOptions, setNewQuestionOptions] = useState<string[]>(["Yes", "No"]);
   const [newOptionInput, setNewOptionInput] = useState("");
   const [newQuestionRequired, setNewQuestionRequired] = useState(true);
-  const [newDependsOnCode, setNewDependsOnCode] = useState("");
-  const [newCascadeDraftByParent, setNewCascadeDraftByParent] = useState<Record<string, string>>({});
   const [optionDraftByKey, setOptionDraftByKey] = useState<Record<string, string>>({});
   const [expandedQuestionKey, setExpandedQuestionKey] = useState<string | null>(null);
 
@@ -199,8 +198,6 @@ export default function AdminEditServicePage() {
     setNewOptionInput("");
     setNewQuestionType("single");
     setNewQuestionRequired(true);
-    setNewDependsOnCode("");
-    setNewCascadeDraftByParent({});
   };
 
   const resetDocComposer = () => {
@@ -240,8 +237,9 @@ export default function AdminEditServicePage() {
       const targets = (payload.services || []).filter((row) => {
         if (row.id === hub.id) return false;
         const type = String(row.service_type || "").toLowerCase();
+        // Assessment is not a checkout Express upgrade target.
         if (type === "document_audit") return false;
-        if (type.startsWith("evisa")) return false;
+        // Skip the Express hub itself / other express catalog rows.
         if (type.includes("express")) return false;
         return true;
       });
@@ -464,12 +462,17 @@ export default function AdminEditServicePage() {
       for (const row of expressFeeRows) {
         const feeNum = Number(row.fee);
         const hasFee = row.fee !== "" && Number.isFinite(feeNum) && feeNum >= 0;
-        if (row.planId) {
-          await updateAdminServiceFeePlan(row.serviceId, row.planId, {
+        let planId = row.planId;
+        // Resolve existing express plan (page may be stale after seed / concurrent create).
+        if (!planId) {
+          const plans = await listAdminServiceFeePlans(row.serviceId);
+          planId = plans.find((plan) => String(plan.plan_code || "").toLowerCase() === "express")?.id ?? null;
+        }
+        if (planId) {
+          await updateAdminServiceFeePlan(row.serviceId, planId, {
             fee: hasFee ? feeNum : 0,
             label: "Express Service",
             is_active: Boolean(row.isActive && hasFee && feeNum > 0),
-            plan_code: "express",
           });
         } else if (hasFee && feeNum > 0) {
           await createAdminServiceFeePlan(row.serviceId, {
@@ -483,6 +486,9 @@ export default function AdminEditServicePage() {
       }
       if (service) await loadExpressFeeMatrix(service);
       clearPublicPricingCache();
+      toast.success("Express fees saved.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save express fees.");
     } finally {
       setExpressFeesSaving(false);
     }
@@ -628,19 +634,8 @@ export default function AdminEditServicePage() {
       toast.error("Question text is required.");
       return;
     }
-    const optionsByAnswer: Record<string, string[]> = {};
-    if (newDependsOnCode) {
-      for (const [parent, raw] of Object.entries(newCascadeDraftByParent)) {
-        const children = raw
-          .split(/[,\n]/)
-          .map((item) => item.trim())
-          .filter(Boolean);
-        if (children.length) optionsByAnswer[parent] = children;
-      }
-    }
-    const isCascading = Boolean(newDependsOnCode && Object.keys(optionsByAnswer).length);
     const options =
-      newQuestionType === "text"
+      newQuestionType === "text" || newQuestionType === "date"
         ? []
         : newQuestionType === "yes_no"
           ? ["Yes", "No"]
@@ -649,12 +644,8 @@ export default function AdminEditServicePage() {
       toast.error("Add at least one country.");
       return;
     }
-    if (newQuestionType === "single" && options.length < 2 && !isCascading) {
-      toast.error("Add at least two choices, or configure cascading options by parent answer.");
-      return;
-    }
-    if (newQuestionType === "single" && newDependsOnCode && !isCascading) {
-      toast.error("Add at least one parent answer with child options for cascading.");
+    if (newQuestionType === "single" && options.length < 2) {
+      toast.error("Add at least two choices.");
       return;
     }
     setQuestionsSaving(true);
@@ -666,8 +657,8 @@ export default function AdminEditServicePage() {
         question_type: newQuestionType,
         is_required: newQuestionRequired,
         is_active: true,
-        depends_on_code: newQuestionType === "country" ? "" : newDependsOnCode || "",
-        options_by_answer: newQuestionType === "country" ? {} : optionsByAnswer,
+        depends_on_code: "",
+        options_by_answer: {},
       });
       if (created) {
         setQuestionRows((prev) => [...prev, created].sort((a, b) => a.display_order - b.display_order));
@@ -685,10 +676,7 @@ export default function AdminEditServicePage() {
 
   const saveQuestionOptions = async (row: AdminServiceQuestion, options: string[]) => {
     const cleaned = options.map((item) => item.trim()).filter(Boolean);
-    const hasCascade =
-      Boolean(String(row.depends_on_code || "").trim()) &&
-      Object.keys(row.options_by_answer || {}).length > 0;
-    if (row.question_type === "single" && cleaned.length < 2 && !hasCascade) {
+    if (row.question_type === "single" && cleaned.length < 2) {
       toast.error("Multiple choice needs at least two options.");
       return;
     }
@@ -1072,7 +1060,7 @@ export default function AdminEditServicePage() {
                     <div>
                       <p className="text-[15px] font-semibold text-[#102A43]">Express fee by service</p>
                       <p className="mt-0.5 text-[13px] text-[#627D98]">
-                        Set a different Express price for each service. These appear on that service&apos;s checkout.
+                        Set Express price for every service (including 1-year / 5-year / 30-day e-Visa and others). These appear on that service&apos;s checkout.
                       </p>
                     </div>
                     <button
@@ -1228,14 +1216,9 @@ export default function AdminEditServicePage() {
                                   >
                                     {row.is_active ? "Active" : "Hidden"}
                                   </span>
-                                  {row.question_type !== "text" ? (
+                                  {row.question_type !== "text" && row.question_type !== "date" ? (
                                     <span className="text-[11px] text-[#829AB1]">
                                       {options.length} choice{options.length === 1 ? "" : "s"}
-                                    </span>
-                                  ) : null}
-                                  {row.depends_on_code ? (
-                                    <span className="rounded-full bg-[#EEF2FF] px-2 py-0.5 text-[11px] font-medium text-[#3730A3]">
-                                      Cascades from {row.depends_on_code}
                                     </span>
                                   ) : null}
                                 </div>
@@ -1320,7 +1303,7 @@ export default function AdminEditServicePage() {
                                       const nextType = e.target.value;
                                       const patch: Record<string, unknown> = { question_type: nextType };
                                       if (nextType === "yes_no") patch.options = ["Yes", "No"];
-                                      if (nextType === "text") patch.options = [];
+                                      if (nextType === "text" || nextType === "date") patch.options = [];
                                       if (nextType === "country") {
                                         // Do not auto-seed a long country list — admin adds only what is needed.
                                         patch.options = row.options?.length ? row.options : [];
@@ -1334,22 +1317,21 @@ export default function AdminEditServicePage() {
                                     <option value="single">Multiple choice</option>
                                     <option value="yes_no">Yes / No</option>
                                     <option value="text">Free text</option>
+                                    <option value="date">Date picker</option>
                                     <option value="country">Country → State dropdown</option>
                                   </select>
                                 </div>
-                                <div className="flex items-end">
-                                  <button
-                                    type="button"
-                                    disabled={questionsSaving}
-                                    onClick={() => void patchQuestion(row, { is_required: !row.is_required })}
-                                    className={`w-full rounded-[8px] border px-3 py-2 text-sm font-semibold ${
-                                      row.is_required
-                                        ? "border-[#009877]/30 bg-[#E8F7F2] text-[#006F57]"
-                                        : "border-[#E5EAF0] bg-white text-[#627D98]"
-                                    }`}
-                                  >
-                                    {row.is_required ? "Required" : "Optional"}
-                                  </button>
+                                <div className="flex items-end pb-2">
+                                  <label className="inline-flex items-center gap-2 text-sm font-medium text-[#334E68]">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(row.is_required)}
+                                      disabled={questionsSaving}
+                                      onChange={() => void patchQuestion(row, { is_required: !row.is_required })}
+                                      className="h-4 w-4 rounded border-[#D9E1EA] text-[#009877] focus:ring-[#009877]"
+                                    />
+                                    Required
+                                  </label>
                                 </div>
                                 <div className="flex items-end">
                                   <button
@@ -1367,91 +1349,7 @@ export default function AdminEditServicePage() {
                                 </div>
                               </div>
 
-                              {row.question_type === "single" ? (
-                                <div className="space-y-2.5 rounded-[8px] border border-[#E5EAF0] bg-[#FBFCFD] p-3">
-                                  <div>
-                                    <label className={labelClass}>Depends on (cascading)</label>
-                                    <select
-                                      value={row.depends_on_code || ""}
-                                      disabled={questionsSaving}
-                                      onChange={(e) => {
-                                        const parentCode = e.target.value;
-                                        const parent = sortedQuestions.find((item) => item.code === parentCode);
-                                        const seeded: Record<string, string[]> = {};
-                                        for (const parentOption of parent?.options || []) {
-                                          seeded[parentOption] = row.options_by_answer?.[parentOption] || [];
-                                        }
-                                        void patchQuestion(row, {
-                                          depends_on_code: parentCode,
-                                          options_by_answer: parentCode ? seeded : {},
-                                        });
-                                      }}
-                                      className={fieldClass}
-                                    >
-                                      <option value="">None — flat choices only</option>
-                                      {sortedQuestions
-                                        .filter((item) => item.id !== row.id)
-                                        .map((item) => (
-                                          <option key={item.id} value={item.code}>
-                                            {item.label} ({item.code})
-                                          </option>
-                                        ))}
-                                    </select>
-                                    <p className="mt-1 text-[11px] text-[#829AB1]">
-                                      Example: Country question first, then State with options mapped per country.
-                                    </p>
-                                  </div>
-                                  {row.depends_on_code ? (
-                                    <div className="space-y-2">
-                                      <label className={labelClass}>Options by parent answer</label>
-                                      {(
-                                        (() => {
-                                          const parent = sortedQuestions.find((item) => item.code === row.depends_on_code);
-                                          const keys = Array.from(
-                                            new Set([
-                                              ...(parent?.options || []),
-                                              ...Object.keys(row.options_by_answer || {}),
-                                            ]),
-                                          );
-                                          return keys.length ? keys : ["United Kingdom", "United States"];
-                                        })()
-                                      ).map((parentAnswer) => {
-                                        const children = (row.options_by_answer || {})[parentAnswer] || [];
-                                        return (
-                                          <div key={`${row.id}-${parentAnswer}`} className="rounded-[8px] border border-[#E5EAF0] bg-white p-2.5">
-                                            <p className="text-[12px] font-semibold text-[#102A43]">When parent = {parentAnswer}</p>
-                                            <textarea
-                                              defaultValue={children.join(", ")}
-                                              key={`${row.id}-${parentAnswer}-${children.join("|")}`}
-                                              disabled={questionsSaving}
-                                              rows={2}
-                                              placeholder="England, Scotland, Wales…"
-                                              onBlur={(e) => {
-                                                const nextChildren = e.target.value
-                                                  .split(/[,\n]/)
-                                                  .map((item) => item.trim())
-                                                  .filter(Boolean);
-                                                const prevChildren = children;
-                                                if (nextChildren.join("|") === prevChildren.join("|")) return;
-                                                const nextMap = { ...(row.options_by_answer || {}) };
-                                                if (nextChildren.length) nextMap[parentAnswer] = nextChildren;
-                                                else delete nextMap[parentAnswer];
-                                                void patchQuestion(row, {
-                                                  depends_on_code: row.depends_on_code || "",
-                                                  options_by_answer: nextMap,
-                                                });
-                                              }}
-                                              className={fieldClass}
-                                            />
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-
-                              {row.question_type !== "text" ? (
+                              {row.question_type !== "text" && row.question_type !== "date" ? (
                                 <div>
                                   <label className={labelClass}>
                                     {row.question_type === "country" ? "Countries" : "Answer choices"}
@@ -1596,21 +1494,20 @@ export default function AdminEditServicePage() {
                         <option value="single">Multiple choice</option>
                         <option value="yes_no">Yes / No</option>
                         <option value="text">Free text</option>
+                        <option value="date">Date picker</option>
                         <option value="country">Country → State dropdown</option>
                       </select>
                     </div>
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        onClick={() => setNewQuestionRequired((v) => !v)}
-                        className={`w-full rounded-[8px] border px-3 py-2 text-sm font-semibold ${
-                          newQuestionRequired
-                            ? "border-[#009877]/30 bg-[#E8F7F2] text-[#006F57]"
-                            : "border-[#E5EAF0] bg-white text-[#627D98]"
-                        }`}
-                      >
-                        {newQuestionRequired ? "Required" : "Optional"}
-                      </button>
+                    <div className="flex items-end pb-2">
+                      <label className="inline-flex items-center gap-2 text-sm font-medium text-[#334E68]">
+                        <input
+                          type="checkbox"
+                          checked={newQuestionRequired}
+                          onChange={(e) => setNewQuestionRequired(e.target.checked)}
+                          className="h-4 w-4 rounded border-[#D9E1EA] text-[#009877] focus:ring-[#009877]"
+                        />
+                        Required
+                      </label>
                     </div>
                   </div>
                   {newQuestionType === "country" ? (
@@ -1694,65 +1591,7 @@ export default function AdminEditServicePage() {
                       </div>
                     </div>
                   ) : null}
-                  {newQuestionType === "single" ? (
-                    <div className="space-y-2 rounded-[8px] border border-[#E5EAF0] bg-white p-2.5">
-                      <div>
-                        <label className={labelClass}>Depends on (optional cascading)</label>
-                        <select
-                          value={newDependsOnCode}
-                          onChange={(e) => {
-                            const parentCode = e.target.value;
-                            setNewDependsOnCode(parentCode);
-                            const parent = sortedQuestions.find((item) => item.code === parentCode);
-                            const nextDraft: Record<string, string> = {};
-                            for (const option of parent?.options || []) {
-                              nextDraft[option] = newCascadeDraftByParent[option] || "";
-                            }
-                            setNewCascadeDraftByParent(nextDraft);
-                          }}
-                          className={fieldClass}
-                        >
-                          <option value="">None</option>
-                          {sortedQuestions.map((item) => (
-                            <option key={item.id} value={item.code}>
-                              {item.label} ({item.code})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      {newDependsOnCode ? (
-                        <div className="space-y-2">
-                          <p className="text-[11px] text-[#627D98]">
-                            Enter child options for each parent answer (comma-separated). Flat choices below are optional.
-                          </p>
-                          {Object.keys(newCascadeDraftByParent).length === 0 ? (
-                            <p className="text-[12px] text-amber-700">
-                              Parent question has no choices yet — add choices on the parent first.
-                            </p>
-                          ) : (
-                            Object.keys(newCascadeDraftByParent).map((parentAnswer) => (
-                              <div key={parentAnswer}>
-                                <label className={labelClass}>When parent = {parentAnswer}</label>
-                                <textarea
-                                  value={newCascadeDraftByParent[parentAnswer] || ""}
-                                  onChange={(e) =>
-                                    setNewCascadeDraftByParent((prev) => ({
-                                      ...prev,
-                                      [parentAnswer]: e.target.value,
-                                    }))
-                                  }
-                                  rows={2}
-                                  placeholder="Option A, Option B, Option C"
-                                  className={fieldClass}
-                                />
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {newQuestionType !== "text" && newQuestionType !== "country" ? (
+                  {newQuestionType !== "text" && newQuestionType !== "date" && newQuestionType !== "country" ? (
                     <div>
                       <label className={labelClass}>Choices</label>
                       <div className="mt-1 mb-2 flex flex-wrap gap-1.5">

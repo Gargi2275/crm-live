@@ -38,7 +38,7 @@ export default function IndianEVisaPage() {
           { label: "Best for", value: "Short trips", highlight: true },
         ],
         ctaLabel: "Apply for Indian e-Visa",
-        ctaHref: "/indian-e-visa",
+        ctaHref: "/dashboard/document-audit?start=1&service=evisa_1year",
       }}
       stats={[
         { label: "Best For", value: "Short-term frequent India travel" },

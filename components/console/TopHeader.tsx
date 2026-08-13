@@ -60,6 +60,15 @@ export function TopHeader({
   const hasActions = Boolean(chrome?.actions);
   const activeFilterCount = chrome?.activeFilterCount ?? 0;
 
+  const applySearchValue = (next: string) => {
+    // Searching should drop other filters so results are not constrained by them.
+    if (next.trim()) {
+      chromeRef.current?.onClearFilters?.();
+      setFiltersOpen(false);
+    }
+    chromeRef.current?.search?.onChange(next);
+  };
+
   const loadAlertSummary = useCallback(async (markRead = false) => {
     try {
       const payload = await getAdminAlerts(markRead);
@@ -217,14 +226,14 @@ export function TopHeader({
               <input
                 type="search"
                 value={chrome?.search?.value ?? ""}
-                onChange={(e) => chromeRef.current?.search?.onChange(e.target.value)}
+                onChange={(e) => applySearchValue(e.target.value)}
                 placeholder={chrome?.search?.placeholder || "Search…"}
                 className="w-full rounded-[10px] border border-[#D9E1EA] bg-[#F8FAFC] py-2 sm:py-2.5 pl-9 sm:pl-10 pr-9 text-base text-[#102A43] placeholder:text-[#8A9BB0] focus:outline-none focus:ring-2 focus:ring-[#009877]/20 focus:border-[#009877] transition-all"
               />
               {chrome?.search?.value ? (
                 <button
                   type="button"
-                  onClick={() => chromeRef.current?.search?.onChange("")}
+                  onClick={() => applySearchValue("")}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8A9BB0] hover:text-[#486581]"
                   aria-label="Clear search"
                 >
@@ -373,6 +382,11 @@ export function TopHeader({
                       >
                         <p className="text-[15px] text-[#102A43] leading-snug">{notification.message}</p>
                         <p className="mt-1 text-xs text-[#829AB1]">
+                          {String(notification.severity || "").toLowerCase() === "super_critical"
+                            ? "Super Critical · "
+                            : String(notification.severity || "").toLowerCase() === "critical"
+                              ? "Critical · "
+                              : ""}
                           {notification.type_label ? `${notification.type_label} · ` : ""}
                           {new Date(notification.timestamp).toLocaleString([], {
                             hour: "2-digit",
